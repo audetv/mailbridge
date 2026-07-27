@@ -17,7 +17,18 @@ build:
 	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)"
 
 run: build
-	./$(BUILD_DIR)/$(APP_NAME) $(ARGS)
+	@if [ -f configs/config.env ]; then \
+		set -a && . configs/config.env && set +a && ./$(BUILD_DIR)/$(APP_NAME) $(ARGS); \
+	else \
+		./$(BUILD_DIR)/$(APP_NAME) $(ARGS); \
+	fi
+
+run-dev:
+	@if [ -f configs/config.env ]; then \
+		set -a && . configs/config.env && set +a && go run ./cmd/$(APP_NAME) $(ARGS); \
+	else \
+		go run ./cmd/$(APP_NAME) $(ARGS); \
+	fi
 
 test:
 	go test -v -count=1 -timeout 30s ./...

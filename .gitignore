@@ -15,7 +15,7 @@ mailbridge
 Thumbs.db
 
 # Config
-.env
+config.env
 *.local.env
 
 # Data
