@@ -1,0 +1,31 @@
+# Binaries
+mailbridge
+*.exe
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config
+.env
+*.local.env
+
+# Data
+data/
+*.db
+
+# Build
+dist/
+vendor/
+
+# Coverage
+coverage.out
+coverage.html
