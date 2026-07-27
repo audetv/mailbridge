@@ -16,7 +16,7 @@ build:
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) ./cmd/$(APP_NAME)
 	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)"
 
-run: build
+run:
 	@if [ -f configs/config.env ]; then \
 		set -a && . configs/config.env && set +a && ./$(BUILD_DIR)/$(APP_NAME) $(ARGS); \
 	else \
