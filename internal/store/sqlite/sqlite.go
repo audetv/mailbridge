@@ -43,6 +43,11 @@ func NewStore(dsn string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Ping проверяет соединение с базой данных.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 // Migrate выполняет миграции схемы.
 func (s *Store) Migrate(ctx context.Context) error {
 	migrations := []string{

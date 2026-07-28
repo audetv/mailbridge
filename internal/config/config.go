@@ -10,13 +10,18 @@ import (
 
 // Config содержит все настройки приложения.
 type Config struct {
-	IMAP    IMAPConfig
-	SMTP    SMTPConfig
-	Plane   PlaneConfig
-	Webhook WebhookConfig
-	Storage StorageConfig
-	NLP     NLPConfig
-	Logging LoggingConfig
+	IMAP        IMAPConfig
+	SMTP        SMTPConfig
+	Plane       PlaneConfig
+	Webhook     WebhookConfig
+	Storage     StorageConfig
+	NLP         NLPConfig
+	Logging     LoggingConfig
+	Attachments AttachmentsConfig
+}
+
+type AttachmentsConfig struct {
+	Dir string
 }
 
 // IMAPConfig настройки подключения к почтовому ящику.
@@ -76,6 +81,9 @@ type LoggingConfig struct {
 // Приоритет: переменная окружения > значение по умолчанию.
 func Load() (*Config, error) {
 	cfg := &Config{
+		Attachments: AttachmentsConfig{
+			Dir: getEnv("MAILBRIDGE_ATTACHMENTS_DIR", "data/attachments"),
+		},
 		IMAP: IMAPConfig{
 			Server:       getEnv("MAILBRIDGE_IMAP_SERVER", ""),
 			Port:         getEnvAsInt("MAILBRIDGE_IMAP_PORT", 993),
