@@ -14,11 +14,11 @@ type RuleBasedClassifier struct {
 }
 
 // NewRuleBasedClassifier создаёт новый RuleBasedClassifier.
-func NewRuleBasedClassifier(rules []Rule) *RuleBasedClassifier {
+func NewRuleBasedClassifier(rules []Rule, urgencyPatterns []string, validTypes, validPriorities map[string]bool) *RuleBasedClassifier {
 	return &RuleBasedClassifier{
 		matcher: NewMatcher(rules),
-		booster: NewUrgencyBooster(DefaultUrgencyPatterns()),
-		parser:  parser.NewFieldParser(),
+		booster: NewUrgencyBooster(urgencyPatterns),
+		parser:  parser.NewFieldParser(validTypes, validPriorities),
 	}
 }
 

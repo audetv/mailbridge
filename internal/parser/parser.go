@@ -27,7 +27,6 @@ type ParsedFields struct {
 
 // FieldParser извлекает структурированные поля из текста.
 type FieldParser struct {
-	keyMap     map[string]*fieldTarget
 	keyPattern *regexp.Regexp
 	validTypes map[string]bool
 	validPrios map[string]bool
@@ -36,73 +35,22 @@ type FieldParser struct {
 // fieldTarget связывает ключ с указателем на поле в ParsedFields.
 type fieldTarget struct {
 	ptr     *string
-	allowed map[string]bool // опциональный набор допустимых значений
+	allowed map[string]bool
 }
 
-// NewFieldParser создаёт новый FieldParser.
-func NewFieldParser() *FieldParser {
-	p := &FieldParser{
+// NewFieldParser создаёт новый FieldParser с заданными допустимыми значениями.
+func NewFieldParser(validTypes, validPriorities map[string]bool) *FieldParser {
+	return &FieldParser{
 		keyPattern: regexp.MustCompile(`^([a-zA-Zа-яА-ЯёЁ]+)\s*:\s*(.+)$`),
-		validTypes: map[string]bool{
-			"bug": true, "feature": true, "support": true,
-			"access": true, "seo": true, "content": true,
-		},
-		validPrios: map[string]bool{
-			"urgent": true, "high": true, "medium": true, "low": true,
-		},
+		validTypes: validTypes,
+		validPrios: validPriorities,
 	}
-	p.keyMap = p.buildKeyMap()
-	return p
-}
-
-// buildKeyMap создаёт карту ключей с указателями на поля.
-func (p *FieldParser) buildKeyMap() map[string]*fieldTarget {
-	result := make(map[string]*fieldTarget)
-
-	// Project
-	projectTarget := &fieldTarget{ptr: new(string)}
-	projectKeys := []string{"проект", "project"}
-	for _, k := range projectKeys {
-		result[k] = projectTarget
-	}
-
-	// Type
-	typeTarget := &fieldTarget{ptr: new(string), allowed: p.validTypes}
-	typeKeys := []string{"тип", "type"}
-	for _, k := range typeKeys {
-		result[k] = typeTarget
-	}
-
-	// Priority
-	prioTarget := &fieldTarget{ptr: new(string), allowed: p.validPrios}
-	prioKeys := []string{"приоритет", "priority"}
-	for _, k := range prioKeys {
-		result[k] = prioTarget
-	}
-
-	// Deadline
-	deadlineTarget := &fieldTarget{ptr: new(string)}
-	deadlineKeys := []string{"дедлайн", "deadline"}
-	for _, k := range deadlineKeys {
-		result[k] = deadlineTarget
-	}
-
-	// Assignee
-	assigneeTarget := &fieldTarget{ptr: new(string)}
-	assigneeKeys := []string{"исполнитель", "assignee"}
-	for _, k := range assigneeKeys {
-		result[k] = assigneeTarget
-	}
-
-	// Связываем указатели с реальными полями (будет заполнено при Parse)
-	return result
 }
 
 // Parse разбирает текст и возвращает извлечённые поля.
 func (p *FieldParser) Parse(body string) *ParsedFields {
 	result := &ParsedFields{Body: body}
 
-	// Создаём карту ключей, указывающих на поля result
 	keyMap := make(map[string]*fieldTarget)
 
 	projectTarget := &fieldTarget{ptr: &result.Project}

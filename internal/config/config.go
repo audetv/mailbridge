@@ -109,7 +109,7 @@ func Load() (*Config, error) {
 			DSN:    getEnv("MAILBRIDGE_STORAGE_DSN", "data/mailbridge.db"),
 		},
 		NLP: NLPConfig{
-			RulesFile: getEnv("MAILBRIDGE_NLP_RULES_FILE", "configs/rules.json"),
+			RulesFile: getEnv("MAILBRIDGE_NLP_RULES_FILE", "configs/rules.yml"),
 		},
 		Logging: LoggingConfig{
 			Level:  getEnv("MAILBRIDGE_LOG_LEVEL", "info"),

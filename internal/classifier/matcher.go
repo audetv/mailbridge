@@ -7,15 +7,6 @@ import (
 	"github.com/audetv/mailbridge/internal/classifier/nlp"
 )
 
-// Rule описывает одно правило классификации.
-type Rule struct {
-	Keywords []string // фразы ключевых слов
-	Project  string   // проект (опционально)
-	Type     string   // тип задачи (опционально)
-	Priority string   // приоритет (опционально)
-	Weight   int      // вес правила (1-10)
-}
-
 // ScoredMatch содержит результат сопоставления правила с текстом.
 type ScoredMatch struct {
 	Rule    Rule

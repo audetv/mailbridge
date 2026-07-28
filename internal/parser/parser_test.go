@@ -7,8 +7,21 @@ import (
 	"github.com/audetv/mailbridge/internal/parser"
 )
 
+// testParser создаёт FieldParser с тестовыми допустимыми значениями.
+func testParser() *parser.FieldParser {
+	return parser.NewFieldParser(
+		map[string]bool{
+			"bug": true, "feature": true, "support": true,
+			"access": true, "seo": true, "content": true,
+		},
+		map[string]bool{
+			"urgent": true, "high": true, "medium": true, "low": true,
+		},
+	)
+}
+
 func TestParse_AllFieldsRussian(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: Отель
 Тип: bug
@@ -44,7 +57,7 @@ func TestParse_AllFieldsRussian(t *testing.T) {
 }
 
 func TestParse_AllFieldsEnglish(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Project: TRK
 Type: support
@@ -74,7 +87,7 @@ Need to update the banner`
 }
 
 func TestParse_MixedLanguages(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: ТРК
 Type: bug
@@ -100,7 +113,7 @@ Priority: urgent
 }
 
 func TestParse_NoFields(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := "Просто обычный текст письма без каких-либо полей"
 	result := p.Parse(text)
@@ -114,7 +127,7 @@ func TestParse_NoFields(t *testing.T) {
 }
 
 func TestParse_EmptyLineTerminatesHeader(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: ТРК
 
@@ -126,14 +139,13 @@ func TestParse_EmptyLineTerminatesHeader(t *testing.T) {
 	if result.Project != "ТРК" {
 		t.Errorf("Project = %q", result.Project)
 	}
-	// Тип не должен быть распарсен, т.к. он после пустой строки
 	if result.Type != "" {
 		t.Errorf("Type should be empty, got %q", result.Type)
 	}
 }
 
 func TestParse_InvalidType(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: ТРК
 Тип: unknown_type
@@ -155,7 +167,7 @@ func TestParse_InvalidType(t *testing.T) {
 }
 
 func TestParse_InvalidPriority(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Тип: bug
 Приоритет: максимальный
@@ -173,7 +185,7 @@ func TestParse_InvalidPriority(t *testing.T) {
 }
 
 func TestParse_WhitespaceAroundColon(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	tests := []string{
 		"Проект:ТРК",
@@ -190,7 +202,7 @@ func TestParse_WhitespaceAroundColon(t *testing.T) {
 }
 
 func TestParse_CaseInsensitiveKeys(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	tests := []string{
 		"проект: ТРК",
@@ -213,21 +225,20 @@ func TestParse_CaseInsensitiveKeys(t *testing.T) {
 }
 
 func TestParse_DuplicateKeys(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: ТРК
 Проект: Отель`
 
 	result := p.Parse(text)
 
-	// Должно использоваться первое значение
 	if result.Project != "ТРК" {
 		t.Errorf("Project = %q, want first value %q", result.Project, "ТРК")
 	}
 }
 
 func TestParse_OnlyType(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Тип: bug
 Описание проблемы`
@@ -246,7 +257,7 @@ func TestParse_OnlyType(t *testing.T) {
 }
 
 func TestParse_BodyPreservedWithFields(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	text := `Проект: Отель
 Тип: feature
@@ -264,7 +275,7 @@ func TestParse_BodyPreservedWithFields(t *testing.T) {
 }
 
 func TestParse_AllValidTypes(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	validTypes := []string{"bug", "feature", "support", "access", "seo", "content"}
 
@@ -277,18 +288,20 @@ func TestParse_AllValidTypes(t *testing.T) {
 }
 
 func TestParse_AllValidPriorities(t *testing.T) {
-	p := parser.NewFieldParser()
+	p := testParser()
 
 	validPrios := []string{"urgent", "high", "medium", "low"}
 
 	for _, prio := range validPrios {
 		result := p.Parse("Приоритет: " + prio)
-		if result.Priority != normalizeCase(prio) {
-			t.Errorf("Priority %q -> %q", prio, result.Priority)
+		expected := normalizeCase(prio)
+		if result.Priority != expected {
+			t.Errorf("Priority %q -> %q, want %q", prio, result.Priority, expected)
 		}
 	}
 }
 
+// normalizeCase вспомогательная функция для тестов.
 func normalizeCase(s string) string {
 	if s == "" {
 		return ""
