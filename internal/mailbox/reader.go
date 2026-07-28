@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -30,9 +32,11 @@ type RawEmail struct {
 
 // Reader читает письма из IMAP-ящика.
 type Reader struct {
-	config Config
-	logger *slog.Logger
-	client *imapclient.Client
+	config    Config
+	logger    *slog.Logger
+	client    *imapclient.Client
+	mu        sync.RWMutex
+	connected bool
 }
 
 // NewReader создаёт новый Reader.
@@ -41,6 +45,20 @@ func NewReader(cfg Config, logger *slog.Logger) *Reader {
 		config: cfg,
 		logger: logger,
 	}
+}
+
+// IsConnected возвращает текущее состояние подключения.
+func (r *Reader) IsConnected() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.connected
+}
+
+// setConnected обновляет состояние подключения.
+func (r *Reader) setConnected(state bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.connected = state
 }
 
 // Connect устанавливает соединение с IMAP-сервером.
@@ -54,14 +72,17 @@ func (r *Reader) Connect() error {
 		r.client, err = imapclient.DialStartTLS(addr, nil)
 	}
 	if err != nil {
+		r.setConnected(false)
 		return fmt.Errorf("failed to connect to IMAP: %w", err)
 	}
 
 	if err := r.client.Login(r.config.User, r.config.Password).Wait(); err != nil {
 		r.client.Close()
+		r.setConnected(false)
 		return fmt.Errorf("failed to login: %w", err)
 	}
 
+	r.setConnected(true)
 	r.logger.Info("connected to IMAP", "server", addr, "user", r.config.User)
 
 	if err := r.ensureFolder(r.config.Archive); err != nil {
@@ -74,14 +95,53 @@ func (r *Reader) Connect() error {
 	return nil
 }
 
+// Reconnect пытается переподключиться с exponential backoff.
+func (r *Reader) Reconnect() error {
+	r.mu.Lock()
+	if r.client != nil {
+		r.client.Close()
+		r.client = nil
+	}
+	r.connected = false
+	r.mu.Unlock()
+
+	backoff := 1 * time.Second
+	maxBackoff := 5 * time.Minute
+	attempts := 0
+
+	for {
+		attempts++
+		r.logger.Info("attempting IMAP reconnect", "attempt", attempts, "backoff", backoff)
+
+		if err := r.Connect(); err != nil {
+			r.logger.Warn("IMAP reconnect failed", "attempt", attempts, "error", err)
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		r.logger.Info("IMAP reconnected", "attempts", attempts)
+		return nil
+	}
+}
+
 // FetchUnseen возвращает непрочитанные письма из inbox.
 func (r *Reader) FetchUnseen(_ context.Context) ([]*RawEmail, error) {
-	if r.client == nil {
+	r.mu.RLock()
+	client := r.client
+	connected := r.connected
+	r.mu.RUnlock()
+
+	if client == nil || !connected {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	_, err := r.client.Select(r.config.Inbox, nil).Wait()
+	_, err := client.Select(r.config.Inbox, nil).Wait()
 	if err != nil {
+		r.setConnected(false)
 		return nil, fmt.Errorf("failed to select inbox: %w", err)
 	}
 
@@ -89,8 +149,9 @@ func (r *Reader) FetchUnseen(_ context.Context) ([]*RawEmail, error) {
 		NotFlag: []imap.Flag{imap.FlagSeen},
 	}
 
-	searchData, err := r.client.UIDSearch(&criteria, nil).Wait()
+	searchData, err := client.UIDSearch(&criteria, nil).Wait()
 	if err != nil {
+		r.setConnected(false)
 		return nil, fmt.Errorf("failed to search unseen: %w", err)
 	}
 
@@ -107,7 +168,7 @@ func (r *Reader) FetchUnseen(_ context.Context) ([]*RawEmail, error) {
 		BodySection: []*imap.FetchItemBodySection{{}},
 	}
 
-	fetchCmd := r.client.Fetch(uidSet, fetchOptions)
+	fetchCmd := client.Fetch(uidSet, fetchOptions)
 	defer fetchCmd.Close()
 
 	var rawEmails []*RawEmail
@@ -145,13 +206,17 @@ func (r *Reader) MarkErrored(uid imap.UID) error {
 }
 
 func (r *Reader) moveMessage(uid imap.UID, folder string) error {
-	if r.client == nil {
+	r.mu.RLock()
+	client := r.client
+	r.mu.RUnlock()
+
+	if client == nil {
 		return fmt.Errorf("not connected")
 	}
 
 	uidSet := imap.UIDSetNum(uid)
 
-	_, err := r.client.Copy(uidSet, folder).Wait()
+	_, err := client.Copy(uidSet, folder).Wait()
 	if err != nil {
 		return fmt.Errorf("failed to copy to %s: %w", folder, err)
 	}
@@ -160,31 +225,39 @@ func (r *Reader) moveMessage(uid imap.UID, folder string) error {
 		Op:    imap.StoreFlagsAdd,
 		Flags: []imap.Flag{imap.FlagDeleted},
 	}
-	if err := r.client.Store(uidSet, &delFlags, nil).Close(); err != nil {
+	if err := client.Store(uidSet, &delFlags, nil).Close(); err != nil {
 		return fmt.Errorf("failed to store delete flags: %w", err)
 	}
 
-	expungeCmd := r.client.Expunge()
+	expungeCmd := client.Expunge()
 	_, _ = expungeCmd.Collect()
 
 	return nil
 }
 
 func (r *Reader) ensureFolder(folder string) error {
-	if r.client == nil {
+	r.mu.RLock()
+	client := r.client
+	r.mu.RUnlock()
+
+	if client == nil {
 		return fmt.Errorf("not connected")
 	}
 
-	_, err := r.client.Select(folder, nil).Wait()
+	_, err := client.Select(folder, nil).Wait()
 	if err == nil {
 		return nil
 	}
 
-	return r.client.Create(folder, nil).Wait()
+	return client.Create(folder, nil).Wait()
 }
 
 // Disconnect закрывает соединение.
 func (r *Reader) Disconnect() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.connected = false
 	if r.client != nil {
 		return r.client.Logout().Wait()
 	}

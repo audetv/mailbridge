@@ -67,7 +67,17 @@ func (w *InboundWorker) Stop(_ context.Context) error {
 func (w *InboundWorker) processUnseenMessages(ctx context.Context) {
 	rawEmails, err := w.reader.FetchUnseen(ctx)
 	if err != nil {
-		w.logger.Error("failed to fetch unseen messages", "error", err)
+		// Если соединение потеряно — пробуем переподключиться
+		if err.Error() == "not connected" || !w.reader.IsConnected() {
+			w.logger.Warn("IMAP disconnected, attempting reconnect")
+			if reconnectErr := w.reader.Reconnect(); reconnectErr != nil {
+				w.logger.Error("IMAP reconnect failed", "error", reconnectErr)
+				return
+			}
+			w.logger.Info("IMAP reconnected, resuming normal operation")
+		} else {
+			w.logger.Error("failed to fetch unseen messages", "error", err)
+		}
 		return
 	}
 
