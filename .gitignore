@@ -1,5 +1,5 @@
 # Binaries
-mailbridge
+/mailbridge
 *.exe
 *.test
 *.out
@@ -15,6 +15,7 @@ mailbridge
 Thumbs.db
 
 # Config
+.env
 config.env
 *.local.env
 
@@ -23,6 +24,7 @@ data/
 *.db
 
 # Build
+build/
 dist/
 vendor/
 
