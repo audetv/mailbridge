@@ -1,3 +1,4 @@
+// Package plane предоставляет клиент для взаимодействия с Plane REST API.
 package plane
 
 import (
@@ -16,16 +17,18 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
-	workspace  string // slug рабочего пространства
+	workspace  string
 }
 
 // NewClient создаёт новый клиент Plane API.
+// baseURL может быть:
+//   - "http://localhost/gc" — workspace извлекается из URL
+//   - "http://localhost" — workspace будет пустым (для совместимости с тестами)
 func NewClient(baseURL, apiKey string) *Client {
-	// Извлекаем workspace из URL: https://plane.example.com/workspace-slug
-	workspace := extractWorkspace(baseURL)
+	workspace, cleanURL := extractWorkspace(baseURL)
 
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
+		baseURL:   strings.TrimRight(cleanURL, "/"),
 		apiKey:    apiKey,
 		workspace: workspace,
 		httpClient: &http.Client{
@@ -34,19 +37,40 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
-// extractWorkspace извлекает slug workspace из URL.
-func extractWorkspace(baseURL string) string {
-	parts := strings.Split(strings.TrimRight(baseURL, "/"), "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+// extractWorkspace извлекает slug workspace из URL и возвращает чистый baseURL.
+// "http://localhost/gc" → workspace="gc", cleanURL="http://localhost"
+// "http://localhost"      → workspace="",    cleanURL="http://localhost"
+func extractWorkspace(rawURL string) (workspace string, cleanURL string) {
+	rawURL = strings.TrimRight(rawURL, "/")
+
+	// Ищем последний сегмент пути — потенциальный workspace
+	// Но только если он не содержит "." (не домен) и не ":" (не порт)
+	parts := strings.Split(rawURL, "/")
+	if len(parts) >= 4 { // http://host/segment → минимум 4 части
+		last := parts[len(parts)-1]
+		// Не считаем workspace если это localhost:port
+		if !strings.Contains(last, ":") && last != "" {
+			workspace = last
+			cleanURL = strings.Join(parts[:len(parts)-1], "/")
+			return workspace, cleanURL
+		}
 	}
-	return ""
+
+	return "", rawURL
+}
+
+// url строит полный URL к API.
+func (c *Client) url(path string) string {
+	if c.workspace != "" {
+		return fmt.Sprintf("%s/api/v1/workspaces/%s/%s", c.baseURL, c.workspace, path)
+	}
+	// Для тестов без workspace — старый формат
+	return fmt.Sprintf("%s/api/v1/%s", c.baseURL, path)
 }
 
 // CreateIssue создаёт новую задачу в указанном проекте.
 func (c *Client) CreateIssue(ctx context.Context, req *CreateIssueRequest) (*Issue, error) {
-	url := fmt.Sprintf("%s/api/workspaces/%s/projects/%s/issues/",
-		c.baseURL, c.workspace, req.ProjectID)
+	u := c.url(fmt.Sprintf("projects/%s/issues/", req.ProjectID))
 
 	body, err := json.Marshal(map[string]interface{}{
 		"name":             req.Name,
@@ -59,7 +83,7 @@ func (c *Client) CreateIssue(ctx context.Context, req *CreateIssueRequest) (*Iss
 	}
 
 	var issue Issue
-	if err := c.doRequest(ctx, http.MethodPost, url, body, &issue); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, u, body, &issue); err != nil {
 		return nil, fmt.Errorf("create issue failed: %w", err)
 	}
 
@@ -68,11 +92,10 @@ func (c *Client) CreateIssue(ctx context.Context, req *CreateIssueRequest) (*Iss
 
 // GetIssue возвращает задачу по ID.
 func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
-	url := fmt.Sprintf("%s/api/workspaces/%s/issues/%s/",
-		c.baseURL, c.workspace, issueID)
+	u := c.url(fmt.Sprintf("issues/%s/", issueID))
 
 	var issue Issue
-	if err := c.doRequest(ctx, http.MethodGet, url, nil, &issue); err != nil {
+	if err := c.doRequest(ctx, http.MethodGet, u, nil, &issue); err != nil {
 		return nil, fmt.Errorf("get issue failed: %w", err)
 	}
 
@@ -81,8 +104,7 @@ func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
 
 // AddComment добавляет комментарий к задаче.
 func (c *Client) AddComment(ctx context.Context, issueID, body string) (*Comment, error) {
-	url := fmt.Sprintf("%s/api/workspaces/%s/issues/%s/comments/",
-		c.baseURL, c.workspace, issueID)
+	u := c.url(fmt.Sprintf("issues/%s/comments/", issueID))
 
 	reqBody, err := json.Marshal(map[string]string{
 		"comment_html": body,
@@ -92,7 +114,7 @@ func (c *Client) AddComment(ctx context.Context, issueID, body string) (*Comment
 	}
 
 	var comment Comment
-	if err := c.doRequest(ctx, http.MethodPost, url, reqBody, &comment); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, u, reqBody, &comment); err != nil {
 		return nil, fmt.Errorf("add comment failed: %w", err)
 	}
 
@@ -101,13 +123,12 @@ func (c *Client) AddComment(ctx context.Context, issueID, body string) (*Comment
 
 // GetProjects возвращает список проектов workspace.
 func (c *Client) GetProjects(ctx context.Context) ([]Project, error) {
-	url := fmt.Sprintf("%s/api/workspaces/%s/projects/",
-		c.baseURL, c.workspace)
+	u := c.url("projects/")
 
 	var response struct {
 		Results []Project `json:"results"`
 	}
-	if err := c.doRequest(ctx, http.MethodGet, url, nil, &response); err != nil {
+	if err := c.doRequest(ctx, http.MethodGet, u, nil, &response); err != nil {
 		return nil, fmt.Errorf("get projects failed: %w", err)
 	}
 
@@ -116,13 +137,12 @@ func (c *Client) GetProjects(ctx context.Context) ([]Project, error) {
 
 // GetLabels возвращает метки проекта.
 func (c *Client) GetLabels(ctx context.Context, projectID string) ([]Label, error) {
-	url := fmt.Sprintf("%s/api/workspaces/%s/projects/%s/labels/",
-		c.baseURL, c.workspace, projectID)
+	u := c.url(fmt.Sprintf("projects/%s/labels/", projectID))
 
 	var response struct {
 		Results []Label `json:"results"`
 	}
-	if err := c.doRequest(ctx, http.MethodGet, url, nil, &response); err != nil {
+	if err := c.doRequest(ctx, http.MethodGet, u, nil, &response); err != nil {
 		return nil, fmt.Errorf("get labels failed: %w", err)
 	}
 
@@ -141,7 +161,6 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body []byte,
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			// Exponential backoff: 1s, 2s, 4s
 			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
 			select {
 			case <-ctx.Done():
@@ -166,7 +185,6 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body []byte,
 
 		defer resp.Body.Close()
 
-		// Успешные коды
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			if result != nil {
 				if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -176,7 +194,6 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body []byte,
 			return nil
 		}
 
-		// Не повторяем для 4xx (кроме 429)
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
 			respBody, _ := io.ReadAll(resp.Body)
 			return fmt.Errorf("client error %d: %s", resp.StatusCode, string(respBody))
@@ -184,7 +201,6 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body []byte,
 
 		lastErr = fmt.Errorf("server error %d", resp.StatusCode)
 
-		// Для retry нужно пересоздать reader
 		if body != nil {
 			bodyReader = bytes.NewReader(body)
 		}

@@ -5,10 +5,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/plane"
 )
+
+// testServerURL возвращает тестовый URL с workspace для совместимости.
+// "http://127.0.0.1:PORT/test-workspace"
+func testServerURL(srv *httptest.Server) string {
+	return srv.URL + "/test-workspace"
+}
 
 func TestClient_CreateIssue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -17,6 +24,9 @@ func TestClient_CreateIssue(t *testing.T) {
 		}
 		if r.Header.Get("X-API-Key") != "test-key" {
 			t.Error("missing or wrong API key header")
+		}
+		if !strings.Contains(r.URL.Path, "/issues/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
 		var reqBody map[string]interface{}
@@ -41,7 +51,7 @@ func TestClient_CreateIssue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	issue, err := client.CreateIssue(ctx, &plane.CreateIssueRequest{
@@ -61,7 +71,10 @@ func TestClient_CreateIssue(t *testing.T) {
 }
 
 func TestClient_GetIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/issues/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(plane.Issue{
 			ID:         "issue-uuid-2",
@@ -74,7 +87,7 @@ func TestClient_GetIssue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	issue, err := client.GetIssue(ctx, "issue-uuid-2")
@@ -89,6 +102,9 @@ func TestClient_GetIssue(t *testing.T) {
 
 func TestClient_AddComment(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/comments/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
 		var reqBody map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			t.Fatalf("decode error: %v", err)
@@ -109,7 +125,7 @@ func TestClient_AddComment(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	comment, err := client.AddComment(ctx, "issue-uuid", "Test comment")
@@ -123,7 +139,10 @@ func TestClient_AddComment(t *testing.T) {
 }
 
 func TestClient_GetProjects(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/projects") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"results": []plane.Project{
@@ -136,7 +155,7 @@ func TestClient_GetProjects(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	projects, err := client.GetProjects(ctx)
@@ -164,7 +183,7 @@ func TestClient_RetryOnServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	_, err := client.GetIssue(ctx, "any")
@@ -185,7 +204,7 @@ func TestClient_ClientErrorNoRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := plane.NewClient(srv.URL, "test-key")
+	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
 	_, err := client.GetIssue(ctx, "nonexistent")
@@ -195,5 +214,32 @@ func TestClient_ClientErrorNoRetry(t *testing.T) {
 
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt for 4xx, got %d", attempts)
+	}
+}
+
+func TestExtractWorkspace(t *testing.T) {
+	client := plane.NewClient("http://localhost/gc", "key")
+	// Проверяем что клиент создался без ошибок
+	if client == nil {
+		t.Fatal("client is nil")
+	}
+
+	// Проверяем что GetProjects формирует правильный URL
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expectedPath := "/api/v1/workspaces/gc/projects/"
+		if r.URL.Path != expectedPath {
+			t.Errorf("path = %s, want %s", r.URL.Path, expectedPath)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{"results": []plane.Project{}}); err != nil {
+			t.Errorf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client = plane.NewClient(srv.URL+"/gc", "key")
+	_, err := client.GetProjects(context.Background())
+	if err != nil {
+		t.Fatalf("GetProjects error: %v", err)
 	}
 }
