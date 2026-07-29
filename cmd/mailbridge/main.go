@@ -114,7 +114,7 @@ func main() {
 	ext := extractor.NewExtractor(attStore)
 
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, planeClient, cfg, logger,
+		st, cl, ext, par, planeClient, cfg, logger, projectMap,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ func main() {
 }
 
 // loadProjectMap загружает проекты из Plane и строит карту имя → UUID.
-func loadProjectMap(client *plane.Client, logger *slog.Logger) map[string]string {
+func loadProjectMap(client *plane.Client, logger *slog.Logger) map[string]*plane.Project {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -285,10 +285,10 @@ func loadProjectMap(client *plane.Client, logger *slog.Logger) map[string]string
 		return nil
 	}
 
-	projectMap := make(map[string]string, len(projects))
-	for _, p := range projects {
-		projectMap[p.Name] = p.ID
-		logger.Debug("mapped project", "name", p.Name, "id", p.ID)
+	projectMap := make(map[string]*plane.Project, len(projects))
+	for i := range projects {
+		projectMap[projects[i].Name] = &projects[i]
+		logger.Debug("mapped project", "name", projects[i].Name, "id", projects[i].ID, "identifier", projects[i].Identifier)
 	}
 
 	return projectMap

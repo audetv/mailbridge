@@ -10,8 +10,9 @@ import (
 type EmailMapping struct {
 	ID               int64
 	MessageID        string
-	PlaneIssueID     string
-	PlaneIssueSeq    string
+	PlaneIssueID     string // UUID work-item'а
+	PlaneProjectID   string // UUID проекта
+	PlaneIssueSeq    string // "INBOX-1" (project_identifier-sequence_id)
 	OriginalFrom     string
 	OriginalSubject  string
 	ThreadReferences []string
@@ -59,6 +60,9 @@ type Store interface {
 	GetPendingOutbox(ctx context.Context, limit int) ([]*OutboxItem, error)
 	MarkOutboxSent(ctx context.Context, id int64) error
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error
+
+	// Ping проверяет соединение с базой данных.
+	Ping(ctx context.Context) error
 
 	// Close закрывает соединение с хранилищем.
 	Close() error

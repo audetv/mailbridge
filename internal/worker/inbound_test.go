@@ -49,9 +49,13 @@ func TestInboundWorker_Creation(t *testing.T) {
 
 	pc := plane.NewClient("https://plane.example.com/test", "key")
 
+	projectMap := map[string]*plane.Project{
+		"Входящие": {ID: "proj-inbox", Name: "Входящие", Identifier: "INBOX"},
+	}
+
 	proc := processor.NewMessageProcessor(st, cl, ext, par, pc, &config.Config{
 		Plane: config.PlaneConfig{DefaultProject: "Входящие"},
-	}, logger)
+	}, logger, projectMap)
 
 	w := worker.NewInboundWorker(reader, proc, 30*time.Second, logger)
 

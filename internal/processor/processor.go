@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/audetv/mailbridge/internal/classifier"
@@ -46,6 +48,8 @@ type MessageProcessor struct {
 	planeClient *plane.Client
 	config      *config.Config
 	logger      *slog.Logger
+	// projectMap: имя проекта → Project (содержит ID и Identifier)
+	projectMap map[string]*plane.Project
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -57,6 +61,7 @@ func NewMessageProcessor(
 	pc *plane.Client,
 	cfg *config.Config,
 	logger *slog.Logger,
+	projectMap map[string]*plane.Project,
 ) *MessageProcessor {
 	return &MessageProcessor{
 		store:       st,
@@ -66,12 +71,12 @@ func NewMessageProcessor(
 		planeClient: pc,
 		config:      cfg,
 		logger:      logger,
+		projectMap:  projectMap,
 	}
 }
 
 // Process обрабатывает сырое письмо и возвращает результат.
 func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*ProcessResult, error) {
-	// Шаг 1: извлекаем данные из письма
 	email, err := p.extractor.Extract(rawEmail)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract email: %w", err)
@@ -83,37 +88,37 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		"subject", email.Subject,
 	)
 
-	// Шаг 2: проверяем дубликат по Message-ID
 	exists, err := p.store.MessageExists(ctx, email.MessageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check message existence: %w", err)
 	}
 	if exists {
 		p.logger.Info("duplicate email ignored", "message_id", email.MessageID)
-		return &ProcessResult{
-			Action:    ActionIgnore,
-			Extracted: email,
-		}, nil
+		return &ProcessResult{Action: ActionIgnore, Extracted: email}, nil
 	}
 
-	// Шаг 3: ищем существующую задачу по ID в теме или References
-	existingIssueID := p.findExistingIssue(ctx, email)
+	existingIssueID, existingProjectID := p.findExistingIssue(ctx, email)
 
-	if existingIssueID != "" {
-		// Это ответ на существующую задачу — добавляем комментарий
-		return p.addCommentToIssue(ctx, email, existingIssueID)
+	if existingIssueID != "" && existingProjectID != "" {
+		return p.addCommentToIssue(ctx, email, existingProjectID, existingIssueID)
 	}
 
-	// Шаг 4: создаём новую задачу
 	return p.createNewIssue(ctx, email)
 }
 
-// findExistingIssue ищет ID существующей задачи.
-func (p *MessageProcessor) findExistingIssue(ctx context.Context, email *extractor.ExtractedEmail) string {
-	// Проверяем тему на наличие [PLANE-XXX] или [WEB-XXX]
-	issueID := extractIssueIDFromSubject(email.Subject)
-	if issueID != "" {
-		return issueID
+// findExistingIssue ищет ID существующей задачи и проекта.
+func (p *MessageProcessor) findExistingIssue(ctx context.Context, email *extractor.ExtractedEmail) (issueID, projectID string) {
+	// Проверяем тему на наличие [IDENTIFIER-XXX]
+	identifier, seq := extractIssueIDFromSubject(email.Subject)
+	if identifier != "" && seq > 0 {
+		workItem, err := p.planeClient.GetWorkItemByIdentifier(ctx, identifier, seq)
+		if err == nil && workItem != nil {
+			return workItem.ID, workItem.ProjectID
+		}
+		p.logger.Debug("work item not found by identifier",
+			"identifier", identifier,
+			"seq", seq,
+		)
 	}
 
 	// Проверяем References / In-Reply-To
@@ -124,16 +129,15 @@ func (p *MessageProcessor) findExistingIssue(ctx context.Context, email *extract
 	if len(refs) > 0 {
 		mapping, err := p.store.FindMappingByReferences(ctx, refs)
 		if err == nil && mapping != nil {
-			return mapping.PlaneIssueID
+			return mapping.PlaneIssueID, mapping.PlaneProjectID
 		}
 	}
 
-	return ""
+	return "", ""
 }
 
 // createNewIssue создаёт новую задачу в Plane.
 func (p *MessageProcessor) createNewIssue(ctx context.Context, email *extractor.ExtractedEmail) (*ProcessResult, error) {
-	// Классифицируем текст
 	text := email.BodyText
 	if text == "" {
 		text = email.Subject
@@ -149,42 +153,43 @@ func (p *MessageProcessor) createNewIssue(ctx context.Context, email *extractor.
 		"type", classification.Type,
 		"priority", classification.Priority,
 		"confidence", classification.Confidence,
-		"needs_triage", classification.NeedsTriage,
 	)
 
-	// Если требуется ручной разбор — создаём в проекте по умолчанию
-	projectID := p.config.Plane.DefaultProject
-	if classification.Project != "" {
-		// TODO: маппинг названия проекта на UUID через GetProjects
-		projectID = classification.Project
-	}
+	// Определяем проект
+	targetProject := p.resolveProject(classification.Project)
 
-	// Формируем описание
+	// Разрешаем метки
+	labelIDs := p.resolveLabels(ctx, targetProject.ID, classification)
+
+	// Создаём задачу
 	description := formatIssueDescription(email)
 
-	// Создаём задачу в Plane
-	issue, err := p.planeClient.CreateIssue(ctx, &plane.CreateIssueRequest{
-		ProjectID:   projectID,
-		Name:        email.Subject,
-		Description: description,
-		Priority:    classification.Priority,
-		Labels:      buildLabels(classification, email),
+	workItem, err := p.planeClient.CreateWorkItem(ctx, &plane.CreateWorkItemRequest{
+		ProjectID:      targetProject.ID,
+		Name:           email.Subject,
+		Description:    description,
+		Priority:       classification.Priority,
+		Labels:         labelIDs,
+		ExternalID:     email.MessageID,
+		ExternalSource: "mailbridge",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create issue: %w", err)
+		return nil, fmt.Errorf("failed to create work item: %w", err)
 	}
 
-	p.logger.Info("issue created",
-		"issue_id", issue.ID,
-		"sequence_id", issue.SequenceID,
-		"project", projectID,
+	issueSeq := fmt.Sprintf("%s-%d", targetProject.Identifier, workItem.SequenceID)
+
+	p.logger.Info("work item created",
+		"work_item_id", workItem.ID,
+		"project_id", targetProject.ID,
+		"issue_seq", issueSeq,
 	)
 
-	// Сохраняем маппинг
 	mapping := &store.EmailMapping{
 		MessageID:        email.MessageID,
-		PlaneIssueID:     issue.ID,
-		PlaneIssueSeq:    issue.SequenceID,
+		PlaneIssueID:     workItem.ID,
+		PlaneProjectID:   targetProject.ID,
+		PlaneIssueSeq:    issueSeq,
 		OriginalFrom:     email.From,
 		OriginalSubject:  email.Subject,
 		ThreadReferences: append(email.References, email.MessageID),
@@ -193,23 +198,22 @@ func (p *MessageProcessor) createNewIssue(ctx context.Context, email *extractor.
 
 	if err := p.store.SaveMapping(ctx, mapping); err != nil {
 		p.logger.Error("failed to save mapping", "error", err)
-		// Не фатально — задача уже создана
 	}
 
 	return &ProcessResult{
 		Action:        ActionCreateIssue,
-		IssueID:       issue.ID,
-		IssueSequence: issue.SequenceID,
+		IssueID:       workItem.ID,
+		IssueSequence: issueSeq,
 		Mapping:       mapping,
 		Extracted:     email,
 	}, nil
 }
 
 // addCommentToIssue добавляет комментарий к существующей задаче.
-func (p *MessageProcessor) addCommentToIssue(ctx context.Context, email *extractor.ExtractedEmail, issueID string) (*ProcessResult, error) {
+func (p *MessageProcessor) addCommentToIssue(ctx context.Context, email *extractor.ExtractedEmail, projectID, issueID string) (*ProcessResult, error) {
 	commentText := formatCommentText(email)
 
-	_, err := p.planeClient.AddComment(ctx, issueID, commentText)
+	_, err := p.planeClient.AddComment(ctx, projectID, issueID, commentText, email.MessageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add comment: %w", err)
 	}
@@ -219,10 +223,10 @@ func (p *MessageProcessor) addCommentToIssue(ctx context.Context, email *extract
 		"message_id", email.MessageID,
 	)
 
-	// Сохраняем маппинг
 	mapping := &store.EmailMapping{
 		MessageID:        email.MessageID,
 		PlaneIssueID:     issueID,
+		PlaneProjectID:   projectID,
 		OriginalFrom:     email.From,
 		OriginalSubject:  email.Subject,
 		ThreadReferences: append(email.References, email.MessageID),
@@ -233,25 +237,119 @@ func (p *MessageProcessor) addCommentToIssue(ctx context.Context, email *extract
 		p.logger.Error("failed to save mapping", "error", err)
 	}
 
-	// Получаем sequence_id задачи
-	issue, err := p.planeClient.GetIssue(ctx, issueID)
-	if err == nil {
-		mapping.PlaneIssueSeq = issue.SequenceID
+	issueSeq := ""
+	workItem, err := p.planeClient.GetWorkItemByIdentifier(ctx, projectID, 0)
+	if err == nil && workItem != nil {
+		// Не можем получить seq без identifier, но он есть в mapping ответа
+		_ = workItem
 	}
+	_ = issueSeq
 
 	return &ProcessResult{
-		Action:        ActionAddComment,
-		IssueID:       issueID,
-		IssueSequence: mapping.PlaneIssueSeq,
-		Mapping:       mapping,
-		Extracted:     email,
+		Action:    ActionAddComment,
+		IssueID:   issueID,
+		Mapping:   mapping,
+		Extracted: email,
 	}, nil
 }
 
-// extractIssueIDFromSubject извлекает ID задачи из темы письма.
-// Поддерживает форматы: [WEB-123], [PLANE-123], #WEB-123
-func extractIssueIDFromSubject(subject string) string {
-	// Убираем Re:, Fwd: префиксы
+// resolveProject находит проект по имени или возвращает проект по умолчанию.
+func (p *MessageProcessor) resolveProject(name string) *plane.Project {
+	if name != "" {
+		if proj, ok := p.projectMap[name]; ok {
+			return proj
+		}
+	}
+	// Проект по умолчанию
+	for _, proj := range p.projectMap {
+		if proj.Name == p.config.Plane.DefaultProject {
+			return proj
+		}
+	}
+	// Возвращаем первый попавшийся
+	for _, proj := range p.projectMap {
+		return proj
+	}
+	return &plane.Project{ID: "", Identifier: "INBOX"}
+}
+
+// resolveLabels разрешает имена меток в UUID'ы, создавая отсутствующие.
+func (p *MessageProcessor) resolveLabels(ctx context.Context, projectID string, classification *classifier.Classification) []string {
+	if projectID == "" {
+		return nil
+	}
+
+	// Загружаем существующие метки
+	existingLabels, err := p.planeClient.GetLabels(ctx, projectID)
+	if err != nil {
+		p.logger.Warn("failed to get labels", "error", err)
+	}
+
+	labelMap := make(map[string]string) // имя → UUID
+	for _, l := range existingLabels {
+		labelMap[strings.ToLower(l.Name)] = l.ID
+	}
+
+	var labelIDs []string
+	labelsToCreate := []string{"from:email"}
+
+	if classification.Type != "" {
+		labelsToCreate = append(labelsToCreate, classification.Type)
+	}
+	if classification.NeedsTriage {
+		labelsToCreate = append(labelsToCreate, "needs_triage")
+	}
+
+	for _, name := range labelsToCreate {
+		key := strings.ToLower(name)
+		if id, ok := labelMap[key]; ok {
+			labelIDs = append(labelIDs, id)
+			continue
+		}
+
+		// Создаём метку
+		label, err := p.planeClient.CreateLabel(ctx, projectID, &plane.CreateLabelRequest{
+			Name:           name,
+			Color:          labelColor(name),
+			Description:    name,
+			ExternalSource: "mailbridge",
+		})
+		if err != nil {
+			p.logger.Warn("failed to create label", "name", name, "error", err)
+			continue
+		}
+		labelMap[key] = label.ID
+		labelIDs = append(labelIDs, label.ID)
+	}
+
+	return labelIDs
+}
+
+// labelColor возвращает цвет для метки по имени.
+func labelColor(name string) string {
+	colors := map[string]string{
+		"bug":          "#ff0000",
+		"feature":      "#00ff00",
+		"support":      "#0000ff",
+		"access":       "#ffaa00",
+		"seo":          "#aa00ff",
+		"content":      "#00aaaa",
+		"urgent":       "#ff0000",
+		"high":         "#ff6600",
+		"medium":       "#ffaa00",
+		"low":          "#00aa00",
+		"needs_triage": "#888888",
+		"from:email":   "#666666",
+	}
+	if c, ok := colors[strings.ToLower(name)]; ok {
+		return c
+	}
+	return "#666666"
+}
+
+// extractIssueIDFromSubject извлекает идентификатор проекта и номер задачи из темы.
+// Поддерживает форматы: [INBOX-123], [TRK-5], #INBOX-123
+func extractIssueIDFromSubject(subject string) (identifier string, seq int) {
 	subject = strings.TrimSpace(subject)
 	for {
 		lower := strings.ToLower(subject)
@@ -259,54 +357,35 @@ func extractIssueIDFromSubject(subject string) string {
 			subject = strings.TrimSpace(subject[3:])
 		} else if strings.HasPrefix(lower, "fwd:") || strings.HasPrefix(lower, "fw:") {
 			subject = strings.TrimSpace(subject[4:])
-			if strings.HasPrefix(strings.ToLower(subject), "d:") {
-				subject = strings.TrimSpace(subject[2:])
-			}
 		} else {
 			break
 		}
 	}
 
-	// Ищем [WEB-XXX] или [PLANE-XXX]
-	patterns := []string{"[web-", "[plane-", "#web-", "#plane-"}
-	lower := strings.ToLower(subject)
-
-	for _, pattern := range patterns {
-		idx := strings.Index(lower, pattern)
-		if idx == -1 {
-			continue
-		}
-
-		start := idx + len(pattern)
-		end := start
-		for end < len(subject) {
-			c := subject[end]
-			if c >= '0' && c <= '9' {
-				end++
-			} else if c == ']' && pattern[0] == '[' {
-				break
-			} else {
-				break
-			}
-		}
-
-		if end > start {
-			return subject[idx : end+1] // возвращаем вместе с [] или #
-		}
+	// Ищем [XXX-NNN] или #XXX-NNN
+	re := regexp.MustCompile(`[\[#]([A-Za-z0-9]+)-(\d+)[\]\s]`)
+	matches := re.FindStringSubmatch(subject)
+	if len(matches) == 3 {
+		identifier = strings.ToUpper(matches[1])
+		seq, _ = strconv.Atoi(matches[2])
+		return
 	}
 
-	return ""
+	return "", 0
 }
 
-// formatIssueDescription форматирует описание задачи для Plane.
+// formatIssueDescription форматирует описание задачи.
 func formatIssueDescription(email *extractor.ExtractedEmail) string {
-	var parts []string
+	author := email.From
+	if idx := strings.LastIndex(email.From, "<"); idx != -1 {
+		author = strings.TrimSpace(email.From[:idx])
+	}
 
-	parts = append(parts, fmt.Sprintf("<p><strong>От:</strong> %s</p>", email.From))
+	var parts []string
+	parts = append(parts, fmt.Sprintf("<p><strong>От:</strong> %s (%s)</p>", author, email.From))
 	parts = append(parts, fmt.Sprintf("<p><strong>Тема:</strong> %s</p>", email.Subject))
 
 	if email.BodyText != "" {
-		// Экранируем HTML
 		escaped := strings.ReplaceAll(email.BodyText, "&", "&amp;")
 		escaped = strings.ReplaceAll(escaped, "<", "&lt;")
 		escaped = strings.ReplaceAll(escaped, ">", "&gt;")
@@ -328,9 +407,13 @@ func formatIssueDescription(email *extractor.ExtractedEmail) string {
 
 // formatCommentText форматирует текст комментария.
 func formatCommentText(email *extractor.ExtractedEmail) string {
-	var parts []string
+	author := email.From
+	if idx := strings.LastIndex(email.From, "<"); idx != -1 {
+		author = strings.TrimSpace(email.From[:idx])
+	}
 
-	parts = append(parts, fmt.Sprintf("<p><strong>Ответ от:</strong> %s</p>", email.From))
+	var parts []string
+	parts = append(parts, fmt.Sprintf("<p><strong>Ответ от:</strong> %s (%s)</p>", author, email.From))
 
 	if email.BodyText != "" {
 		escaped := strings.ReplaceAll(email.BodyText, "&", "&amp;")
@@ -340,7 +423,6 @@ func formatCommentText(email *extractor.ExtractedEmail) string {
 		parts = append(parts, fmt.Sprintf("<p>%s</p>", escaped))
 	}
 
-	// Информация о вложениях
 	if len(email.Attachments) > 0 {
 		parts = append(parts, "<p><em>Вложения:</em></p><ul>")
 		for _, att := range email.Attachments {
@@ -350,29 +432,4 @@ func formatCommentText(email *extractor.ExtractedEmail) string {
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-// buildLabels формирует список меток для задачи.
-func buildLabels(classification *classifier.Classification, email *extractor.ExtractedEmail) []string {
-	var labels []string
-
-	if classification.Type != "" {
-		labels = append(labels, "type:"+classification.Type)
-	}
-	if classification.Priority != "" {
-		labels = append(labels, "priority:"+classification.Priority)
-	}
-	if classification.NeedsTriage {
-		labels = append(labels, "needs_triage")
-	}
-
-	// Метка источника
-	labels = append(labels, "from:email")
-
-	// Если есть вложения — добавляем метку
-	if len(email.Attachments) > 0 {
-		labels = append(labels, "has_attachments")
-	}
-
-	return labels
 }

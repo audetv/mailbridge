@@ -33,14 +33,13 @@ func TestMigrate(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()
 
-	// Миграция уже выполнена в setupStore, проверяем что таблицы созданы
 	ctx := context.Background()
 
-	// Проверяем что можем вставить запись
 	err := s.SaveMapping(ctx, &store.EmailMapping{
 		MessageID:       "test-msg-id",
 		PlaneIssueID:    "plane-issue-1",
-		PlaneIssueSeq:   "WEB-1",
+		PlaneProjectID:  "plane-project-1",
+		PlaneIssueSeq:   "INBOX-1",
 		OriginalFrom:    "test@example.com",
 		OriginalSubject: "Test Subject",
 		ActionType:      "CREATE",
@@ -57,8 +56,9 @@ func TestSaveAndGetMapping(t *testing.T) {
 
 	mapping := &store.EmailMapping{
 		MessageID:        "msg-001",
-		PlaneIssueID:     "issue-001",
-		PlaneIssueSeq:    "WEB-123",
+		PlaneIssueID:     "issue-uuid-001",
+		PlaneProjectID:   "project-uuid-001",
+		PlaneIssueSeq:    "INBOX-1",
 		OriginalFrom:     "user@example.com",
 		OriginalSubject:  "Test",
 		ThreadReferences: []string{"ref-1", "ref-2"},
@@ -81,8 +81,11 @@ func TestSaveAndGetMapping(t *testing.T) {
 	if got.MessageID != mapping.MessageID {
 		t.Errorf("MessageID = %s, want %s", got.MessageID, mapping.MessageID)
 	}
-	if got.PlaneIssueSeq != mapping.PlaneIssueSeq {
-		t.Errorf("PlaneIssueSeq = %s, want %s", got.PlaneIssueSeq, mapping.PlaneIssueSeq)
+	if got.PlaneProjectID != "project-uuid-001" {
+		t.Errorf("PlaneProjectID = %s, want project-uuid-001", got.PlaneProjectID)
+	}
+	if got.PlaneIssueSeq != "INBOX-1" {
+		t.Errorf("PlaneIssueSeq = %s, want INBOX-1", got.PlaneIssueSeq)
 	}
 	if len(got.ThreadReferences) != 2 {
 		t.Errorf("ThreadReferences length = %d, want 2", len(got.ThreadReferences))
@@ -105,6 +108,7 @@ func TestMessageExists(t *testing.T) {
 	err = s.SaveMapping(ctx, &store.EmailMapping{
 		MessageID:       "msg-002",
 		PlaneIssueID:    "issue-002",
+		PlaneProjectID:  "project-002",
 		OriginalFrom:    "user@example.com",
 		OriginalSubject: "Test",
 		ActionType:      "CREATE",
@@ -130,7 +134,8 @@ func TestFindMappingByReferences(t *testing.T) {
 	err := s.SaveMapping(ctx, &store.EmailMapping{
 		MessageID:        "ref-msg-1",
 		PlaneIssueID:     "issue-003",
-		PlaneIssueSeq:    "WEB-3",
+		PlaneProjectID:   "project-003",
+		PlaneIssueSeq:    "INBOX-3",
 		OriginalFrom:     "user@example.com",
 		OriginalSubject:  "Test",
 		ThreadReferences: []string{"thread-1", "thread-2"},
@@ -140,7 +145,6 @@ func TestFindMappingByReferences(t *testing.T) {
 		t.Fatalf("SaveMapping failed: %v", err)
 	}
 
-	// Поиск по прямому MessageID
 	m, err := s.FindMappingByReferences(ctx, []string{"ref-msg-1"})
 	if err != nil {
 		t.Fatalf("FindMappingByReferences failed: %v", err)
@@ -149,7 +153,6 @@ func TestFindMappingByReferences(t *testing.T) {
 		t.Fatal("expected mapping, got nil")
 	}
 
-	// Поиск по thread reference
 	m, err = s.FindMappingByReferences(ctx, []string{"thread-1"})
 	if err != nil {
 		t.Fatalf("FindMappingByReferences failed: %v", err)
@@ -164,11 +167,11 @@ func TestGetLatestMappingByIssueID(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Сохраняем два маппинга на одну задачу
 	err := s.SaveMapping(ctx, &store.EmailMapping{
 		MessageID:       "msg-a",
 		PlaneIssueID:    "issue-004",
-		PlaneIssueSeq:   "WEB-4",
+		PlaneProjectID:  "project-004",
+		PlaneIssueSeq:   "INBOX-4",
 		OriginalFrom:    "user1@example.com",
 		OriginalSubject: "First",
 		ActionType:      "CREATE",
@@ -180,7 +183,8 @@ func TestGetLatestMappingByIssueID(t *testing.T) {
 	err = s.SaveMapping(ctx, &store.EmailMapping{
 		MessageID:       "msg-b",
 		PlaneIssueID:    "issue-004",
-		PlaneIssueSeq:   "WEB-4",
+		PlaneProjectID:  "project-004",
+		PlaneIssueSeq:   "INBOX-4",
 		OriginalFrom:    "user2@example.com",
 		OriginalSubject: "Second",
 		ActionType:      "REPLY",
@@ -209,6 +213,7 @@ func TestDuplicateMessageID(t *testing.T) {
 	mapping := &store.EmailMapping{
 		MessageID:       "dup-msg",
 		PlaneIssueID:    "issue-005",
+		PlaneProjectID:  "project-005",
 		OriginalFrom:    "user@example.com",
 		OriginalSubject: "Test",
 		ActionType:      "CREATE",
@@ -219,7 +224,6 @@ func TestDuplicateMessageID(t *testing.T) {
 		t.Fatalf("first SaveMapping failed: %v", err)
 	}
 
-	// Попытка вставить дубликат
 	err = s.SaveMapping(ctx, mapping)
 	if err == nil {
 		t.Fatal("expected error for duplicate message_id")
@@ -231,7 +235,6 @@ func TestReplyLog(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Сохраняем ответ
 	err := s.SaveReplyLog(ctx, &store.ReplyLog{
 		MessageID:    "reply-001",
 		InReplyTo:    "original-001",
@@ -241,7 +244,6 @@ func TestReplyLog(t *testing.T) {
 		t.Fatalf("SaveReplyLog failed: %v", err)
 	}
 
-	// Проверяем существование
 	exists, err := s.ReplyExists(ctx, "reply-001")
 	if err != nil {
 		t.Fatalf("ReplyExists failed: %v", err)
@@ -250,7 +252,6 @@ func TestReplyLog(t *testing.T) {
 		t.Error("expected reply to exist")
 	}
 
-	// Проверяем несуществующий
 	exists, err = s.ReplyExists(ctx, "nonexistent-reply")
 	if err != nil {
 		t.Fatalf("ReplyExists failed: %v", err)
@@ -265,13 +266,11 @@ func TestOutbox(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Добавляем в очередь
 	err := s.EnqueueOutbox(ctx, `{"to":"test@example.com","subject":"Hello"}`)
 	if err != nil {
 		t.Fatalf("EnqueueOutbox failed: %v", err)
 	}
 
-	// Получаем pending
 	items, err := s.GetPendingOutbox(ctx, 10)
 	if err != nil {
 		t.Fatalf("GetPendingOutbox failed: %v", err)
@@ -283,13 +282,11 @@ func TestOutbox(t *testing.T) {
 		t.Errorf("expected status pending, got %s", items[0].Status)
 	}
 
-	// Помечаем как отправленное
 	err = s.MarkOutboxSent(ctx, items[0].ID)
 	if err != nil {
 		t.Fatalf("MarkOutboxSent failed: %v", err)
 	}
 
-	// Проверяем, что очередь пуста
 	items, err = s.GetPendingOutbox(ctx, 10)
 	if err != nil {
 		t.Fatalf("GetPendingOutbox failed: %v", err)
@@ -316,9 +313,18 @@ func TestMarkOutboxFailed(t *testing.T) {
 		t.Fatalf("MarkOutboxFailed failed: %v", err)
 	}
 
-	// Проверяем, что больше не pending
 	items, _ = s.GetPendingOutbox(ctx, 1)
 	if len(items) != 0 {
 		t.Errorf("expected 0 pending items, got %d", len(items))
+	}
+}
+
+func TestPing(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := s.Ping(ctx); err != nil {
+		t.Errorf("Ping failed: %v", err)
 	}
 }

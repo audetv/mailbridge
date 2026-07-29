@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // драйвер SQLite
@@ -43,18 +42,14 @@ func NewStore(dsn string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Ping проверяет соединение с базой данных.
-func (s *Store) Ping(ctx context.Context) error {
-	return s.db.PingContext(ctx)
-}
-
 // Migrate выполняет миграции схемы.
 func (s *Store) Migrate(ctx context.Context) error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS email_mapping (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			message_id TEXT NOT NULL UNIQUE,
-			plane_issue_id TEXT NOT NULL,
+			plane_issue_id TEXT NOT NULL DEFAULT '',
+			plane_project_id TEXT NOT NULL DEFAULT '',
 			plane_issue_seq TEXT NOT NULL DEFAULT '',
 			original_from TEXT NOT NULL,
 			original_subject TEXT NOT NULL,
@@ -102,11 +97,11 @@ func (s *Store) SaveMapping(ctx context.Context, m *store.EmailMapping) error {
 	}
 
 	query := `INSERT INTO email_mapping 
-		(message_id, plane_issue_id, plane_issue_seq, original_from, original_subject, thread_references, action_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`
+		(message_id, plane_issue_id, plane_project_id, plane_issue_seq, original_from, original_subject, thread_references, action_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err = s.db.ExecContext(ctx, query,
-		m.MessageID, m.PlaneIssueID, m.PlaneIssueSeq,
+		m.MessageID, m.PlaneIssueID, m.PlaneProjectID, m.PlaneIssueSeq,
 		m.OriginalFrom, m.OriginalSubject, string(refsJSON), m.ActionType)
 	if err != nil {
 		return fmt.Errorf("failed to save mapping: %w", err)
@@ -117,7 +112,7 @@ func (s *Store) SaveMapping(ctx context.Context, m *store.EmailMapping) error {
 
 // GetMappingByMessageID возвращает маппинг по Message-ID.
 func (s *Store) GetMappingByMessageID(ctx context.Context, msgID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_issue_seq, 
+	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 		original_from, original_subject, thread_references, action_type, created_at
 		FROM email_mapping WHERE message_id = ?`
 
@@ -127,7 +122,7 @@ func (s *Store) GetMappingByMessageID(ctx context.Context, msgID string) (*store
 
 // GetLatestMappingByIssueID возвращает последний маппинг по ID задачи в Plane.
 func (s *Store) GetLatestMappingByIssueID(ctx context.Context, issueID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_issue_seq, 
+	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 		original_from, original_subject, thread_references, action_type, created_at
 		FROM email_mapping WHERE plane_issue_id = ? ORDER BY id DESC LIMIT 1`
 
@@ -155,9 +150,8 @@ func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*st
 		}
 	}
 
-	// Поиск по JSON-массиву thread_references
 	for _, ref := range refs {
-		query := `SELECT id, message_id, plane_issue_id, plane_issue_seq, 
+		query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 			original_from, original_subject, thread_references, action_type, created_at
 			FROM email_mapping WHERE thread_references LIKE ?`
 		row := s.db.QueryRowContext(ctx, query, "%\""+ref+"\"%")
@@ -240,14 +234,18 @@ func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
 }
 
 // MarkOutboxFailed помечает элемент очереди как ошибочный.
-func (s *Store) MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error {
-	payload := fmt.Sprintf(`{"error": "%s"}`, strings.ReplaceAll(errMsg, `"`, `\"`))
-	query := `UPDATE outbox SET status = 'failed', attempts = attempts + 1, last_attempt_at = ?, payload = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, time.Now(), payload, id)
+func (s *Store) MarkOutboxFailed(ctx context.Context, id int64, _ string) error {
+	query := `UPDATE outbox SET status = 'failed', attempts = attempts + 1, last_attempt_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("failed to mark outbox failed: %w", err)
 	}
 	return nil
+}
+
+// Ping проверяет соединение с базой данных.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
 }
 
 // Close закрывает соединение с БД.
@@ -261,7 +259,7 @@ func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMappi
 	var refsJSON string
 	var createdAt time.Time
 
-	err := row.Scan(&m.ID, &m.MessageID, &m.PlaneIssueID, &m.PlaneIssueSeq,
+	err := row.Scan(&m.ID, &m.MessageID, &m.PlaneIssueID, &m.PlaneProjectID, &m.PlaneIssueSeq,
 		&m.OriginalFrom, &m.OriginalSubject, &refsJSON, &m.ActionType, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
