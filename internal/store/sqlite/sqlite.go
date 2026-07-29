@@ -43,6 +43,7 @@ func NewStore(dsn string) (*Store, error) {
 }
 
 // Migrate выполняет миграции схемы.
+// Migrate выполняет миграции схемы.
 func (s *Store) Migrate(ctx context.Context) error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS email_mapping (
@@ -86,7 +87,52 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 
+	// Миграции для обновления схемы существующих БД
+	if err := s.migrateSchema(ctx); err != nil {
+		return fmt.Errorf("schema migration failed: %w", err)
+	}
+
 	return nil
+}
+
+// migrateSchema выполняет миграции для обновления существующих таблиц.
+func (s *Store) migrateSchema(ctx context.Context) error {
+	// Проверяем наличие колонки plane_project_id в email_mapping
+	hasColumn, err := s.columnExists(ctx, "email_mapping", "plane_project_id")
+	if err != nil {
+		return fmt.Errorf("failed to check column plane_project_id: %w", err)
+	}
+	if !hasColumn {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE email_mapping ADD COLUMN plane_project_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("failed to add column plane_project_id: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// columnExists проверяет существование колонки в таблице.
+func (s *Store) columnExists(ctx context.Context, table, column string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+
+	return false, rows.Err()
 }
 
 // SaveMapping сохраняет маппинг email-сообщения.
