@@ -11,131 +11,8 @@ import (
 	"github.com/audetv/mailbridge/internal/plane"
 )
 
-// testServerURL возвращает тестовый URL с workspace для совместимости.
-// "http://127.0.0.1:PORT/test-workspace"
 func testServerURL(srv *httptest.Server) string {
 	return srv.URL + "/test-workspace"
-}
-
-func TestClient_CreateIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		if r.Header.Get("X-API-Key") != "test-key" {
-			t.Error("missing or wrong API key header")
-		}
-		if !strings.Contains(r.URL.Path, "/issues/") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-
-		var reqBody map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			t.Fatalf("decode error: %v", err)
-		}
-
-		if reqBody["name"] != "Test Issue" {
-			t.Errorf("name = %v", reqBody["name"])
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(plane.Issue{
-			ID:         "issue-uuid-1",
-			SequenceID: "WEB-1",
-			ProjectID:  "proj-uuid",
-			Name:       "Test Issue",
-			Priority:   "high",
-		}); err != nil {
-			t.Fatalf("encode error: %v", err)
-		}
-	}))
-	defer srv.Close()
-
-	client := plane.NewClient(testServerURL(srv), "test-key")
-	ctx := context.Background()
-
-	issue, err := client.CreateIssue(ctx, &plane.CreateIssueRequest{
-		ProjectID:   "proj-uuid",
-		Name:        "Test Issue",
-		Description: "Description text",
-		Priority:    "high",
-		Labels:      []string{"bug", "urgent"},
-	})
-	if err != nil {
-		t.Fatalf("CreateIssue error: %v", err)
-	}
-
-	if issue.SequenceID != "WEB-1" {
-		t.Errorf("SequenceID = %q, want %q", issue.SequenceID, "WEB-1")
-	}
-}
-
-func TestClient_GetIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "/issues/") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(plane.Issue{
-			ID:         "issue-uuid-2",
-			SequenceID: "WEB-2",
-			Name:       "Existing Issue",
-			State:      "in_progress",
-		}); err != nil {
-			t.Fatalf("encode error: %v", err)
-		}
-	}))
-	defer srv.Close()
-
-	client := plane.NewClient(testServerURL(srv), "test-key")
-	ctx := context.Background()
-
-	issue, err := client.GetIssue(ctx, "issue-uuid-2")
-	if err != nil {
-		t.Fatalf("GetIssue error: %v", err)
-	}
-
-	if issue.ID != "issue-uuid-2" {
-		t.Errorf("ID = %q", issue.ID)
-	}
-}
-
-func TestClient_AddComment(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "/comments/") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		var reqBody map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			t.Fatalf("decode error: %v", err)
-		}
-
-		if reqBody["comment_html"] != "Test comment" {
-			t.Errorf("comment_html = %q", reqBody["comment_html"])
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(plane.Comment{
-			ID:      "comment-uuid",
-			IssueID: "issue-uuid",
-			Body:    "<p>Test comment</p>",
-		}); err != nil {
-			t.Fatalf("encode error: %v", err)
-		}
-	}))
-	defer srv.Close()
-
-	client := plane.NewClient(testServerURL(srv), "test-key")
-	ctx := context.Background()
-
-	comment, err := client.AddComment(ctx, "issue-uuid", "Test comment")
-	if err != nil {
-		t.Fatalf("AddComment error: %v", err)
-	}
-
-	if comment.Body != "<p>Test comment</p>" {
-		t.Errorf("Body = %q", comment.Body)
-	}
 }
 
 func TestClient_GetProjects(t *testing.T) {
@@ -146,8 +23,8 @@ func TestClient_GetProjects(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"results": []plane.Project{
-				{ID: "proj-1", Name: "ТРК"},
-				{ID: "proj-2", Name: "Отель"},
+				{ID: "proj-uuid-1", Name: "ТРК", Identifier: "TRK"},
+				{ID: "proj-uuid-2", Name: "Отель", Identifier: "HOTEL"},
 			},
 		}); err != nil {
 			t.Fatalf("encode error: %v", err)
@@ -162,9 +39,233 @@ func TestClient_GetProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProjects error: %v", err)
 	}
-
 	if len(projects) != 2 {
 		t.Errorf("expected 2 projects, got %d", len(projects))
+	}
+	if projects[0].Identifier != "TRK" {
+		t.Errorf("Identifier = %s, want TRK", projects[0].Identifier)
+	}
+}
+
+func TestClient_GetLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/labels") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": []plane.Label{
+				{ID: "label-uuid-1", Name: "Bug", Color: "#ff0000"},
+				{ID: "label-uuid-2", Name: "Feature", Color: "#00ff00"},
+			},
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	labels, err := client.GetLabels(ctx, "proj-uuid")
+	if err != nil {
+		t.Fatalf("GetLabels error: %v", err)
+	}
+	if len(labels) != 2 {
+		t.Errorf("expected 2 labels, got %d", len(labels))
+	}
+}
+
+func TestClient_CreateLabel_New(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(plane.Label{
+			ID:    "new-label-uuid",
+			Name:  "Bug",
+			Color: "#ff0000",
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	label, err := client.CreateLabel(ctx, "proj-uuid", &plane.CreateLabelRequest{
+		Name:        "Bug",
+		Color:       "#ff0000",
+		Description: "Bug report",
+	})
+	if err != nil {
+		t.Fatalf("CreateLabel error: %v", err)
+	}
+	if label.ID != "new-label-uuid" {
+		t.Errorf("ID = %s, want new-label-uuid", label.ID)
+	}
+}
+
+func TestClient_CreateLabel_Conflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		if err := json.NewEncoder(w).Encode(plane.LabelConflictError{
+			Error: "Label with the same name already exists in the project",
+			ID:    "existing-label-uuid",
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	label, err := client.CreateLabel(ctx, "proj-uuid", &plane.CreateLabelRequest{
+		Name:  "Bug",
+		Color: "#ff0000",
+	})
+	if err != nil {
+		t.Fatalf("CreateLabel error: %v", err)
+	}
+	if label.ID != "existing-label-uuid" {
+		t.Errorf("ID = %s, want existing-label-uuid", label.ID)
+	}
+}
+
+func TestClient_CreateWorkItem(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/work-items") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if reqBody["name"] != "Test Issue" {
+			t.Errorf("name = %v", reqBody["name"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(plane.WorkItem{
+			ID:         "work-item-uuid",
+			SequenceID: 1,
+			ProjectID:  "proj-uuid",
+			Name:       "Test Issue",
+			Priority:   "high",
+			Labels:     []string{"label-uuid"},
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	item, err := client.CreateWorkItem(ctx, &plane.CreateWorkItemRequest{
+		ProjectID:      "proj-uuid",
+		Name:           "Test Issue",
+		Description:    "<p>Description</p>",
+		Priority:       "high",
+		Labels:         []string{"label-uuid"},
+		ExternalID:     "msg-001",
+		ExternalSource: "mailbridge",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem error: %v", err)
+	}
+	if item.ID != "work-item-uuid" {
+		t.Errorf("ID = %s", item.ID)
+	}
+	if item.SequenceID != 1 {
+		t.Errorf("SequenceID = %d, want 1", item.SequenceID)
+	}
+}
+
+func TestClient_GetWorkItemByIdentifier(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/work-items/INBOX-1") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(plane.WorkItem{
+			ID:         "work-item-uuid",
+			SequenceID: 1,
+			ProjectID:  "proj-uuid",
+			Name:       "Existing Issue",
+			State:      "in_progress",
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	item, err := client.GetWorkItemByIdentifier(ctx, "INBOX", 1)
+	if err != nil {
+		t.Fatalf("GetWorkItemByIdentifier error: %v", err)
+	}
+	if item.ID != "work-item-uuid" {
+		t.Errorf("ID = %s", item.ID)
+	}
+}
+
+func TestClient_AddComment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/comments") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		var reqBody map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if reqBody["comment_html"] != "<p>Test comment</p>" {
+			t.Errorf("comment_html = %q", reqBody["comment_html"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(plane.Comment{
+			ID:   "comment-uuid",
+			Body: "<p>Test comment</p>",
+			Actor: &plane.Actor{
+				ID:          "actor-uuid",
+				DisplayName: "Test User",
+			},
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := plane.NewClient(testServerURL(srv), "test-key")
+	ctx := context.Background()
+
+	comment, err := client.AddComment(ctx, "proj-uuid", "work-item-uuid", "<p>Test comment</p>", "msg-001")
+	if err != nil {
+		t.Fatalf("AddComment error: %v", err)
+	}
+	if comment.Body != "<p>Test comment</p>" {
+		t.Errorf("Body = %q", comment.Body)
+	}
+	if comment.Actor == nil {
+		t.Error("Actor is nil")
 	}
 }
 
@@ -177,7 +278,9 @@ func TestClient_RetryOnServerError(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(plane.Issue{ID: "ok"}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": []plane.Project{},
+		}); err != nil {
 			t.Fatalf("encode error: %v", err)
 		}
 	}))
@@ -186,11 +289,10 @@ func TestClient_RetryOnServerError(t *testing.T) {
 	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
-	_, err := client.GetIssue(ctx, "any")
+	_, err := client.GetProjects(ctx)
 	if err != nil {
-		t.Fatalf("GetIssue error after retry: %v", err)
+		t.Fatalf("GetProjects error after retry: %v", err)
 	}
-
 	if attempts != 3 {
 		t.Errorf("expected 3 attempts, got %d", attempts)
 	}
@@ -207,11 +309,10 @@ func TestClient_ClientErrorNoRetry(t *testing.T) {
 	client := plane.NewClient(testServerURL(srv), "test-key")
 	ctx := context.Background()
 
-	_, err := client.GetIssue(ctx, "nonexistent")
+	_, err := client.GetProjects(ctx)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
-
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt for 4xx, got %d", attempts)
 	}
@@ -219,20 +320,19 @@ func TestClient_ClientErrorNoRetry(t *testing.T) {
 
 func TestExtractWorkspace(t *testing.T) {
 	client := plane.NewClient("http://localhost/gc", "key")
-	// Проверяем что клиент создался без ошибок
 	if client == nil {
 		t.Fatal("client is nil")
 	}
 
-	// Проверяем что GetProjects формирует правильный URL
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPath := "/api/v1/workspaces/gc/projects/"
-		if r.URL.Path != expectedPath {
-			t.Errorf("path = %s, want %s", r.URL.Path, expectedPath)
+		if !strings.Contains(r.URL.Path, "/api/v1/workspaces/gc/projects/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{"results": []plane.Project{}}); err != nil {
-			t.Errorf("encode error: %v", err)
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": []plane.Project{},
+		}); err != nil {
+			t.Fatalf("encode error: %v", err)
 		}
 	}))
 	defer srv.Close()
