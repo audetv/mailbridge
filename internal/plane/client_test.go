@@ -242,12 +242,9 @@ func TestClient_AddComment(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		if err := json.NewEncoder(w).Encode(plane.Comment{
-			ID:   "comment-uuid",
-			Body: "<p>Test comment</p>",
-			Actor: &plane.Actor{
-				ID:          "actor-uuid",
-				DisplayName: "Test User",
-			},
+			ID:       "comment-uuid",
+			Body:     "<p>Test comment</p>",
+			ActorRaw: json.RawMessage(`"actor-uuid"`),
 		}); err != nil {
 			t.Fatalf("encode error: %v", err)
 		}
@@ -264,9 +261,10 @@ func TestClient_AddComment(t *testing.T) {
 	if comment.Body != "<p>Test comment</p>" {
 		t.Errorf("Body = %q", comment.Body)
 	}
-	if comment.Actor == nil {
-		t.Error("Actor is nil")
+	if len(comment.ActorRaw) == 0 {
+		t.Error("ActorRaw is empty")
 	}
+	t.Logf("ActorName: %s", comment.ActorName())
 }
 
 func TestClient_RetryOnServerError(t *testing.T) {

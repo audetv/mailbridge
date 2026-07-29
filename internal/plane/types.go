@@ -1,7 +1,10 @@
 // Package plane предоставляет клиент для взаимодействия с Plane REST API.
 package plane
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Project представляет проект в Plane.
 type Project struct {
@@ -46,17 +49,49 @@ type CreateWorkItemRequest struct {
 }
 
 // Comment представляет комментарий к задаче.
+// ActorRaw может быть строкой (UUID пользователя) или объектом Actor.
 type Comment struct {
-	ID         string    `json:"id"`
-	Body       string    `json:"comment_html"`
-	ExternalID string    `json:"external_id"`
-	Actor      *Actor    `json:"actor,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string          `json:"id"`
+	Body       string          `json:"comment_html"`
+	ExternalID string          `json:"external_id"`
+	ActorRaw   json.RawMessage `json:"actor"`
+	CreatedAt  time.Time       `json:"created_at"`
 }
 
+// Actor представляет пользователя, создавшего комментарий.
 type Actor struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+}
+
+// ActorName возвращает имя пользователя из ActorRaw.
+// Если actor — строка, возвращает её. Если объект — DisplayName.
+func (c *Comment) ActorName() string {
+	if len(c.ActorRaw) == 0 {
+		return "Unknown"
+	}
+
+	// Пробуем распарсить как строку
+	var actorID string
+	if err := json.Unmarshal(c.ActorRaw, &actorID); err == nil {
+		return actorID
+	}
+
+	// Пробуем распарсить как объект
+	var actor Actor
+	if err := json.Unmarshal(c.ActorRaw, &actor); err == nil {
+		if actor.DisplayName != "" {
+			return actor.DisplayName
+		}
+		if actor.FirstName != "" {
+			return actor.FirstName + " " + actor.LastName
+		}
+		return actor.ID
+	}
+
+	return "Unknown"
 }
 
 // CreateLabelRequest содержит данные для создания метки.

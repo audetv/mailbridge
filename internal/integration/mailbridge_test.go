@@ -124,7 +124,7 @@ func setupPlaneMock(t *testing.T) (*httptest.Server, *plane.Client) {
 				Body:       req["comment_html"],
 				ExternalID: req["external_id"],
 				CreatedAt:  time.Now(),
-				Actor:      &plane.Actor{ID: "actor-1", DisplayName: "Test User"},
+				ActorRaw:   json.RawMessage(`"actor-1"`),
 			}
 			comments = append(comments, comment)
 
