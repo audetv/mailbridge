@@ -1,565 +1,345 @@
-# Проект: Mailbridge
+# Mailbridge — План разработки v2
 
-**Описание:** Интерактивный почтовый шлюз между email и Plane, с NLP-классификацией, обработкой вложений, двухсторонней синхронизацией и гарантированной доставкой.
+## Статус
+
+**Версия:** v0.18.1
+**Выполненные этапы (v1):** 0–16 (зафиксированы в `PLAN.v1.md`)
+
+### Что работает
+- Приём писем через IMAP
+- Классификация через rules.yml (NLP + стемминг)
+- Создание задач в Plane (work-items, labels)
+- Обработка ответов (добавление комментариев)
+- Webhook'и от Plane
+- Отказоустойчивость (реконнекты, health-проверки, метрики)
+- Конфигурация через YAML
+
+### Проблемы, выявленные в боевой эксплуатации
+1. Plane не позволяет сменить проект задачи — ошибка классификации фатальна
+2. Plane не даёт единого потока для руководителя
+3. Plane free не имеет интеграции с GitHub
+4. Классификация на rules.yml недостаточно точна (~60%)
+
+### Решение
+Отказ от Plane как базы задач. Разработка собственного helpdesk-модуля с веб-интерфейсом на Vue.js 3 и хранением задач в SQLite.
 
 ---
 
-## План разработки (12 этапов)
-
-```
-Этап 0: Инициализация проекта и CI
-Этап 1: Конфигурация и Graceful Shutdown
-Этап 2: Логирование и Health Checks
-Этап 3: Store — интерфейс и SQLite-реализация
-Этап 4: NLP — токенизатор, стеммер, n-граммы
-Этап 5: Classifier — Rule-Based с NLP и urgency booster
-Этап 6: Extractor — MIME-парсинг, очистка тела, вложения
-Этап 7: Field Parser — извлечение ключей из тела
-Этап 8: Plane Client — REST API клиент
-Этап 9: Message Processor — оркестрация обработки письма
-Этап 10: Mail Reader — IMAP-клиент и Inbound Worker
-Этап 11: Email Sender, Outbox, Outbound Worker
-Этап 12: Webhook Handler — приём событий из Plane
-```
-
----
-
-Сейчас создам файл `PLAN.md` с детальным описанием каждого этапа: конкретные файлы, интерфейсы, структуры, тесты, критерии приёмки.
-
-```markdown
-# Mailbridge — План разработки
-
-## Этап 0: Инициализация проекта и CI
+## Этап 17: Таблица задач в БД + REST API
 
 ### Цель
-Создать структуру проекта, модуль, зависимости, базовый CI.
-
-### Действия
-- `go mod init github.com/your-org/mailbridge`
-- Создать структуру директорий
-- Добавить зависимости: spdlog, sqlite3, vmime/go-imap, gomail, snowball
-- Настроить golangci-lint
-- Настроить GitHub Actions: lint, test
-- Создать Makefile: build, test, lint, run
-- Написать тест-заглушку для проверки CI
-
-### Критерии приёмки
-- `make lint` проходит без ошибок
-- `make test` проходит (1 заглушка)
-- CI зелёный в репозитории
-
----
-
-## Этап 1: Конфигурация и Graceful Shutdown
-
-### Цель
-Загрузка конфигурации из .env и аргументов командной строки. Корректное завершение по SIGINT/SIGTERM.
+Спроектировать и реализовать таблицы для хранения задач, комментариев, вложений. Создать REST API для CRUD-операций.
 
 ### Файлы
-- `internal/config/config.go` — структура Config, метод Load()
-- `internal/config/config_test.go` — тесты загрузки
-- `internal/app/app.go` — структура App, методы Run(), Shutdown()
-- `internal/app/signals.go` — обработка сигналов ОС
-- `cmd/mailbridge/main.go` — точка входа
+```
+internal/store/store.go            — новые модели: Task, TaskComment, TaskAttachment
+internal/store/sqlite/sqlite.go    — миграции, CRUD-методы
+internal/store/sqlite/sqlite_test.go
+internal/web/api.go                — REST API handlers
+internal/web/api_test.go
+internal/web/auth.go               — базовая аутентификация (JWT)
+internal/web/auth_test.go
+cmd/mailbridge/main.go             — регистрация API-роутов
+```
 
-### Интерфейсы
-```go
-type Config struct {
-    IMAP     IMAPConfig
-    SMTP     SMTPConfig
-    Plane    PlaneConfig
-    Webhook  WebhookConfig
-    Storage  StorageConfig
-    NLP      NLPConfig
-    Logging  LoggingConfig
-}
+### Модели данных
 
-type App struct {
-    Config    *Config
-    Components []Component  // интерфейс: Start(ctx) error; Stop(ctx) error
-}
+```sql
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    body_html TEXT DEFAULT '',
+    from_email TEXT NOT NULL,
+    from_name TEXT DEFAULT '',
+    project TEXT NOT NULL DEFAULT 'Входящие',
+    type TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'new',
+    assignee TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE task_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    body TEXT NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'in',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE task_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    storage_path TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### API Endpoints
+
+```
+GET    /api/tasks                    — список задач (paginated, filterable)
+GET    /api/tasks/:id                — задача с комментариями и вложениями
+POST   /api/tasks/:id/reply          — ответ клиенту
+PATCH  /api/tasks/:id                — обновить статус/проект/исполнителя/тип/приоритет
+POST   /api/auth/login               — вход (логин/пароль → JWT)
+GET    /api/auth/me                  — текущий пользователь
 ```
 
 ### Критерии приёмки
-- Приложение запускается и ждёт SIGINT
-- При SIGINT вызывает Stop() у всех компонентов
-- Конфигурация валидируется (обязательные поля)
-- Тесты: загрузка из .env, валидация, значения по умолчанию
+- [ ] Таблицы создаются миграцией
+- [ ] API создаёт задачу из письма (процессор адаптирован)
+- [ ] API возвращает список задач с фильтрацией
+- [ ] API позволяет обновить статус/проект/исполнителя
+- [ ] Аутентификация работает (JWT)
+- [ ] `make test` проходит
 
 ---
 
-## Этап 2: Логирование и Health Checks
+## Этап 18: Интеграция процессора с новой БД
 
 ### Цель
-Структурированное логирование с уровнями. HTTP-сервер с /health и /ready.
+Перенаправить создание задач из Plane API в собственную БД. Убрать зависимость от Plane для хранения задач.
 
 ### Файлы
-- `internal/logging/logger.go` — обёртка над slog
-- `internal/logging/logger_test.go`
-- `internal/health/server.go` — HTTP-сервер health check
-- `internal/health/checks.go` — проверки компонентов
-- `internal/health/server_test.go`
-
-### Интерфейсы
-```go
-type HealthChecker interface {
-    Name() string
-    Check(ctx context.Context) error
-}
-
-type HealthServer struct {
-    server   *http.Server
-    checks   []HealthChecker
-}
 ```
-
-### Endpoints
-- `GET /health` — 200 OK всегда (liveness)
-- `GET /ready` — 200 если все Check() прошли (readiness)
-- `GET /metrics` — Prometheus метрики (заглушка)
-
-### Критерии приёмки
-- Логи пишутся в JSON при LOG_FORMAT=json
-- Уровни: debug, info, warn, error
-- /health отвечает 200
-- /ready отвечает 503 если БД недоступна
-- Тесты: проверка форматов, уровней
-
----
-
-## Этап 3: Store — интерфейс и SQLite-реализация
-
-### Цель
-Абстрактный интерфейс хранилища. SQLite-реализация с миграциями. Готовность к Postgres в будущем.
-
-### Файлы
-- `internal/store/store.go` — интерфейс Store
-- `internal/store/models.go` — структуры EmailMapping, ReplyLog, OutboxItem
-- `internal/store/sqlite/sqlite.go` — SQLite-реализация
-- `internal/store/sqlite/migrations.go` — SQL-миграции
-- `internal/store/sqlite/sqlite_test.go` — интеграционные тесты
-
-### Интерфейс
-```go
-type Store interface {
-    Migrate(ctx context.Context) error
-    SaveMapping(ctx context.Context, m *EmailMapping) error
-    GetMappingByMessageID(ctx context.Context, msgID string) (*EmailMapping, error)
-    GetLatestMappingByIssueID(ctx context.Context, issueID string) (*EmailMapping, error)
-    MessageExists(ctx context.Context, msgID string) (bool, error)
-    FindMappingByReferences(ctx context.Context, refs []string) (*EmailMapping, error)
-    SaveReplyLog(ctx context.Context, log *ReplyLog) error
-    ReplyExists(ctx context.Context, msgID string) (bool, error)
-    EnqueueOutbox(ctx context.Context, payload string) error
-    GetPendingOutbox(ctx context.Context, limit int) ([]*OutboxItem, error)
-    MarkOutboxSent(ctx context.Context, id int64) error
-    MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error
-    Close() error
-}
+internal/processor/processor.go     — переписать createNewIssue, addCommentToIssue
+internal/processor/processor_test.go
+cmd/mailbridge/main.go              — убрать инициализацию PlaneClient для процессора
 ```
-
-### Таблицы
-- `email_mapping` — связь Message-ID ↔ Plane Issue ID
-- `reply_log` — история отправленных ответов
-- `outbox` — очередь исходящих писем
-
-### Критерии приёмки
-- Миграции создают таблицы в новой БД
-- SaveMapping + GetMappingByMessageID работают
-- MessageExists возвращает true для сохранённого
-- FindMappingByReferences находит по массиву refs
-- Outbox: Enqueue → GetPending → MarkSent
-- Все методы покрыты тестами с реальной SQLite в памяти
-
----
-
-## Этап 4: NLP — токенизатор, стеммер, n-граммы
-
-### Цель
-Пакет нормализации текста для русского и английского языков.
-
-### Файлы
-- `internal/classifier/nlp/tokenizer.go`
-- `internal/classifier/nlp/stemmer.go`
-- `internal/classifier/nlp/ngram.go`
-- `internal/classifier/nlp/nlp_test.go`
-
-### Интерфейсы
-```go
-type Tokenizer struct {
-    stopWords map[string]bool
-}
-func (t *Tokenizer) Tokenize(text string) []string
-
-type Stemmer interface {
-    Stem(word string) string
-}
-type RussianStemmer struct{}
-type EnglishStemmer struct{}
-
-type NGramGenerator struct{}
-func (g *NGramGenerator) Generate(tokens []string) []string // уни-, би-, триграммы
-```
-
-### Алгоритм стеммера
-- RussianStemmer: отсечение окончаний и суффиксов по правилам
-- EnglishStemmer: обёртка над porterstemmer
-
-### Критерии приёмки
-- Токенизатор удаляет стоп-слова и знаки препинания
-- "не работает сайт" → токены ["работает", "сайт"] (без "не" — оставить значимое)
-- Стеммер: "работает" → "работа", "ошибки" → "ошибк"
-- N-граммы: ["ошибк", "сервер"] → ["ошибк", "сервер", "ошибк_сервер"]
-- Тесты: 15+ кейсов для каждого компонента
-
----
-
-## Этап 5: Classifier — Rule-Based с NLP и Urgency Booster
-
-### Цель
-Классификатор, принимающий текст и возвращающий проект, тип, приоритет с confidence.
-
-### Файлы
-- `internal/classifier/classifier.go` — интерфейс
-- `internal/classifier/rule_based.go` — RuleBasedClassifier
-- `internal/classifier/matcher.go` — Matcher с весами
-- `internal/classifier/urgency.go` — UrgencyBooster
-- `internal/classifier/rules.go` — дефолтные правила
-- `internal/classifier/classifier_test.go`
-
-### Интерфейс
-```go
-type Classifier interface {
-    Classify(ctx context.Context, text string, projects, types []string) (*Classification, error)
-}
-
-type Classification struct {
-    Project     string
-    Type        string
-    Priority    string
-    Confidence  float64
-    NeedsTriage bool
-}
-```
-
-### Urgency Booster
-```go
-type UrgencyBooster struct {
-    patterns []string
-}
-func (b *UrgencyBooster) Boost(text string, currentPriority string) string
-// Если найдены срочные слова → priority = "urgent"
-```
-
-### Логика Matcher
-- Токенизация текста → стемминг → n-граммы
-- Сравнение с нормализованными правилами
-- Подсчёт весов: униграмма=1, биграмма=3, триграмма=5
-- Умножение на вес правила
-- Выбор лучшего совпадения по каждому полю
-
-### Критерии приёмки
-- "Не открывается кабинет арендатора, ошибка 500" → project=ТРК, type=bug, priority=high
-- "Срочно! Сайт отеля упал!" → priority=urgent (booster)
-- "Добавьте баннер на сайт трк" → type=content
-- "Нужен доступ к админке театра" → type=access, project=Театр
-- Пустой текст → NeedsTriage=true
-- Тесты: 20+ классификационных кейсов
-
----
-
-## Этап 6: Extractor — MIME-парсинг, очистка тела, вложения
-
-### Цель
-Извлечение текста, вложений из сырого email. Очистка от истории переписки и подписей.
-
-### Файлы
-- `internal/extractor/extractor.go`
-- `internal/extractor/cleaner.go`
-- `internal/extractor/attachments.go`
-- `internal/extractor/extractor_test.go`
-
-### Интерфейсы
-```go
-type ExtractedEmail struct {
-    MessageID   string
-    From        string
-    To          string
-    Subject     string
-    BodyText    string
-    BodyHTML    string
-    References  []string
-    InReplyTo   string
-    Attachments []Attachment
-    ReceivedAt  time.Time
-}
-
-type Attachment struct {
-    Filename    string
-    ContentType string
-    Size        int64
-    Data        []byte
-    StoragePath string  // путь после сохранения
-}
-
-type AttachmentStore interface {
-    Save(ctx context.Context, attachment *Attachment) error
-    Get(ctx context.Context, path string) (*Attachment, error)
-}
-```
-
-### Компоненты
-- `Extractor.Extract(raw []byte)` → ExtractedEmail
-- `Cleaner.CleanBody(text string)` → очищенный текст
-- `AttachmentStore.Save()` → сохраняет в filesystem/S3/MinIO
-
-### Алгоритм очистки
-1. Удаление цитируемого ответа (маркеры: "-----Original Message-----", "писал(а):")
-2. Удаление подписей (разделитель "-- ")
-3. Удаление пустых строк в конце
-
-### Критерии приёмки
-- Извлекает текст из multipart/alternative
-- Извлекает HTML и конвертирует в текст
-- Вложения сохраняются в указанную директорию
-- Имена файлов санитизируются (удаление спецсимволов)
-- Тест с реальным .eml файлом
-
----
-
-## Этап 7: Field Parser — извлечение ключей из тела
-
-### Цель
-Парсинг тела письма на наличие структурированных полей.
-
-### Файлы
-- `internal/parser/parser.go`
-- `internal/parser/parser_test.go`
-
-### Интерфейс
-```go
-type ParsedFields struct {
-    Project     string
-    Type        string
-    Priority    string
-    Deadline    string
-    Assignee    string
-    Body        string  // текст без полей
-    HasFields   bool
-}
-
-type FieldParser struct{}
-func (p *FieldParser) Parse(body string) *ParsedFields
-```
-
-### Поддерживаемые ключи
-- Проект:, Project:
-- Тип:, Type:
-- Приоритет:, Priority:
-- Дедлайн:, Deadline:
-- Исполнитель:, Assignee:
-
-### Критерии приёмки
-- Парсит "Проект: ТРК" → Project="ТРК"
-- Мультиязычность: "Project: TRK" → Project="TRK"
-- Не ломается на отсутствии полей
-- Body содержит только текст после полей
-- Тесты: 10+ кейсов
-
----
-
-## Этап 8: Plane Client — REST API клиент
-
-### Цель
-Клиент для взаимодействия с Plane API.
-
-### Файлы
-- `internal/plane/client.go`
-- `internal/plane/types.go`
-- `internal/plane/client_test.go`
-
-### Методы
-```go
-type PlaneClient struct {
-    baseURL string
-    apiKey  string
-    http    *http.Client
-}
-
-func (c *PlaneClient) CreateIssue(ctx context.Context, req *CreateIssueRequest) (*Issue, error)
-func (c *PlaneClient) GetIssue(ctx context.Context, id string) (*Issue, error)
-func (c *PlaneClient) AddComment(ctx context.Context, issueID, body string) (*Comment, error)
-func (c *PlaneClient) GetProjects(ctx context.Context) ([]Project, error)
-func (c *PlaneClient) GetLabels(ctx context.Context, projectID string) ([]Label, error)
-```
-
-### Особенности
-- Retry с exponential backoff (3 попытки)
-- Таймаут запроса: 10 секунд
-- Обработка 429 (rate limit)
-
-### Критерии приёмки
-- CreateIssue создаёт задачу в тестовом Plane
-- AddComment добавляет комментарий
-- GetProjects возвращает список проектов
-- Retry работает при ошибках сети
-- Тесты с httptest.NewServer (mock Plane API)
-
----
-
-## Этап 9: Message Processor — оркестрация обработки письма
-
-### Цель
-Центральный оркестратор, определяющий действие для входящего письма.
-
-### Файлы
-- `internal/processor/processor.go`
-- `internal/processor/processor_test.go`
 
 ### Логика
-```go
-type MessageProcessor struct {
-    store      Store
-    classifier Classifier
-    extractor  *Extractor
-    parser     *FieldParser
-    planeClient *PlaneClient
-}
-
-func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*ProcessResult, error)
-```
-
-### Сценарии
-1. **Новое письмо с ID задачи в теме** (`[WEB-123]`) → добавить комментарий
-2. **Новое письмо, References указывают на известную задачу** → добавить комментарий
-3. **Новое письмо, без связи с задачей** → создать задачу
-4. **Дубликат Message-ID** → игнорировать
-
-### ProcessResult
-```go
-type ProcessResult struct {
-    Action        ActionType // CREATE_ISSUE, ADD_COMMENT, IGNORE
-    IssueID       string
-    IssueSequence string
-    Mapping       *EmailMapping
-    Error         error
-}
-```
+- `createNewIssue` — пишет задачу в таблицу `tasks` вместо Plane API
+- `addCommentToIssue` — пишет комментарий в `task_comments` вместо Plane API
+- `resolveProject` — определяет проект (строка-категория) из классификации
+- `resolveLabels` — заменяется на прямое присвоение type/priority
+- Plane API остаётся только для загрузки списка проектов (опционально)
 
 ### Критерии приёмки
-- Все 4 сценария покрыты тестами
-- Создание задачи: вызывается Classifier + PlaneClient.CreateIssue
-- Комментарий: вызывается PlaneClient.AddComment
-- Дубликат: возвращается IGNORE
-- Мок хранилища, классификатора, API
+- [ ] Письмо → задача в таблице tasks
+- [ ] Ответ на письмо → комментарий в task_comments
+- [ ] Вложения сохраняются в task_attachments
+- [ ] `make test` проходит
 
 ---
 
-## Этап 10: Mail Reader — IMAP-клиент и Inbound Worker
+## Этап 19: Веб-интерфейс на Vue.js 3
+
+### Этап 19.1: Инициализация проекта и роутинг
+
+**Цель:** Создать структуру Vue-проекта, настроить Vite, Vue Router, подключить PrimeVue. Базовая страница входа и пустой дашборд с проверкой аутентификации.
+
+**Файлы:**
+- `frontend/package.json`
+- `frontend/vite.config.js`
+- `frontend/index.html`
+- `frontend/src/main.js`
+- `frontend/src/App.vue`
+- `frontend/src/router/index.js`
+- `frontend/src/views/LoginView.vue`
+- `frontend/src/views/DashboardView.vue`
+- `frontend/src/stores/auth.js`
+- `frontend/src/api/client.js`
+
+**Критерии приёмки:**
+- [ ] `npm run dev` запускает dev-сервер
+- [ ] `/login` показывает форму входа
+- [ ] Успешный вход → редирект на `/`
+- [ ] `/` показывает пустой дашборд (заглушку)
+- [ ] Без токена редиректит на `/login`
+- [ ] `npm run build` собирает production-бандл
+
+---
+
+### Этап 19.2: Таблица задач с фильтрами
+
+**Цель:** Компонент таблицы задач с сортировкой, фильтрацией и пагинацией. Данные загружаются из API.
+
+**Файлы:**
+- `frontend/src/components/TaskTable.vue`
+- `frontend/src/components/FilterBar.vue`
+- `frontend/src/components/StatusBadge.vue`
+- `frontend/src/stores/tasks.js`
+- `frontend/src/views/DashboardView.vue` (обновление)
+- `internal/web/api.go` (дополнить эндпоинт `GET /api/tasks` — pagination, filters)
+
+**API:**
+```
+GET /api/tasks?page=1&per_page=50&project=ТРК&status=new&assignee=Иванов&search=баннер
+Response: { tasks: [...], total: 150, page: 1, per_page: 50 }
+```
+
+**Критерии приёмки:**
+- [ ] Таблица отображает список задач
+- [ ] Колонки: ID, Дата, От кого, Тема, Тип, Приоритет, Проект, Статус, Исполнитель
+- [ ] Сортировка по клику на заголовок колонки
+- [ ] Фильтры: проект, статус, исполнитель (выпадающие списки)
+- [ ] Поиск по теме/тексту (поле ввода)
+- [ ] Пагинация (если задач >50)
+- [ ] `make test` проходит
+
+---
+
+### Этап 19.3: Карточка задачи
+
+**Цель:** Модальное окно или страница с деталями задачи: описание, вложения, комментарии, действия.
+
+**Файлы:**
+- `frontend/src/components/TaskCard.vue`
+- `frontend/src/components/CommentList.vue`
+- `frontend/src/views/TaskDetailView.vue`
+- `frontend/src/router/index.js` (обновление — маршрут `/tasks/:id`)
+
+**API:**
+```
+GET /api/tasks/:id
+Response: {
+  task: { id, subject, body_text, body_html, from_email, from_name, project, type,
+          priority, status, assignee, created_at },
+  comments: [{ id, author, body, direction, created_at }],
+  attachments: [{ id, filename, content_type, size, storage_path }]
+}
+```
+
+**Критерии приёмки:**
+- [ ] Клик по задаче в таблице → открывается карточка
+- [ ] Вкладка «Описание»: текст письма, вложения (ссылки)
+- [ ] Вкладка «Комментарии»: список комментариев с автором и датой
+- [ ] Из карточки можно вернуться к таблице
+- [ ] `make test` проходит
+
+---
+
+### Этап 19.4: Действия с задачей
+
+**Цель:** Изменить статус, проект, исполнителя через UI. Ответить клиенту.
+
+**Файлы:**
+- `frontend/src/components/ReplyForm.vue`
+- `frontend/src/components/TaskCard.vue` (обновление — кнопки действий)
+- `frontend/src/stores/tasks.js` (обновление — actions)
+
+**API:**
+```
+PATCH /api/tasks/:id
+Body: { "project": "Отель" }
+ИЛИ: { "status": "in_progress" }
+ИЛИ: { "assignee": "Иванов" }
+Response: { task: {...} }
+
+POST /api/tasks/:id/reply
+Body: { "body": "Текст ответа" }
+Response: { comment: {...} }
+```
+
+**Критерии приёмки:**
+- [ ] Выпадающий список «Проект» — меняет проект задачи
+- [ ] Выпадающий список «Статус» — меняет статус
+- [ ] Выпадающий список «Исполнитель» — назначает исполнителя
+- [ ] Форма ответа: ввод текста → отправка → комментарий появляется в списке
+- [ ] Ответ уходит клиенту на email
+- [ ] Все изменения сохраняются в БД
+- [ ] `make test` проходит
+
+---
+
+### Этап 19.5: Интеграция с Go (embed + production build)
+
+**Цель:** Настроить production-сборку: Vite собирает статику, Go внедряет через `embed` и раздаёт. Один бинарник.
+
+**Файлы:**
+- `cmd/mailbridge/main.go` (обновление — раздача статики)
+- `Makefile` (обновление — сборка фронтенда перед Go)
+- `frontend/vite.config.js` (обновление — production-настройки)
+
+**Критерии приёмки:**
+- [ ] `make build` собирает фронтенд и бекенд
+- [ ] Бинарник запускается и отдаёт SPA на `:8080`
+- [ ] API работает на `/api/`
+- [ ] SPA работает без dev-сервера
+- [ ] `make test` проходит
+
+## Этап 20: ИИ-классификатор (локальный Qwen 14B)
 
 ### Цель
-Подключение к IMAP, сканирование новых писем, передача в Processor.
+Повысить точность классификации до >85% с помощью локальной LLM.
 
-### Файлы
-- `internal/mailbox/reader.go`
-- `internal/mailbox/reader_test.go`
-- `internal/worker/inbound.go`
-
-### Интерфейс
-```go
-type MailReader struct {
-    imapClient *imapclient.Client
-    config     IMAPConfig
-}
-
-func (r *MailReader) Connect(ctx context.Context) error
-func (r *MailReader) FetchUnseen(ctx context.Context) ([]*RawEmail, error)
-func (r *MailReader) MarkProcessed(ctx context.Context, uid uint32) error
-func (r *MailReader) MarkErrored(ctx context.Context, uid uint32) error
+### Архитектура
+```
+Mailbridge → текст письма → HTTP POST → Ollama API (localhost:11434)
+                                              ↓
+                                         Qwen 2.5 14B
+                                              ↓
+                                         JSON: {project, type, priority, confidence}
+                                              ↓
+Mailbridge ← если confidence < 0.7 → fallback на rules.yml
+           ← если Ollama недоступна → fallback на rules.yml
 ```
 
-### Inbound Worker
-```go
-type InboundWorker struct {
-    reader    *MailReader
-    processor *MessageProcessor
-    interval  time.Duration
-}
-// Бесконечный цикл: FetchUnseen → Process → MarkProcessed
+### Файлы
+```
+internal/classifier/ai_based.go     — клиент Ollama API
+internal/classifier/classifier.go   — CompositeClassifier (ИИ → rules → triage)
+internal/config/config.go           — настройки Ollama
+configs/rules.yml                   — флаг ai_enabled
+cmd/mailbridge/main.go              — инициализация
+```
+
+### Промпт
+```
+Ты — классификатор обращений в техподдержку.
+Определи проект, тип и приоритет по тексту обращения.
+
+Проекты: ТРК, Отель, Фитнес-клуб, Театр, Мебельный центр, Складской комплекс,
+         Кафе, Ледовая арена, Корпоративные сайты, Входящие
+Типы: bug, feature, support, access, seo, content
+Приоритеты: urgent, high, medium, low
+
+Ответь ТОЛЬКО валидным JSON без форматирования:
+{"project":"...","type":"...","priority":"...","confidence":0.0-1.0}
+
+Текст обращения: {text}
 ```
 
 ### Критерии приёмки
-- Подключается к тестовому IMAP (можно greenmail/mailhog)
-- Получает непрочитанные письма
-- Помечает прочитанными после обработки
-- Перемещает в Archive при успехе, в Errors при ошибке
-- Inbound Worker работает по тикеру
-- Graceful shutdown: завершает текущую итерацию
+- [ ] Ollama установлена, модель загружена
+- [ ] AI-классификатор возвращает корректный JSON
+- [ ] Fallback на rules.yml при ошибке
+- [ ] Точность >85% на 30 тестовых письмах
+- [ ] Задержка <2 секунд на запрос
 
 ---
 
-## Этап 11: Email Sender, Outbox, Outbound Worker
+## Этап 21: Финальное тестирование и приёмка v1.0.0
 
 ### Цель
-Отправка email-ответов с threading. Гарантированная доставка через outbox.
+Проверить полный цикл работы системы, зафиксировать v1.0.0.
 
-### Файлы
-- `internal/sender/sender.go`
-- `internal/sender/templates.go`
-- `internal/sender/sender_test.go`
-- `internal/worker/outbound.go`
-
-### Интерфейс
-```go
-type EmailSender struct {
-    smtpClient *gomail.Dialer
-    from       string
-}
-
-func (s *EmailSender) SendAcknowledgement(ctx context.Context, data *AcknowledgementData) error
-func (s *EmailSender) SendCommentReply(ctx context.Context, data *CommentReplyData) error
-func (s *EmailSender) SendStatusChange(ctx context.Context, data *StatusChangeData) error
-```
-
-### Outbound Worker
-- Читает outbox из Store каждые 15 секунд
-- Отправляет через EmailSender
-- Retry с задержкой: 1м, 5м, 15м, 1ч
-- После 5 попыток — помечает failed, алерт в лог
-
-### Критерии приёмки
-- Acknowledgement отправляется с корректным In-Reply-To
-- CommentReply сохраняет цепочку (References)
-- Outbox: письмо попадает в очередь → отправляется → помечается sent
-- При ошибке SMTP — retry работает
-- Тесты с mock SMTP
+### Действия
+- [ ] Прогнать 50 реальных писем через полный цикл (email → задача → ответ)
+- [ ] Проверить точность классификации (ИИ + rules)
+- [ ] Проверить веб-интерфейс (дашборд, фильтры, ответы)
+- [ ] Проверить отказоустойчивость (обрыв IMAP, перезапуск)
+- [ ] Нагрузочный тест (100+ писем)
+- [ ] Финальный коммит, тег v1.0.0
+- [ ] README с инструкцией по развёртыванию
 
 ---
 
-## Этап 12: Webhook Handler — приём событий из Plane
+## Оценка трудозатрат
 
-### Цель
-Обработка событий из Plane (новый комментарий, изменение статуса).
-
-### Файлы
-- `internal/webhook/handler.go`
-- `internal/webhook/validator.go`
-- `internal/webhook/handler_test.go`
-
-### Обрабатываемые события
-- `issue.comment.created` — отправить комментарий автору письма
-- `issue.updated` — отправить уведомление о смене статуса
-
-### Защита от петель
-- В начало каждого исходящего комментария добавлять маркер `[MAILBRIDGE-INTERNAL]`
-- При получении webhook'а проверять наличие маркера → игнорировать
-
-### Критерии приёмки
-- Принимает webhook, валидирует подпись
-- Игнорирует события от самого шлюза
-- Находит оригинальное письмо по issue_id
-- Вызывает EmailSender.SendCommentReply
-- Тесты с httptest.Server и моками
-```
-
----
+| Этап | Содержание | Часов |
+|------|-----------|-------|
+| 17 | БД + REST API | 12 |
+| 18 | Интеграция процессора | 6 |
+| 19 | Vue.js интерфейс | 34 |
+| 20 | ИИ-классификатор | 8 |
+| 21 | Тестирование и приёмка | 10 |
+| **Итого** | | **70 часов** |
