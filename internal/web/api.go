@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -11,12 +12,48 @@ import (
 
 // TaskHandler обрабатывает запросы к задачам.
 type TaskHandler struct {
-	store store.Store
+	store  store.Store
+	broker *EventBroker
 }
 
 // NewTaskHandler создаёт новый TaskHandler.
-func NewTaskHandler(st store.Store) *TaskHandler {
-	return &TaskHandler{store: st}
+func NewTaskHandler(st store.Store, broker *EventBroker) *TaskHandler {
+	return &TaskHandler{store: st, broker: broker}
+}
+
+// Broker возвращает EventBroker для внешнего использования.
+func (h *TaskHandler) Broker() *EventBroker {
+	return h.broker
+}
+
+// TaskEvents обрабатывает GET /api/tasks/events (SSE)
+func (h *TaskHandler) TaskEvents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ch := h.broker.Subscribe()
+	defer h.broker.Unsubscribe(ch)
+
+	fmt.Fprintf(w, "data: {\"type\":\"connected\"}\n\n")
+	flusher.Flush()
+
+	for {
+		select {
+		case event := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", event)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // ListTasks обрабатывает GET /api/tasks
@@ -125,7 +162,6 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Разрешённые поля для обновления
 	allowedFields := map[string]bool{
 		"project": true, "status": true, "assignee": true,
 		"type": true, "priority": true,
@@ -146,6 +182,8 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	h.broker.Publish(TaskEvent{Type: "task_updated", TaskID: id})
 
 	task, _ := h.store.GetTask(r.Context(), id)
 	w.Header().Set("Content-Type", "application/json")
@@ -196,6 +234,8 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	h.broker.Publish(TaskEvent{Type: "task_comment", TaskID: id})
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"comment": comment}); err != nil {

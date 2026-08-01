@@ -15,14 +15,23 @@ export const useTasksStore = defineStore('tasks', () => {
         perPage: 50
     })
 
-    async function fetchTasks() {
-        loading.value = true
+    let eventSource = null
+    let reconnectTimer = null
+
+    const RECONNECT_DELAY = 3000
+    const MAX_RECONNECT_DELAY = 30000
+    let currentDelay = RECONNECT_DELAY
+
+    // ── Данные ───────────────────────────────────────────────────
+
+    async function fetchTasks({ silent = false } = {}) {
+        if (!silent) loading.value = true
         try {
             const { data } = await apiClient.get('/tasks', { params: filters.value })
             tasks.value = data.tasks
             total.value = data.total
         } finally {
-            loading.value = false
+            if (!silent) loading.value = false
         }
     }
 
@@ -32,5 +41,79 @@ export const useTasksStore = defineStore('tasks', () => {
         fetchTasks()
     }
 
-    return { tasks, total, loading, filters, fetchTasks, setFilter }
+    // ── SSE ──────────────────────────────────────────────────────
+
+    function connectEvents() {
+        cleanup()
+
+        eventSource = new EventSource('/api/tasks/events')
+
+        eventSource.onmessage = (e) => {
+            try {
+                const event = JSON.parse(e.data)
+                if (['task_created', 'task_updated', 'task_comment'].includes(event.type)) {
+                    fetchTasks({ silent: true })
+                }
+            } catch {
+                // игнорируем ошибки парсинга
+            }
+        }
+
+        eventSource.onopen = () => {
+            console.log('SSE connected')
+            currentDelay = RECONNECT_DELAY
+        }
+
+        eventSource.onerror = () => {
+            console.warn('SSE error, readyState:', eventSource?.readyState)
+
+            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                scheduleReconnect()
+            }
+        }
+    }
+
+    function scheduleReconnect() {
+        cleanup()
+        if (reconnectTimer) return
+
+        console.log(`SSE reconnect in ${currentDelay / 1000}s`)
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null
+            connectEvents()
+        }, currentDelay)
+
+        currentDelay = Math.min(currentDelay * 2, MAX_RECONNECT_DELAY)
+    }
+
+    function cleanup() {
+        if (eventSource) {
+            eventSource.onmessage = null
+            eventSource.onopen = null
+            eventSource.onerror = null
+            eventSource.close()
+            eventSource = null
+        }
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = null
+        }
+    }
+
+    function disconnectEvents() {
+        cleanup()
+    }
+
+    // ── Экспорт ──────────────────────────────────────────────────
+
+    return {
+        tasks,
+        total,
+        loading,
+        filters,
+        fetchTasks,
+        setFilter,
+        connectEvents,
+        disconnectEvents
+    }
 })

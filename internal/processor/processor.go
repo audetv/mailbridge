@@ -46,7 +46,8 @@ type MessageProcessor struct {
 	config     *config.Config
 	logger     *slog.Logger
 	// projectMap: имя проекта → проект (для маппинга имени на UUID, опционально)
-	projectMap map[string]string
+	projectMap  map[string]string
+	onTaskEvent func(eventType string, taskID int64)
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -58,15 +59,17 @@ func NewMessageProcessor(
 	cfg *config.Config,
 	logger *slog.Logger,
 	projectMap map[string]string,
+	onTaskEvent func(eventType string, taskID int64),
 ) *MessageProcessor {
 	return &MessageProcessor{
-		store:      st,
-		classifier: cl,
-		extractor:  ext,
-		parser:     par,
-		config:     cfg,
-		logger:     logger,
-		projectMap: projectMap,
+		store:       st,
+		classifier:  cl,
+		extractor:   ext,
+		parser:      par,
+		config:      cfg,
+		logger:      logger,
+		projectMap:  projectMap,
+		onTaskEvent: onTaskEvent,
 	}
 }
 
@@ -193,6 +196,10 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
+	if p.onTaskEvent != nil {
+		p.onTaskEvent("task_created", task.ID)
+	}
+
 	p.logger.Info("task created",
 		"task_id", task.ID,
 		"project", task.Project,
@@ -251,6 +258,10 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 
 	if err := p.store.AddTaskComment(ctx, comment); err != nil {
 		return nil, fmt.Errorf("failed to add comment: %w", err)
+	}
+
+	if p.onTaskEvent != nil {
+		p.onTaskEvent("task_comment", taskID)
 	}
 
 	p.logger.Info("comment added to task",

@@ -15,6 +15,7 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
@@ -27,6 +28,7 @@ const authStore = useAuthStore()
 const store = useTasksStore()
 
 function handleLogout() {
+  store.disconnectEvents()
   authStore.logout()
   router.push('/login')
 }
@@ -34,6 +36,24 @@ function handleLogout() {
 function openTask(task) {
   // Будет реализовано в этапе 19.3
 }
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    store.fetchTasks({ silent: true })
+    store.connectEvents()
+  }
+}
+
+onMounted(() => {
+  store.fetchTasks()
+  store.connectEvents()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  store.disconnectEvents()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
 </script>
 
 <style scoped>

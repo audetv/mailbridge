@@ -110,6 +110,11 @@ func main() {
 	)
 
 	// ---------------------------------------------------------------------------
+	// Event Broker (SSE)
+	// ---------------------------------------------------------------------------
+	broker := web.NewEventBroker()
+
+	// ---------------------------------------------------------------------------
 	// Extractor и Processor
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
@@ -125,6 +130,9 @@ func main() {
 
 	proc := processor.NewMessageProcessor(
 		st, cl, ext, par, cfg, logger, projectNameMap,
+		func(eventType string, taskID int64) {
+			broker.Publish(web.TaskEvent{Type: eventType, TaskID: taskID})
+		},
 	)
 
 	// ---------------------------------------------------------------------------
@@ -211,7 +219,10 @@ func main() {
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
-	taskHandler := web.NewTaskHandler(st)
+	taskHandler := web.NewTaskHandler(st, broker)
+
+	mux.HandleFunc("/api/tasks/events", taskHandler.TaskEvents)
+
 	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

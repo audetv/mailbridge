@@ -26,7 +26,8 @@ func setupAPI(t *testing.T) (*web.TaskHandler, *sqlite.Store, func()) {
 		t.Fatalf("Migrate error: %v", err)
 	}
 
-	handler := web.NewTaskHandler(st)
+	broker := web.NewEventBroker()
+	handler := web.NewTaskHandler(st, broker)
 
 	cleanup := func() {
 		st.Close()
