@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // драйвер SQLite
@@ -25,16 +26,16 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open sqlite: %w", err)
 	}
 
-	// Настройка для конкурентного доступа
+	// Пытаемся включить ICU для корректной работы LOWER() с кириллицей
+	// Если ICU недоступен — продолжаем без него, поиск по кириллице будет чувствителен к регистру
+	_, _ = db.Exec("SELECT icu_load_collation('ru_RU', 'ru')")
+
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	// Включаем WAL-режим
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
 	}
-
-	// Включаем поддержку внешних ключей
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
@@ -43,9 +44,54 @@ func NewStore(dsn string) (*Store, error) {
 }
 
 // Migrate выполняет миграции схемы.
-// Migrate выполняет миграции схемы.
 func (s *Store) Migrate(ctx context.Context) error {
 	migrations := []string{
+		// Таблица задач
+		`CREATE TABLE IF NOT EXISTS tasks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id TEXT NOT NULL UNIQUE,
+			subject TEXT NOT NULL,
+			body_text TEXT NOT NULL DEFAULT '',
+			body_html TEXT NOT NULL DEFAULT '',
+			from_email TEXT NOT NULL,
+			from_name TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT 'Входящие',
+			type TEXT NOT NULL DEFAULT '',
+			priority TEXT NOT NULL DEFAULT 'medium',
+			status TEXT NOT NULL DEFAULT 'new',
+			assignee TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_message_id ON tasks(message_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee)`,
+
+		// Таблица комментариев
+		`CREATE TABLE IF NOT EXISTS task_comments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			author TEXT NOT NULL,
+			body TEXT NOT NULL,
+			direction TEXT NOT NULL DEFAULT 'in',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
+
+		// Таблица вложений
+		`CREATE TABLE IF NOT EXISTS task_attachments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			filename TEXT NOT NULL,
+			content_type TEXT NOT NULL,
+			size INTEGER NOT NULL DEFAULT 0,
+			storage_path TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id)`,
+
+		// Email mapping (совместимость)
 		`CREATE TABLE IF NOT EXISTS email_mapping (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			message_id TEXT NOT NULL UNIQUE,
@@ -87,7 +133,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 
-	// Миграции для обновления схемы существующих БД
 	if err := s.migrateSchema(ctx); err != nil {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
@@ -97,7 +142,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 // migrateSchema выполняет миграции для обновления существующих таблиц.
 func (s *Store) migrateSchema(ctx context.Context) error {
-	// Проверяем наличие колонки plane_project_id в email_mapping
 	hasColumn, err := s.columnExists(ctx, "email_mapping", "plane_project_id")
 	if err != nil {
 		return fmt.Errorf("failed to check column plane_project_id: %w", err)
@@ -107,7 +151,6 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 			return fmt.Errorf("failed to add column plane_project_id: %w", err)
 		}
 	}
-
 	return nil
 }
 
@@ -131,8 +174,228 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 			return true, nil
 		}
 	}
-
 	return false, rows.Err()
+}
+
+// CreateTask создаёт новую задачу.
+func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
+	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	result, err := s.db.ExecContext(ctx, query,
+		task.MessageID, task.Subject, task.BodyText, task.BodyHTML,
+		task.FromEmail, task.FromName, task.Project, task.Type,
+		task.Priority, task.Status, task.Assignee)
+	if err != nil {
+		return fmt.Errorf("failed to create task: %w", err)
+	}
+
+	id, _ := result.LastInsertId()
+	task.ID = id
+	task.CreatedAt = time.Now()
+	task.UpdatedAt = time.Now()
+	return nil
+}
+
+// GetTask возвращает задачу по ID.
+func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
+	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, created_at, updated_at
+		FROM tasks WHERE id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, id)
+	return scanTask(row)
+}
+
+// GetTaskByMessageID возвращает задачу по Message-ID.
+func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
+	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, created_at, updated_at
+		FROM tasks WHERE message_id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, messageID)
+	return scanTask(row)
+}
+
+// ListTasks возвращает список задач с фильтрацией и пагинацией.
+func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store.TaskListResult, error) {
+	if filter == nil {
+		filter = &store.TaskFilter{Page: 1, PerPage: 50}
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PerPage < 1 || filter.PerPage > 200 {
+		filter.PerPage = 50
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	if filter.Project != "" {
+		conditions = append(conditions, "project = ?")
+		args = append(args, filter.Project)
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.Assignee != "" {
+		conditions = append(conditions, "assignee = ?")
+		args = append(args, filter.Assignee)
+	}
+	if filter.Type != "" {
+		conditions = append(conditions, "type = ?")
+		args = append(args, filter.Type)
+	}
+	if filter.Priority != "" {
+		conditions = append(conditions, "priority = ?")
+		args = append(args, filter.Priority)
+	}
+	if filter.Search != "" {
+		conditions = append(conditions, "(LOWER(subject) LIKE LOWER(?) OR LOWER(body_text) LIKE LOWER(?) OR LOWER(from_email) LIKE LOWER(?))")
+		search := "%" + filter.Search + "%"
+		args = append(args, search, search, search)
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Подсчёт общего количества
+	var total int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM tasks %s", where)
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count tasks: %w", err)
+	}
+
+	// Запрос с пагинацией
+	offset := (filter.Page - 1) * filter.PerPage
+	dataQuery := fmt.Sprintf(`SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, created_at, updated_at
+		FROM tasks %s ORDER BY created_at DESC LIMIT ? OFFSET ?`, where)
+
+	dataArgs := append(args, filter.PerPage, offset)
+	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*store.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	return &store.TaskListResult{
+		Tasks:   tasks,
+		Total:   total,
+		Page:    filter.Page,
+		PerPage: filter.PerPage,
+	}, rows.Err()
+}
+
+// UpdateTask обновляет поля задачи.
+func (s *Store) UpdateTask(ctx context.Context, id int64, updates map[string]interface{}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	var setClauses []string
+	var args []interface{}
+
+	for field, value := range updates {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", field))
+		args = append(args, value)
+	}
+
+	setClauses = append(setClauses, "updated_at = ?")
+	args = append(args, time.Now())
+	args = append(args, id)
+
+	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ?", strings.Join(setClauses, ", "))
+	_, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+	return nil
+}
+
+// AddTaskComment добавляет комментарий к задаче.
+func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) error {
+	query := `INSERT INTO task_comments (task_id, author, body, direction) VALUES (?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query, comment.TaskID, comment.Author, comment.Body, comment.Direction)
+	if err != nil {
+		return fmt.Errorf("failed to add comment: %w", err)
+	}
+
+	id, _ := result.LastInsertId()
+	comment.ID = id
+	comment.CreatedAt = time.Now()
+	return nil
+}
+
+// GetTaskComments возвращает комментарии к задаче.
+func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
+	query := `SELECT id, task_id, author, body, direction, created_at
+		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get comments: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []*store.TaskComment
+	for rows.Next() {
+		c := &store.TaskComment{}
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+	return comments, rows.Err()
+}
+
+// AddTaskAttachment добавляет вложение к задаче.
+func (s *Store) AddTaskAttachment(ctx context.Context, att *store.TaskAttachment) error {
+	query := `INSERT INTO task_attachments (task_id, filename, content_type, size, storage_path) VALUES (?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query, att.TaskID, att.Filename, att.ContentType, att.Size, att.StoragePath)
+	if err != nil {
+		return fmt.Errorf("failed to add attachment: %w", err)
+	}
+
+	id, _ := result.LastInsertId()
+	att.ID = id
+	att.CreatedAt = time.Now()
+	return nil
+}
+
+// GetTaskAttachments возвращает вложения задачи.
+func (s *Store) GetTaskAttachments(ctx context.Context, taskID int64) ([]*store.TaskAttachment, error) {
+	query := `SELECT id, task_id, filename, content_type, size, storage_path, created_at
+		FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get attachments: %w", err)
+	}
+	defer rows.Close()
+
+	var attachments []*store.TaskAttachment
+	for rows.Next() {
+		a := &store.TaskAttachment{}
+		if err := rows.Scan(&a.ID, &a.TaskID, &a.Filename, &a.ContentType, &a.Size, &a.StoragePath, &a.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan attachment: %w", err)
+		}
+		attachments = append(attachments, a)
+	}
+	return attachments, rows.Err()
 }
 
 // SaveMapping сохраняет маппинг email-сообщения.
@@ -152,7 +415,6 @@ func (s *Store) SaveMapping(ctx context.Context, m *store.EmailMapping) error {
 	if err != nil {
 		return fmt.Errorf("failed to save mapping: %w", err)
 	}
-
 	return nil
 }
 
@@ -161,17 +423,15 @@ func (s *Store) GetMappingByMessageID(ctx context.Context, msgID string) (*store
 	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 		original_from, original_subject, thread_references, action_type, created_at
 		FROM email_mapping WHERE message_id = ?`
-
 	row := s.db.QueryRowContext(ctx, query, msgID)
 	return scanMapping(row)
 }
 
-// GetLatestMappingByIssueID возвращает последний маппинг по ID задачи в Plane.
+// GetLatestMappingByIssueID возвращает последний маппинг по ID задачи.
 func (s *Store) GetLatestMappingByIssueID(ctx context.Context, issueID string) (*store.EmailMapping, error) {
 	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 		original_from, original_subject, thread_references, action_type, created_at
 		FROM email_mapping WHERE plane_issue_id = ? ORDER BY id DESC LIMIT 1`
-
 	row := s.db.QueryRowContext(ctx, query, issueID)
 	return scanMapping(row)
 }
@@ -180,14 +440,13 @@ func (s *Store) GetLatestMappingByIssueID(ctx context.Context, issueID string) (
 func (s *Store) MessageExists(ctx context.Context, msgID string) (bool, error) {
 	query := `SELECT COUNT(*) FROM email_mapping WHERE message_id = ?`
 	var count int
-	err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count)
-	if err != nil {
+	if err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count); err != nil {
 		return false, fmt.Errorf("failed to check message existence: %w", err)
 	}
 	return count > 0, nil
 }
 
-// FindMappingByReferences ищет маппинг по ссылкам (References/In-Reply-To).
+// FindMappingByReferences ищет маппинг по ссылкам.
 func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*store.EmailMapping, error) {
 	for _, ref := range refs {
 		m, err := s.GetMappingByMessageID(ctx, ref)
@@ -195,7 +454,6 @@ func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*st
 			return m, nil
 		}
 	}
-
 	for _, ref := range refs {
 		query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
 			original_from, original_subject, thread_references, action_type, created_at
@@ -206,7 +464,6 @@ func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*st
 			return m, nil
 		}
 	}
-
 	return nil, fmt.Errorf("mapping not found by references")
 }
 
@@ -214,41 +471,31 @@ func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*st
 func (s *Store) SaveReplyLog(ctx context.Context, log *store.ReplyLog) error {
 	query := `INSERT INTO reply_log (message_id, in_reply_to, plane_issue_id) VALUES (?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, query, log.MessageID, log.InReplyTo, log.PlaneIssueID)
-	if err != nil {
-		return fmt.Errorf("failed to save reply log: %w", err)
-	}
-	return nil
+	return err
 }
 
-// ReplyExists проверяет, был ли уже отправлен ответ с данным Message-ID.
+// ReplyExists проверяет существование ответа.
 func (s *Store) ReplyExists(ctx context.Context, msgID string) (bool, error) {
 	query := `SELECT COUNT(*) FROM reply_log WHERE message_id = ?`
 	var count int
 	err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("failed to check reply existence: %w", err)
-	}
-	return count > 0, nil
+	return count > 0, err
 }
 
-// EnqueueOutbox добавляет письмо в очередь отправки.
+// EnqueueOutbox добавляет письмо в очередь.
 func (s *Store) EnqueueOutbox(ctx context.Context, payload string) error {
 	query := `INSERT INTO outbox (payload) VALUES (?)`
 	_, err := s.db.ExecContext(ctx, query, payload)
-	if err != nil {
-		return fmt.Errorf("failed to enqueue outbox: %w", err)
-	}
-	return nil
+	return err
 }
 
-// GetPendingOutbox возвращает элементы очереди со статусом "pending".
+// GetPendingOutbox возвращает pending-элементы очереди.
 func (s *Store) GetPendingOutbox(ctx context.Context, limit int) ([]*store.OutboxItem, error) {
 	query := `SELECT id, payload, status, attempts, last_attempt_at, created_at
 		FROM outbox WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`
-
 	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pending outbox: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -256,40 +503,30 @@ func (s *Store) GetPendingOutbox(ctx context.Context, limit int) ([]*store.Outbo
 	for rows.Next() {
 		item := &store.OutboxItem{}
 		var lastAttempt sql.NullTime
-		err := rows.Scan(&item.ID, &item.Payload, &item.Status, &item.Attempts, &lastAttempt, &item.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan outbox item: %w", err)
+		if err := rows.Scan(&item.ID, &item.Payload, &item.Status, &item.Attempts, &lastAttempt, &item.CreatedAt); err != nil {
+			return nil, err
 		}
 		if lastAttempt.Valid {
 			item.LastAttempt = &lastAttempt.Time
 		}
 		items = append(items, item)
 	}
-
 	return items, rows.Err()
 }
 
 // MarkOutboxSent помечает элемент очереди как отправленный.
 func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
-	query := `UPDATE outbox SET status = 'sent', last_attempt_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, time.Now(), id)
-	if err != nil {
-		return fmt.Errorf("failed to mark outbox sent: %w", err)
-	}
-	return nil
+	_, err := s.db.ExecContext(ctx, "UPDATE outbox SET status = 'sent', last_attempt_at = ? WHERE id = ?", time.Now(), id)
+	return err
 }
 
 // MarkOutboxFailed помечает элемент очереди как ошибочный.
 func (s *Store) MarkOutboxFailed(ctx context.Context, id int64, _ string) error {
-	query := `UPDATE outbox SET status = 'failed', attempts = attempts + 1, last_attempt_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, time.Now(), id)
-	if err != nil {
-		return fmt.Errorf("failed to mark outbox failed: %w", err)
-	}
-	return nil
+	_, err := s.db.ExecContext(ctx, "UPDATE outbox SET status = 'failed', attempts = attempts + 1, last_attempt_at = ? WHERE id = ?", time.Now(), id)
+	return err
 }
 
-// Ping проверяет соединение с базой данных.
+// Ping проверяет соединение с БД.
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
@@ -297,6 +534,21 @@ func (s *Store) Ping(ctx context.Context) error {
 // Close закрывает соединение с БД.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// scanTask сканирует строку в Task.
+func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) {
+	t := &store.Task{}
+	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
+		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
+		&t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan task: %w", err)
+	}
+	return t, nil
 }
 
 // scanMapping сканирует строку в EmailMapping.
@@ -319,7 +571,6 @@ func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMappi
 			m.ThreadReferences = []string{}
 		}
 	}
-
 	m.CreatedAt = createdAt
 	return m, nil
 }
