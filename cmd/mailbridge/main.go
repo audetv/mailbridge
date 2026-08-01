@@ -211,6 +211,20 @@ func main() {
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
+	taskHandler := web.NewTaskHandler(st)
+	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
+	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			taskHandler.GetTask(w, r)
+		case http.MethodPatch:
+			taskHandler.UpdateTask(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+
 	// Webhook
 	whHandler := webhook.NewHandler(st, cfg.Webhook.Secret, logger)
 	mux.Handle("/webhook", whHandler)
