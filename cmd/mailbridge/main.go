@@ -24,6 +24,7 @@ import (
 	"github.com/audetv/mailbridge/internal/sender"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 	"github.com/audetv/mailbridge/internal/version"
+	"github.com/audetv/mailbridge/internal/web"
 	"github.com/audetv/mailbridge/internal/webhook"
 	"github.com/audetv/mailbridge/internal/worker"
 )
@@ -204,6 +205,11 @@ func main() {
 		m.SetIMAPConnected(imapOk && mailReader.IsConnected())
 		_, _ = w.Write([]byte(m.PrometheusFormat()))
 	})
+
+	// Auth API
+	authHandler := web.NewAuthHandler()
+	mux.HandleFunc("/api/auth/login", authHandler.Login)
+	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
 	// Webhook
 	whHandler := webhook.NewHandler(st, cfg.Webhook.Secret, logger)
