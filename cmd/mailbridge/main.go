@@ -113,8 +113,17 @@ func main() {
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
 
+	// Преобразуем projectMap в map[string]string (имя → идентификатор)
+	projectNameMap := make(map[string]string, len(projectMap))
+	for name, proj := range projectMap {
+		projectNameMap[name] = proj.Identifier
+	}
+	if len(projectNameMap) == 0 {
+		projectNameMap["Входящие"] = "INBOX"
+	}
+
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, planeClient, cfg, logger, projectMap,
+		st, cl, ext, par, cfg, logger, projectNameMap,
 	)
 
 	// ---------------------------------------------------------------------------

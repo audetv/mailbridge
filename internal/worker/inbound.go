@@ -104,12 +104,12 @@ func (w *InboundWorker) processUnseenMessages(ctx context.Context) {
 		case processor.ActionCreateIssue:
 			w.logger.Info("issue created from email",
 				"uid", raw.UID,
-				"issue", result.IssueSequence,
+				"task_id", result.TaskID,
 			)
 		case processor.ActionAddComment:
 			w.logger.Info("comment added from email",
 				"uid", raw.UID,
-				"issue", result.IssueSequence,
+				"task_id", result.TaskID,
 			)
 		case processor.ActionIgnore:
 			w.logger.Info("email ignored",
