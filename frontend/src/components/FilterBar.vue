@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -38,6 +38,13 @@ const statusOptions = [
     { label: 'Решена', value: 'resolved' },
     { label: 'Закрыта', value: 'closed' }
 ]
+
+onMounted(() => {
+    // Восстанавливаем фильтры из store при возврате со страницы задачи
+    search.value = store.filters.search || ''
+    project.value = store.filters.project || null
+    status.value = store.filters.status || null
+})
 
 let searchTimeout
 function onSearch() {

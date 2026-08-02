@@ -215,8 +215,23 @@ function escapeHtml(text) {
 }
 
 .task-body {
-    white-space: pre-wrap;
     line-height: 1.5;
+    max-height: 500px;
+    overflow-y: auto;
+    padding: 0.5rem;
+    border: 1px solid var(--p-surface-200);
+    border-radius: 0.5rem;
+    background: var(--p-surface-0);
+}
+
+.task-body :deep(p) {
+    margin: 0 0 0.5rem 0;
+}
+
+.task-body :deep(br) {
+    display: block;
+    content: "";
+    margin-top: 0.25rem;
 }
 
 .attachments {

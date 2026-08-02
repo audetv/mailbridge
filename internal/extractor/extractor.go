@@ -58,7 +58,7 @@ func (e *Extractor) Extract(raw []byte) (*ExtractedEmail, error) {
 
 	// Текст письма
 	bodyText := e.cleaner.CleanBody(env.Text)
-	bodyHTML := env.HTML
+	bodyHTML := e.cleaner.SanitizeHTML(env.HTML)
 
 	// Вложения
 	var attachments []Attachment

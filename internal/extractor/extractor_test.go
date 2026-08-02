@@ -261,3 +261,46 @@ Content-Type: text/plain
 		t.Errorf("InReplyTo = %q", result.InReplyTo)
 	}
 }
+
+func TestCleaner_SanitizeHTML(t *testing.T) {
+	c := extractor.NewCleaner()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty paragraphs",
+			input: `<p>&nbsp;</p><p>  </p><p>Текст</p>`,
+			want:  `<p>Текст</p>`,
+		},
+		{
+			name:  "multiple br",
+			input: `Текст<br><br><br><br>конец`,
+			want:  `Текст<br><br>конец`,
+		},
+		{
+			name:  "empty divs",
+			input: `<div></div><div>Содержимое</div><div> </div>`,
+			want:  `<div>Содержимое</div>`,
+		},
+		{
+			name:  "cid images removed",
+			input: `<p>Текст</p><img src="cid:ii_123">`,
+			want:  `<p>Текст</p><!-- embedded image removed -->`,
+		},
+		{
+			name:  "clean text passes through",
+			input: "Простой текст без HTML",
+			want:  "Простой текст без HTML",
+		},
+	}
+
+	for _, tt := range tests {
+		got := c.SanitizeHTML(tt.input)
+		if got != tt.want {
+			t.Errorf("%s: SanitizeHTML = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
