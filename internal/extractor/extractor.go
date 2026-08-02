@@ -52,13 +52,11 @@ func (e *Extractor) Extract(raw []byte) (*ExtractedEmail, error) {
 	cc := cleanHeader(env.GetHeader("Cc"))
 	subject := decodeHeader(env.GetHeader("Subject"))
 
-	// Извлекаем References и In-Reply-To
 	refs := parseReferences(env.GetHeader("References"))
 	inReplyTo := cleanHeader(env.GetHeader("In-Reply-To"))
 
-	// Текст письма
 	bodyText := e.cleaner.CleanBody(env.Text)
-	bodyHTML := e.cleaner.SanitizeHTML(env.HTML)
+	bodyHTML := env.HTML
 
 	// Вложения
 	var attachments []Attachment
@@ -70,17 +68,15 @@ func (e *Extractor) Extract(raw []byte) (*ExtractedEmail, error) {
 			Size:        int64(len(att.Content)),
 		}
 
-		// Сохраняем вложение
 		storagePath, err := e.store.Save(&a)
 		if err != nil {
-			// Логируем ошибку, но не прерываем обработку
 			storagePath = fmt.Sprintf("error: %v", err)
 		}
 		a.StoragePath = storagePath
 		attachments = append(attachments, a)
 	}
 
-	// Извлекаем вложения из встроенных изображений (inline)
+	// Inline-изображения: сохраняем и заменяем cid: ссылки в HTML
 	for _, att := range env.Inlines {
 		a := Attachment{
 			Filename:    att.FileName,
@@ -95,7 +91,17 @@ func (e *Extractor) Extract(raw []byte) (*ExtractedEmail, error) {
 		}
 		a.StoragePath = storagePath
 		attachments = append(attachments, a)
+
+		// Заменяем cid: ссылки в HTML на URL сохранённого файла
+		if att.ContentID != "" && bodyHTML != "" {
+			cid := "cid:" + att.ContentID
+			fileURL := "/api/attachments/" + storagePath
+			bodyHTML = strings.ReplaceAll(bodyHTML, cid, fileURL)
+		}
 	}
+
+	// Санитайзим HTML после замены cid
+	bodyHTML = e.cleaner.SanitizeHTML(bodyHTML)
 
 	return &ExtractedEmail{
 		MessageID:   msgID,
@@ -119,12 +125,11 @@ func cleanHeader(header string) string {
 	if err != nil {
 		decoded = header
 	}
-	// Убираем угловые скобки у Message-ID и References
 	decoded = strings.Trim(decoded, "<> ")
 	return strings.TrimSpace(decoded)
 }
 
-// decodeHeader декодирует MIME-заголовок, убирая кодировку.
+// decodeHeader декодирует MIME-заголовок.
 func decodeHeader(header string) string {
 	dec := mime.WordDecoder{}
 	decoded, err := dec.DecodeHeader(header)

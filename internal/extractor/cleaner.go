@@ -125,9 +125,5 @@ func (c *Cleaner) SanitizeHTML(html string) string {
 	// Удаляем множественные пустые строки
 	html = regexp.MustCompile(`\n{3,}`).ReplaceAllString(html, "\n\n")
 
-	// Удаляем cid: ссылки (битые встроенные изображения)
-	cidImg := regexp.MustCompile(`(?i)<img[^>]*src="cid:[^"]*"[^>]*>`)
-	html = cidImg.ReplaceAllString(html, "<!-- embedded image removed -->")
-
 	return strings.TrimSpace(html)
 }
