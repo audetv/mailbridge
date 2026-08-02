@@ -32,6 +32,8 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(q.Get("page"))
 	perPage, _ := strconv.Atoi(q.Get("per_page"))
 
+	username := extractUserFromToken(r)
+
 	filter := &store.TaskFilter{
 		Project:  q.Get("project"),
 		Status:   q.Get("status"),
@@ -41,6 +43,7 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		Search:   q.Get("search"),
 		Page:     page,
 		PerPage:  perPage,
+		Username: username,
 	}
 
 	result, err := h.store.ListTasks(r.Context(), filter)
@@ -54,7 +57,7 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.Tasks == nil {
-		result.Tasks = []*store.Task{}
+		result.Tasks = []*store.TaskWithUnread{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -223,4 +226,39 @@ func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, fullPath)
+}
+
+// MarkRead обрабатывает POST /api/tasks/{id}/mark-read
+func (h *TaskHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	username := extractUserFromToken(r)
+	if username == "" {
+		username = "anonymous"
+	}
+
+	if err := h.store.MarkTaskRead(r.Context(), id, username); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
 }

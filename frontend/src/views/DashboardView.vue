@@ -56,7 +56,7 @@ watch(() => wsStore.events.length, () => {
       break
     case 'task_updated':
       store.fetchTasks()
-      toast.add({ severity: 'success', summary: latest.message, life: 3000 })
+      toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
       break
     case 'connected':
       toast.add({ severity: 'success', summary: latest.message, life: 2000 })

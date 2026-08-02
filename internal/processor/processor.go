@@ -272,11 +272,19 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 		"message_id", email.MessageID,
 	)
 
+	// Если это входящий комментарий — сбрасываем статус прочтения для всех
+	if err := p.store.ResetTaskReads(ctx, taskID); err != nil {
+		p.logger.Error("failed to reset task reads", "error", err)
+	}
+
+	// Уведомляем через WebSocket
 	if p.broker != nil {
 		p.broker.Publish(web.WSEvent{
-			Type:    "task_updated",
-			TaskID:  taskID,
-			Message: fmt.Sprintf("Новый комментарий в задаче #%d", taskID),
+			Type:     "task_updated",
+			TaskID:   taskID,
+			Username: task.Assignee,
+			Message:  fmt.Sprintf("Новый комментарий в задаче #%d от %s", taskID, email.From),
+			Data:     map[string]interface{}{"task_id": taskID, "from": email.From},
 		})
 	}
 

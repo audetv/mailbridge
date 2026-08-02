@@ -219,3 +219,46 @@ func TestGetAttachment_Found(t *testing.T) {
 		t.Errorf("body = %q", w.Body.String())
 	}
 }
+
+func TestMarkRead(t *testing.T) {
+	handler, st, cleanup := setupAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "m6", Subject: "Test", BodyText: "Body", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Добавляем входящий комментарий
+	if err := st.AddTaskComment(ctx, &store.TaskComment{TaskID: 1, Author: "client@e.com", Body: "Проблема", Direction: "in"}); err != nil {
+		t.Fatalf("AddTaskComment error: %v", err)
+	}
+
+	// Проверяем что есть непрочитанные
+	filter := &store.TaskFilter{Username: "admin", Page: 1, PerPage: 10}
+	result, _ := st.ListTasks(ctx, filter)
+	if len(result.Tasks) == 0 {
+		t.Fatal("no tasks returned")
+	}
+	if result.Tasks[0].UnreadComments != 2 {
+		t.Errorf("expected 2 unread (1 new task + 1 comment), got %d", result.Tasks[0].UnreadComments)
+	}
+
+	// Отмечаем прочитанным
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/1/mark-read", nil)
+	req.SetPathValue("id", "1")
+	req.Header.Set("Authorization", "Bearer token-admin-20260101")
+	w := httptest.NewRecorder()
+
+	handler.MarkRead(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Проверяем что непрочитанных больше нет
+	result, _ = st.ListTasks(ctx, filter)
+	if result.Tasks[0].UnreadComments != 0 {
+		t.Errorf("expected 0 unread after mark, got %d", result.Tasks[0].UnreadComments)
+	}
+}

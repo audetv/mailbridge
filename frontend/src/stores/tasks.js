@@ -49,11 +49,15 @@ export const useTasksStore = defineStore('tasks', () => {
         return data
     }
 
+    async function markAsRead(id) {
+        await apiClient.post(`/tasks/${id}/mark-read`)
+    }
+
     function setFilter(key, value) {
         filters.value[key] = value
         filters.value.page = 1
         fetchTasks()
     }
 
-    return { tasks, total, loading, currentTask, currentComments, currentAttachments, filters, fetchTasks, fetchTask, updateTask, replyTask, setFilter }
+    return { tasks, total, loading, currentTask, currentComments, currentAttachments, filters, fetchTasks, fetchTask, updateTask, replyTask, markAsRead, setFilter }
 })

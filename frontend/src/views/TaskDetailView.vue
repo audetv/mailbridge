@@ -132,6 +132,7 @@ const typeOptions = [
 onMounted(async () => {
     await store.fetchTask(route.params.id)
     syncFields()
+    store.markAsRead(route.params.id)
 })
 
 watch(() => store.currentTask, syncFields)

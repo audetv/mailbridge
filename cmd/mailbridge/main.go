@@ -229,6 +229,8 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+	// Помечаем задачу прочитанной
+	mux.HandleFunc("/api/tasks/{id}/mark-read", taskHandler.MarkRead)
 	// Вложения
 	mux.HandleFunc("/api/attachments/{path...}", taskHandler.GetAttachment)
 

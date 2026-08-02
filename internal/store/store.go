@@ -24,13 +24,19 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// TaskWithUnread расширяет Task полем UnreadComments для ответа API.
+type TaskWithUnread struct {
+	*Task
+	UnreadComments int `json:"unread_comments"`
+}
+
 // TaskComment представляет комментарий к задаче.
 type TaskComment struct {
 	ID        int64     `json:"id"`
 	TaskID    int64     `json:"task_id"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
-	Direction string    `json:"direction"` // "in" от клиента, "out" ответ
+	Direction string    `json:"direction"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -53,16 +59,17 @@ type TaskFilter struct {
 	Type     string
 	Priority string
 	Search   string
+	Username string
 	Page     int
 	PerPage  int
 }
 
 // TaskListResult содержит результат запроса списка задач.
 type TaskListResult struct {
-	Tasks   []*Task `json:"tasks"`
-	Total   int64   `json:"total"`
-	Page    int     `json:"page"`
-	PerPage int     `json:"per_page"`
+	Tasks   []*TaskWithUnread `json:"tasks"`
+	Total   int64             `json:"total"`
+	Page    int               `json:"page"`
+	PerPage int               `json:"per_page"`
 }
 
 // EmailMapping связывает email-сообщение с задачей.
@@ -137,6 +144,9 @@ type Store interface {
 
 	// MarkTaskRead отмечает задачу прочитанной пользователем.
 	MarkTaskRead(ctx context.Context, taskID int64, username string) error
+	// ResetTaskReads сбрасывает статус прочтения для всех пользователей задачи.
+	// Вызывается при добавлении нового входящего комментария.
+	ResetTaskReads(ctx context.Context, taskID int64) error
 
 	// Ping
 	Ping(ctx context.Context) error

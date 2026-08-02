@@ -224,7 +224,7 @@ func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*stor
 	return scanTask(row)
 }
 
-// ListTasks возвращает список задач с фильтрацией и пагинацией.
+// ListTasks возвращает список задач с фильтрацией, пагинацией и счётчиком непрочитанных.
 func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store.TaskListResult, error) {
 	if filter == nil {
 		filter = &store.TaskFilter{Page: 1, PerPage: 50}
@@ -240,29 +240,34 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	var args []interface{}
 
 	if filter.Project != "" {
-		conditions = append(conditions, "project = ?")
+		conditions = append(conditions, "t.project = ?")
 		args = append(args, filter.Project)
 	}
 	if filter.Status != "" {
-		conditions = append(conditions, "status = ?")
+		conditions = append(conditions, "t.status = ?")
 		args = append(args, filter.Status)
 	}
 	if filter.Assignee != "" {
-		conditions = append(conditions, "assignee = ?")
+		conditions = append(conditions, "t.assignee = ?")
 		args = append(args, filter.Assignee)
 	}
 	if filter.Type != "" {
-		conditions = append(conditions, "type = ?")
+		conditions = append(conditions, "t.type = ?")
 		args = append(args, filter.Type)
 	}
 	if filter.Priority != "" {
-		conditions = append(conditions, "priority = ?")
+		conditions = append(conditions, "t.priority = ?")
 		args = append(args, filter.Priority)
 	}
 	if filter.Search != "" {
-		conditions = append(conditions, "(LOWER(subject) LIKE LOWER(?) OR LOWER(body_text) LIKE LOWER(?) OR LOWER(from_email) LIKE LOWER(?))")
+		conditions = append(conditions, "(LOWER(t.subject) LIKE LOWER(?) OR LOWER(t.body_text) LIKE LOWER(?) OR LOWER(t.from_email) LIKE LOWER(?))")
 		search := "%" + filter.Search + "%"
 		args = append(args, search, search, search)
+	}
+
+	username := filter.Username
+	if username == "" {
+		username = ""
 	}
 
 	where := ""
@@ -270,33 +275,46 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		where = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Подсчёт общего количества
 	var total int64
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM tasks %s", where)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM tasks t %s", where)
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("failed to count tasks: %w", err)
 	}
 
-	// Запрос с пагинацией
 	offset := (filter.Page - 1) * filter.PerPage
-	dataQuery := fmt.Sprintf(`SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, created_at, updated_at
-		FROM tasks %s ORDER BY created_at DESC LIMIT ? OFFSET ?`, where)
+	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
+		t.project, t.type, t.priority, t.status, t.assignee, t.created_at, t.updated_at,
+		(SELECT COUNT(*) FROM task_comments tc 
+		 WHERE tc.task_id = t.id 
+		 AND tc.direction = 'in' 
+		 AND tc.created_at > COALESCE(
+		   (SELECT read_at FROM task_reads WHERE task_id = t.id AND username = ?1), 
+		   '1970-01-01')
+		) + 
+		CASE WHEN (SELECT read_at FROM task_reads WHERE task_id = t.id AND username = ?1) IS NULL THEN 1 ELSE 0 END
+		as unread_comments
+		FROM tasks t %s ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, where)
 
-	dataArgs := append(args, filter.PerPage, offset)
+	dataArgs := append([]interface{}{username}, args...)
+	dataArgs = append(dataArgs, filter.PerPage, offset)
+
 	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks: %w", err)
 	}
 	defer rows.Close()
 
-	var tasks []*store.Task
+	var tasks []*store.TaskWithUnread
 	for rows.Next() {
-		task, err := scanTask(rows)
+		task := &store.Task{}
+		unread := 0
+		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
+			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
+			&task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}
 
 	return &store.TaskListResult{
@@ -537,6 +555,12 @@ func (s *Store) MarkOutboxFailed(ctx context.Context, id int64, _ string) error 
 func (s *Store) MarkTaskRead(ctx context.Context, taskID int64, username string) error {
 	query := `INSERT OR IGNORE INTO task_reads (task_id, username) VALUES (?, ?)`
 	_, err := s.db.ExecContext(ctx, query, taskID, username)
+	return err
+}
+
+// ResetTaskReads сбрасывает статус прочтения для задачи (при новом входящем комментарии).
+func (s *Store) ResetTaskReads(ctx context.Context, taskID int64) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM task_reads WHERE task_id = ?", taskID)
 	return err
 }
 
