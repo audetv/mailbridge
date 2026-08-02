@@ -104,6 +104,41 @@ export const useTasksStore = defineStore('tasks', () => {
         cleanup()
     }
 
+    // Внутри defineStore, перед return:
+
+    const currentTask = ref(null)
+    const comments = ref([])
+    const attachments = ref([])
+    const taskLoading = ref(false)
+
+    async function fetchTask(id) {
+        taskLoading.value = true
+        try {
+            const { data } = await apiClient.get(`/tasks/${id}`)
+            currentTask.value = data.task
+            comments.value = data.comments
+            attachments.value = data.attachments
+        } finally {
+            taskLoading.value = false
+        }
+    }
+
+    async function updateTask(id, updates) {
+        await apiClient.patch(`/tasks/${id}`, updates)
+        fetchTask(id)
+    }
+
+    async function replyTask(id, body) {
+        await apiClient.post(`/tasks/${id}/reply`, { body })
+        fetchTask(id)
+    }
+
+    function clearCurrentTask() {
+        currentTask.value = null
+        comments.value = []
+        attachments.value = []
+    }
+
     // ── Экспорт ──────────────────────────────────────────────────
 
     return {
@@ -114,6 +149,14 @@ export const useTasksStore = defineStore('tasks', () => {
         fetchTasks,
         setFilter,
         connectEvents,
-        disconnectEvents
+        disconnectEvents,
+        currentTask,
+        comments,
+        attachments,
+        taskLoading,
+        fetchTask,
+        updateTask,
+        replyTask,
+        clearCurrentTask,
     }
 })

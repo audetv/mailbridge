@@ -10,22 +10,27 @@
     <main class="dashboard-content">
       <FilterBar />
       <TaskTable @row-click="openTask" />
+      <TaskCard v-model="showTaskCard" :task-id="selectedTaskId" />
     </main>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
+import TaskCard from '@/components/TaskCard.vue'
 import Button from 'primevue/button'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const store = useTasksStore()
+
+const showTaskCard = ref(false)
+const selectedTaskId = ref(0)
 
 function handleLogout() {
   store.disconnectEvents()
@@ -34,7 +39,8 @@ function handleLogout() {
 }
 
 function openTask(task) {
-  // Будет реализовано в этапе 19.3
+  selectedTaskId.value = task.id
+  showTaskCard.value = true
 }
 
 function onVisibilityChange() {

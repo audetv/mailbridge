@@ -1,6 +1,6 @@
 <template>
   <DataTable :value="store.tasks" :loading="store.loading" paginator :rows="50" :totalRecords="store.total"
-    @page="onPage" lazy stripedRows>
+    @page="onPage" lazy stripedRows @row-click="onRowClick" selectionMode="single">
     <Column field="id" header="ID" style="width: 80px" sortable />
     <Column field="created_at" header="Дата" style="width: 150px" sortable>
       <template #body="{ data }">
@@ -31,18 +31,21 @@
 
 <script setup>
 import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 
 const store = useTasksStore()
-const router = useRouter()
+const emit = defineEmits(['row-click'])
 
 onMounted(() => {
   store.fetchTasks()
 })
+
+function onRowClick(event) {
+  emit('row-click', event.data)
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
