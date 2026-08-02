@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/audetv/mailbridge/internal/store"
@@ -201,4 +203,24 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"comment": comment}); err != nil {
 		log.Printf("encode error: %v", err)
 	}
+}
+
+// GetAttachment обрабатывает GET /api/attachments/{path...}
+func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
+	path := r.PathValue("path")
+	if path == "" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Путь к файлу вложений
+	fullPath := filepath.Join("data", "attachments", filepath.Clean(path))
+
+	// Проверяем что файл существует
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	http.ServeFile(w, r, fullPath)
 }

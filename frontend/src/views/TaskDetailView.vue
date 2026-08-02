@@ -21,7 +21,7 @@
                             <h4>Вложения</h4>
                             <div v-for="att in store.currentAttachments" :key="att.id" class="attachment-item">
                                 <i class="pi pi-paperclip" />
-                                <span>{{ att.filename }}</span>
+                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
                                 <span class="size">{{ formatSize(att.size) }}</span>
                             </div>
                         </div>

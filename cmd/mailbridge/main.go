@@ -229,6 +229,8 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+	// Вложения
+	mux.HandleFunc("/api/attachments/{path...}", taskHandler.GetAttachment)
 
 	// WebSocket
 	wsHandler := web.NewWSHandler(broker)

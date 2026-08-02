@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -172,5 +174,48 @@ func TestReplyTask(t *testing.T) {
 	comments, _ := st.GetTaskComments(ctx, 1)
 	if len(comments) != 1 {
 		t.Errorf("expected 1 comment, got %d", len(comments))
+	}
+}
+
+func TestGetAttachment_NotFound(t *testing.T) {
+	handler, _, cleanup := setupAPI(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/attachments/nonexistent/file.pdf", nil)
+	req.SetPathValue("path", "nonexistent/file.pdf")
+	w := httptest.NewRecorder()
+
+	handler.GetAttachment(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestGetAttachment_Found(t *testing.T) {
+	handler, _, cleanup := setupAPI(t)
+	defer cleanup()
+
+	// Создаём файл в data/attachments относительно рабочей директории
+	attPath := filepath.Join("data", "attachments", "test-file.txt")
+	if err := os.MkdirAll(filepath.Dir(attPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll error: %v", err)
+	}
+	if err := os.WriteFile(attPath, []byte("test content"), 0o644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+	defer os.RemoveAll("data")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/attachments/test-file.txt", nil)
+	req.SetPathValue("path", "test-file.txt")
+	w := httptest.NewRecorder()
+
+	handler.GetAttachment(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "test content" {
+		t.Errorf("body = %q", w.Body.String())
 	}
 }
