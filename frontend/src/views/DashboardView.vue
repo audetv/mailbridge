@@ -71,7 +71,7 @@ function handleLogout() {
 }
 
 function openTask(task) {
-  // Будет реализовано в этапе 19.3
+  router.push(`/tasks/${task.data.id}`)
 }
 </script>
 
