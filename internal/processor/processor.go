@@ -14,6 +14,7 @@ import (
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/parser"
 	"github.com/audetv/mailbridge/internal/store"
+	"github.com/audetv/mailbridge/internal/web"
 )
 
 // ActionType определяет тип действия над письмом.
@@ -47,6 +48,7 @@ type MessageProcessor struct {
 	logger     *slog.Logger
 	// projectMap: имя проекта → проект (для маппинга имени на UUID, опционально)
 	projectMap map[string]string
+	broker     *web.EventBroker
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -58,6 +60,7 @@ func NewMessageProcessor(
 	cfg *config.Config,
 	logger *slog.Logger,
 	projectMap map[string]string,
+	broker *web.EventBroker,
 ) *MessageProcessor {
 	return &MessageProcessor{
 		store:      st,
@@ -67,6 +70,7 @@ func NewMessageProcessor(
 		config:     cfg,
 		logger:     logger,
 		projectMap: projectMap,
+		broker:     broker,
 	}
 }
 
@@ -199,6 +203,16 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		"type", task.Type,
 	)
 
+	if p.broker != nil {
+		p.broker.Publish(web.WSEvent{
+			Type:     "task_created",
+			TaskID:   task.ID,
+			Username: task.Assignee,
+			Message:  fmt.Sprintf("Новая задача #%d: %s", task.ID, task.Subject),
+			Data:     task,
+		})
+	}
+
 	// Сохраняем вложения
 	for _, att := range email.Attachments {
 		taskAtt := &store.TaskAttachment{
@@ -257,6 +271,14 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 		"task_id", taskID,
 		"message_id", email.MessageID,
 	)
+
+	if p.broker != nil {
+		p.broker.Publish(web.WSEvent{
+			Type:    "task_updated",
+			TaskID:  taskID,
+			Message: fmt.Sprintf("Новый комментарий в задаче #%d", taskID),
+		})
+	}
 
 	// Сохраняем вложения к существующей задаче
 	for _, att := range email.Attachments {

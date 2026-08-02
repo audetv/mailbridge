@@ -1,8 +1,12 @@
 <template>
   <div class="dashboard">
+    <Toast position="top-right" />
     <header class="dashboard-header">
       <h1>Mailbridge</h1>
       <div class="header-right">
+        <span class="connection-status" :class="{ connected: wsStore.connected }">
+          {{ wsStore.connected ? '● Онлайн' : '○ Офлайн' }}
+        </span>
         <span class="task-count">Всего задач: {{ store.total }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
       </div>
@@ -15,18 +19,53 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
+import Toast from 'primevue/toast'
+import Button from 'primevue/button'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
+import { useWebSocket } from '@/stores/websocket'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
-import Button from 'primevue/button'
 
 const router = useRouter()
+const toast = useToast()
 const authStore = useAuthStore()
 const store = useTasksStore()
+const wsStore = useWebSocket()
+
+onMounted(() => {
+  wsStore.connect(authStore.token)
+})
+
+onUnmounted(() => {
+  wsStore.disconnect()
+})
+
+watch(() => wsStore.events.length, () => {
+  const events = wsStore.events
+  const latest = events[events.length - 1]
+  if (!latest) return
+
+  switch (latest.type) {
+    case 'task_created':
+      store.fetchTasks()
+      toast.add({ severity: 'info', summary: latest.message, life: 5000 })
+      break
+    case 'task_updated':
+      store.fetchTasks()
+      toast.add({ severity: 'success', summary: latest.message, life: 3000 })
+      break
+    case 'connected':
+      toast.add({ severity: 'success', summary: latest.message, life: 2000 })
+      break
+  }
+})
 
 function handleLogout() {
+  wsStore.disconnect()
   authStore.logout()
   router.push('/login')
 }
@@ -58,6 +97,15 @@ function openTask(task) {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.connection-status {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.connection-status.connected {
+  color: var(--p-green-500);
 }
 
 .task-count {

@@ -110,6 +110,11 @@ func main() {
 	)
 
 	// ---------------------------------------------------------------------------
+	// Websocket
+	// ---------------------------------------------------------------------------
+	broker := web.NewEventBroker()
+
+	// ---------------------------------------------------------------------------
 	// Extractor и Processor
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
@@ -124,7 +129,7 @@ func main() {
 	}
 
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -224,6 +229,10 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+
+	// WebSocket
+	wsHandler := web.NewWSHandler(broker)
+	mux.Handle("/api/ws", wsHandler)
 
 	// Webhook
 	whHandler := webhook.NewHandler(st, cfg.Webhook.Secret, logger)

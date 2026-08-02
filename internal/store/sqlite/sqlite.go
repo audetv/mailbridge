@@ -125,6 +125,13 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)`,
+
+		`CREATE TABLE IF NOT EXISTS task_reads (
+			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			username TEXT NOT NULL,
+			read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (task_id, username)
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -523,6 +530,13 @@ func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
 // MarkOutboxFailed помечает элемент очереди как ошибочный.
 func (s *Store) MarkOutboxFailed(ctx context.Context, id int64, _ string) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE outbox SET status = 'failed', attempts = attempts + 1, last_attempt_at = ? WHERE id = ?", time.Now(), id)
+	return err
+}
+
+// MarkTaskRead отмечает задачу прочитанной пользователем.
+func (s *Store) MarkTaskRead(ctx context.Context, taskID int64, username string) error {
+	query := `INSERT OR IGNORE INTO task_reads (task_id, username) VALUES (?, ?)`
+	_, err := s.db.ExecContext(ctx, query, taskID, username)
 	return err
 }
 

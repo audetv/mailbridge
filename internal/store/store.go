@@ -135,6 +135,9 @@ type Store interface {
 	MarkOutboxSent(ctx context.Context, id int64) error
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error
 
+	// MarkTaskRead отмечает задачу прочитанной пользователем.
+	MarkTaskRead(ctx context.Context, taskID int64, username string) error
+
 	// Ping
 	Ping(ctx context.Context) error
 
