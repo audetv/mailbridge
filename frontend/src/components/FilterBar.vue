@@ -24,7 +24,7 @@ const projectOptions = [
     { label: 'Входящие', value: 'Входящие' },
     { label: 'ТРК', value: 'ТРК' },
     { label: 'Отель', value: 'Отель' },
-    { label: 'Фитнес-клуб', value: 'Фитнес-клуб' },
+    { label: 'Лидер Спорт', value: 'Лидер Спорт' },
     { label: 'Театр', value: 'Театр' },
     { label: 'Мебельный центр', value: 'Мебельный центр' },
     { label: 'Кафе', value: 'Кафе' },
