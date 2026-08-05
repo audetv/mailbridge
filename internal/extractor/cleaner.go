@@ -122,6 +122,10 @@ func (c *Cleaner) SanitizeHTML(html string) string {
 	emptyDiv := regexp.MustCompile(`(?i)<div[^>]*>(?:\s|&nbsp;)*</div>`)
 	html = emptyDiv.ReplaceAllString(html, "")
 
+	// Удаляем <base> теги — они меняют базовый URL страницы и ломают API-запросы
+	baseTag := regexp.MustCompile(`(?i)<base[^>]*>`)
+	html = baseTag.ReplaceAllString(html, "")
+
 	// Удаляем множественные пустые строки
 	html = regexp.MustCompile(`\n{3,}`).ReplaceAllString(html, "\n\n")
 

@@ -286,6 +286,11 @@ func TestCleaner_SanitizeHTML(t *testing.T) {
 			want:  `<div>Содержимое</div>`,
 		},
 		{
+			name:  "base tag removed",
+			input: `<base href="https://e.mail.ru/"><p>Текст</p>`,
+			want:  `<p>Текст</p>`,
+		},
+		{
 			name:  "cid images preserved for inline replacement",
 			input: `<p>Текст</p><img src="cid:ii_123">`,
 			want:  `<p>Текст</p><img src="cid:ii_123">`,
