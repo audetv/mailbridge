@@ -5,6 +5,9 @@ const apiClient = axios.create({
     baseURL: '/api',
     headers: {
         'Content-Type': 'application/json'
+    },
+    paramsSerializer: {
+        indexes: null // убирает [] из массивов: status[]=new → status=new
     }
 })
 

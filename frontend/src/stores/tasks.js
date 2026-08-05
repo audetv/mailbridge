@@ -11,7 +11,7 @@ export const useTasksStore = defineStore('tasks', () => {
     const currentAttachments = ref([])
     const filters = ref({
         project: '',
-        status: '',
+        statuses: ['new', 'in_progress'],
         assignee: '',
         search: '',
         page: 1,
@@ -21,7 +21,14 @@ export const useTasksStore = defineStore('tasks', () => {
     async function fetchTasks() {
         loading.value = true
         try {
-            const { data } = await apiClient.get('/tasks', { params: filters.value })
+            const params = { ...filters.value }
+            delete params.statuses
+            const { data } = await apiClient.get('/tasks', {
+                params: {
+                    ...params,
+                    status: filters.value.statuses
+                }
+            })
             tasks.value = data.tasks
             total.value = data.total
         } finally {
@@ -59,5 +66,11 @@ export const useTasksStore = defineStore('tasks', () => {
         fetchTasks()
     }
 
-    return { tasks, total, loading, currentTask, currentComments, currentAttachments, filters, fetchTasks, fetchTask, updateTask, replyTask, markAsRead, setFilter }
+    function setStatuses(statuses) {
+        filters.value.statuses = statuses
+        filters.value.page = 1
+        fetchTasks()
+    }
+
+    return { tasks, total, loading, currentTask, currentComments, currentAttachments, filters, fetchTasks, fetchTask, updateTask, replyTask, markAsRead, setFilter, setStatuses }
 })

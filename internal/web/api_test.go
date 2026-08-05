@@ -87,6 +87,36 @@ func TestListTasks_WithFilters(t *testing.T) {
 	}
 }
 
+func TestListTasks_MultipleStatuses(t *testing.T) {
+	handler, st, cleanup := setupAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "s1", Subject: "S1", BodyText: "B", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "s2", Subject: "S2", BodyText: "B", FromEmail: "u@e.com", Status: "in_progress"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "s3", Subject: "S3", BodyText: "B", FromEmail: "u@e.com", Status: "closed"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks?status=new&status=in_progress", nil)
+	w := httptest.NewRecorder()
+
+	handler.ListTasks(w, req)
+
+	var result store.TaskListResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	if len(result.Tasks) != 2 {
+		t.Errorf("expected 2 tasks (new + in_progress), got %d", len(result.Tasks))
+	}
+}
+
 func TestGetTask_NotFound(t *testing.T) {
 	handler, _, cleanup := setupAPI(t)
 	defer cleanup()

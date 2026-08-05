@@ -1,11 +1,8 @@
 <template>
-    <div class="filter-bar">
-        <InputText v-model="search" placeholder="Поиск..." @input="onSearch" class="search-input" />
-        <Select v-model="project" :options="projectOptions" optionLabel="label" optionValue="value" placeholder="Проект"
-            @change="onChange('project', $event.value)" showClear />
-        <Select v-model="status" :options="statusOptions" optionLabel="label" optionValue="value" placeholder="Статус"
-            @change="onChange('status', $event.value)" showClear />
-    </div>
+  <div class="filter-bar">
+    <InputText v-model="search" placeholder="Поиск..." @input="onSearch" class="search-input" />
+    <Select v-model="project" :options="projectOptions" optionLabel="label" optionValue="value" placeholder="Проект" @change="onChange('project', $event.value)" showClear />
+  </div>
 </template>
 
 <script setup>

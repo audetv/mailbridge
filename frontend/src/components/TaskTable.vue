@@ -39,7 +39,7 @@
 
 <script setup>
 import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -48,10 +48,11 @@ import Badge from 'primevue/badge'
 
 const store = useTasksStore()
 const router = useRouter()
+const route = useRoute()
 
-onMounted(() => {
-  store.fetchTasks()
-})
+// onMounted(() => {
+//   store.fetchTasks()
+// })
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
@@ -79,7 +80,7 @@ function rowClass(task) {
 }
 
 function onRowClick(event) {
-  router.push(`/tasks/${event.data.id}`)
+  router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
 function onPage(event) {

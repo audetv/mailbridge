@@ -174,7 +174,7 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	mustCreateTask(t, s, &store.Task{MessageID: "s1", Subject: "T1", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"})
 	mustCreateTask(t, s, &store.Task{MessageID: "s2", Subject: "T2", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "in_progress"})
 
-	result, err := s.ListTasks(ctx, &store.TaskFilter{Status: "in_progress", Page: 1, PerPage: 10})
+	result, err := s.ListTasks(ctx, &store.TaskFilter{Statuses: []string{"in_progress"}, Page: 1, PerPage: 10})
 	if err != nil {
 		t.Fatalf("ListTasks error: %v", err)
 	}

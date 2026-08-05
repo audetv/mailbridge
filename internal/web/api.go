@@ -33,10 +33,17 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(q.Get("per_page"))
 
 	username := extractUserFromToken(r)
+	// Статусы — может быть несколько ?status=new&status=in_progress
+	var statuses []string
+	for _, s := range q["status"] {
+		if s != "" {
+			statuses = append(statuses, s)
+		}
+	}
 
 	filter := &store.TaskFilter{
 		Project:  q.Get("project"),
-		Status:   q.Get("status"),
+		Statuses: statuses,
 		Assignee: q.Get("assignee"),
 		Type:     q.Get("type"),
 		Priority: q.Get("priority"),

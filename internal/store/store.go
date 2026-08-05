@@ -54,7 +54,7 @@ type TaskAttachment struct {
 // TaskFilter содержит параметры фильтрации списка задач.
 type TaskFilter struct {
 	Project  string
-	Status   string
+	Statuses []string // множественный фильтр по статусам
 	Assignee string
 	Type     string
 	Priority string

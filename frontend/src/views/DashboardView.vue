@@ -12,15 +12,16 @@
       </div>
     </header>
     <main class="dashboard-content">
+      <TabBar :tabs="tabItems" :activeTab="activeTab" @select="onTabSelect" />
       <FilterBar />
-      <TaskTable @row-click="openTask" />
+      <TaskTable />
     </main>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 import Button from 'primevue/button'
@@ -29,20 +30,57 @@ import { useTasksStore } from '@/stores/tasks'
 import { useWebSocket } from '@/stores/websocket'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
+import TabBar from '@/components/TabBar.vue'
 
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
 const authStore = useAuthStore()
 const store = useTasksStore()
 const wsStore = useWebSocket()
 
+const activeTab = ref('active')
+
+const tabItems = computed(() => [
+  { key: 'active', label: 'Активные', count: 0 },
+  { key: 'resolved', label: 'Решённые', count: 0 },
+  { key: 'closed', label: 'Закрытые', count: 0 }
+])
+
+const tabStatuses = {
+  active: ['new', 'in_progress'],
+  resolved: ['resolved'],
+  closed: ['closed']
+}
+
 onMounted(() => {
   wsStore.connect(authStore.token)
+  
+  // Определяем активную вкладку
+  const tabFromUrl = route.query.tab
+  const saved = localStorage.getItem('mailbridge_active_tab')
+  
+  let tab = 'active'
+  if (tabFromUrl && tabStatuses[tabFromUrl]) {
+    tab = tabFromUrl
+  } else if (saved && tabStatuses[saved]) {
+    tab = saved
+  }
+  
+  activeTab.value = tab
+  store.setStatuses(tabStatuses[tab])
 })
 
 onUnmounted(() => {
   wsStore.disconnect()
 })
+
+function onTabSelect(key) {
+  activeTab.value = key
+  localStorage.setItem('mailbridge_active_tab', key)
+  router.replace({ query: { ...route.query, tab: key } })
+  store.setStatuses(tabStatuses[key])
+}
 
 watch(() => wsStore.events.length, () => {
   const events = wsStore.events
@@ -68,10 +106,6 @@ function handleLogout() {
   wsStore.disconnect()
   authStore.logout()
   router.push('/login')
-}
-
-function openTask(task) {
-  router.push(`/tasks/${task.data.id}`)
 }
 </script>
 

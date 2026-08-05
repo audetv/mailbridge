@@ -243,9 +243,13 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		conditions = append(conditions, "t.project = ?")
 		args = append(args, filter.Project)
 	}
-	if filter.Status != "" {
-		conditions = append(conditions, "t.status = ?")
-		args = append(args, filter.Status)
+	if len(filter.Statuses) > 0 {
+		placeholders := make([]string, len(filter.Statuses))
+		for i, s := range filter.Statuses {
+			placeholders[i] = "?"
+			args = append(args, s)
+		}
+		conditions = append(conditions, fmt.Sprintf("t.status IN (%s)", strings.Join(placeholders, ",")))
 	}
 	if filter.Assignee != "" {
 		conditions = append(conditions, "t.assignee = ?")

@@ -155,7 +155,8 @@ function onReplySent() {
 }
 
 function goBack() {
-    router.push('/')
+  const tab = route.query.tab
+  router.push({ path: '/', query: tab ? { tab } : {} })
 }
 
 function formatDate(dateStr) {
