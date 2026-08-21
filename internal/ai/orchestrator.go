@@ -12,8 +12,9 @@ import (
 
 // Orchestrator координирует обработку писем через LLM.
 type Orchestrator struct {
-	client Client
-	store  store.Store
+	client   Client
+	store    store.Store
+	projects []string
 }
 
 // NewOrchestrator создаёт новый Orchestrator.
@@ -22,6 +23,10 @@ func NewOrchestrator(client Client, st store.Store) *Orchestrator {
 		client: client,
 		store:  st,
 	}
+}
+
+func (o *Orchestrator) SetProjects(projects []string) {
+	o.projects = projects
 }
 
 // ProcessEmail обрабатывает новое письмо через LLM и возвращает вердикты.
@@ -81,6 +86,13 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 
 	sb.WriteString("Ты — интеллектуальный ассистент для управления задачами.\n\n")
 	sb.WriteString("Проанализируй НОВОЕ письмо в контексте цепочки и определи действия.\n\n")
+
+	if len(o.projects) > 0 {
+		sb.WriteString("=== ДОСТУПНЫЕ ПРОЕКТЫ ===\n")
+		sb.WriteString(strings.Join(o.projects, ", "))
+		sb.WriteString("\n\n")
+		sb.WriteString("ВАЖНО: Выбирай проект ТОЛЬКО из этого списка. Если не уверен — используй \"Входящие\".\n\n")
+	}
 
 	if summary != "" {
 		sb.WriteString("=== РЕЗЮМЕ ЦЕПОЧКИ ===\n")

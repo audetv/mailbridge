@@ -158,3 +158,23 @@ func TestUpdateSummary(t *testing.T) {
 		t.Errorf("Summary = %s", thread.Summary)
 	}
 }
+
+func TestBuildPrompt_WithProjects(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+	o.SetProjects([]string{"ТРК", "Отель", "Входящие"})
+
+	email := &extractor.ExtractedEmail{
+		From:     "user@example.com",
+		Subject:  "Тестовое письмо",
+		BodyText: "Текст письма",
+	}
+
+	prompt := o.BuildPrompt("Резюме", []*store.Task{}, email)
+
+	if !strings.Contains(prompt, "=== ДОСТУПНЫЕ ПРОЕКТЫ ===") {
+		t.Error("prompt does not contain projects section")
+	}
+	if !strings.Contains(prompt, "ТРК, Отель, Входящие") {
+		t.Error("prompt does not contain project names")
+	}
+}

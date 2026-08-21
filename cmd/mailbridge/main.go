@@ -116,6 +116,20 @@ func main() {
 	broker := web.NewEventBroker()
 
 	// ---------------------------------------------------------------------------
+	// Extractor и Processor
+	// ---------------------------------------------------------------------------
+	ext := extractor.NewExtractor(attStore)
+
+	// Преобразуем projectMap в map[string]string (имя → идентификатор)
+	projectNameMap := make(map[string]string, len(projectMap))
+	for name, proj := range projectMap {
+		projectNameMap[name] = proj.Identifier
+	}
+	if len(projectNameMap) == 0 {
+		projectNameMap["Входящие"] = "INBOX"
+	}
+
+	// ---------------------------------------------------------------------------
 	// AI Client (если включён в конфиге)
 	// ---------------------------------------------------------------------------
 	var aiClient ai.Client
@@ -133,18 +147,12 @@ func main() {
 		orchestrator = ai.NewOrchestrator(aiClient, st)
 	}
 
-	// ---------------------------------------------------------------------------
-	// Extractor и Processor
-	// ---------------------------------------------------------------------------
-	ext := extractor.NewExtractor(attStore)
-
-	// Преобразуем projectMap в map[string]string (имя → идентификатор)
-	projectNameMap := make(map[string]string, len(projectMap))
-	for name, proj := range projectMap {
-		projectNameMap[name] = proj.Identifier
-	}
-	if len(projectNameMap) == 0 {
-		projectNameMap["Входящие"] = "INBOX"
+	if orchestrator != nil {
+		projectNames := make([]string, 0, len(projectNameMap))
+		for name := range projectNameMap {
+			projectNames = append(projectNames, name)
+		}
+		orchestrator.SetProjects(projectNames)
 	}
 
 	proc := processor.NewMessageProcessor(
