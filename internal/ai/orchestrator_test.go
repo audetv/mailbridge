@@ -11,6 +11,14 @@ import (
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
 
+type mockSummaryClient struct {
+	response string
+}
+
+func (m *mockSummaryClient) Generate(_ context.Context, _ string, _ []string) (string, error) {
+	return m.response, nil
+}
+
 // BuildPrompt — экспортируемая обёртка для тестирования.
 func TestBuildPrompt(t *testing.T) {
 	o := ai.NewOrchestrator(nil, nil)
@@ -116,5 +124,37 @@ func TestApplyVerdicts_NewTask(t *testing.T) {
 	}
 	if tasks[0].Subject != "Новая задача" {
 		t.Errorf("Subject = %s", tasks[0].Subject)
+	}
+}
+
+func TestUpdateSummary(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	mock := &mockSummaryClient{response: "Новое резюме цепочки"}
+	o := ai.NewOrchestrator(mock, st)
+
+	email := &extractor.ExtractedEmail{
+		MessageID: "msg-1",
+		From:      "user@example.com",
+		Subject:   "Test",
+		BodyText:  "Body",
+	}
+
+	response := &ai.LLMResponse{
+		Verdicts: []ai.Verdict{{Action: "info_only"}},
+	}
+
+	if err := o.UpdateSummary(context.Background(), email, response); err != nil {
+		t.Fatalf("UpdateSummary error: %v", err)
+	}
+
+	thread, _ := st.GetThread(context.Background(), "msg-1")
+	if thread == nil {
+		t.Fatal("thread not found")
+	}
+	if thread.Summary != "Новое резюме цепочки" {
+		t.Errorf("Summary = %s", thread.Summary)
 	}
 }

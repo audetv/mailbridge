@@ -289,3 +289,58 @@ func extractName(from string) string {
 	name = strings.Trim(name, `"`)
 	return name
 }
+
+// UpdateSummary обновляет резюме цепочки после обработки письма.
+func (o *Orchestrator) UpdateSummary(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
+	threadID := determineThreadID(email)
+
+	// Формируем запрос на обновление summary
+	prompt := fmt.Sprintf(`Обнови краткое резюме цепочки писем на основе нового события.
+
+ТЕКУЩЕЕ РЕЗЮМЕ:
+%s
+
+НОВОЕ ПИСЬМО:
+От: %s
+Тема: %s
+%s
+
+ВЕРДИКТЫ:
+%s
+
+Новое резюме должно быть кратким (2-3 предложения) и отражать текущее состояние цепочки. Верни ТОЛЬКО текст резюме без кавычек и markdown.`,
+		o.getThreadSummary(ctx, threadID),
+		email.From,
+		email.Subject,
+		email.BodyText,
+		verdictsToJSON(response),
+	)
+
+	summary, err := o.client.Generate(ctx, prompt, nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate summary: %w", err)
+	}
+
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+
+	return o.store.UpdateThreadSummary(ctx, threadID, summary)
+}
+
+func (o *Orchestrator) getThreadSummary(ctx context.Context, threadID string) string {
+	thread, err := o.store.GetThread(ctx, threadID)
+	if err != nil || thread == nil {
+		return "Нет резюме"
+	}
+	return thread.Summary
+}
+
+func verdictsToJSON(response *LLMResponse) string {
+	if response == nil {
+		return "[]"
+	}
+	data, _ := json.Marshal(response.Verdicts)
+	return string(data)
+}
