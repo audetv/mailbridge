@@ -2,8 +2,10 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -25,6 +27,7 @@ func NewOrchestrator(client Client, st store.Store) *Orchestrator {
 	}
 }
 
+// SetProjects устанавливает список доступных проектов.
 func (o *Orchestrator) SetProjects(projects []string) {
 	o.projects = projects
 }
@@ -54,7 +57,19 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 
 	prompt := o.buildPrompt(summary, activeTasks, email)
 
-	response, err := o.client.Generate(ctx, prompt, nil)
+	// Собираем изображения из вложений
+	var images []string
+	for _, att := range email.Attachments {
+		if isImageAttachment(att.ContentType) && att.StoragePath != "" {
+			data, err := os.ReadFile(att.StoragePath)
+			if err != nil {
+				continue
+			}
+			images = append(images, base64.StdEncoding.EncodeToString(data))
+		}
+	}
+
+	response, err := o.client.Generate(ctx, prompt, images)
 	if err != nil {
 		return nil, fmt.Errorf("LLM generate failed: %w", err)
 	}
@@ -62,9 +77,89 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 	return o.parseResponse(response)
 }
 
-// ParseResponse — экспортируемая обёртка для тестирования.
-func (o *Orchestrator) ParseResponse(response string) (*LLMResponse, error) {
-	return o.parseResponse(response)
+// UpdateSummary обновляет резюме цепочки после обработки письма.
+func (o *Orchestrator) UpdateSummary(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
+	threadID := determineThreadID(email)
+
+	thread, err := o.store.GetThread(ctx, threadID)
+	if err != nil {
+		return fmt.Errorf("failed to get thread: %w", err)
+	}
+	if thread == nil {
+		if err := o.store.CreateThread(ctx, &store.Thread{ThreadID: threadID}); err != nil {
+			return fmt.Errorf("failed to create thread: %w", err)
+		}
+	}
+
+	prompt := fmt.Sprintf(`Обнови краткое резюме цепочки писем на основе нового события.
+
+ТЕКУЩЕЕ РЕЗЮМЕ:
+%s
+
+НОВОЕ ПИСЬМО:
+От: %s
+Тема: %s
+%s
+
+ВЕРДИКТЫ:
+%s
+
+Новое резюме должно быть кратким (2-3 предложения) и отражать текущее состояние цепочки. Верни ТОЛЬКО текст резюме без кавычек и markdown.`,
+		o.getThreadSummary(ctx, threadID),
+		email.From,
+		email.Subject,
+		email.BodyText,
+		verdictsToJSON(response),
+	)
+
+	summary, err := o.client.Generate(ctx, prompt, nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate summary: %w", err)
+	}
+
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+
+	return o.store.UpdateThreadSummary(ctx, threadID, summary)
+}
+
+// ApplyVerdicts применяет решения LLM к БД.
+func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
+	if response == nil || len(response.Verdicts) == 0 {
+		return nil
+	}
+
+	for _, verdict := range response.Verdicts {
+		switch verdict.Action {
+		case "new":
+			if verdict.Task != nil {
+				if err := o.createTaskFromVerdict(ctx, email, verdict); err != nil {
+					return fmt.Errorf("failed to create task: %w", err)
+				}
+			}
+
+		case "update":
+			if verdict.TaskID != nil && verdict.Updates != nil {
+				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+					return fmt.Errorf("failed to update task: %w", err)
+				}
+			}
+
+		case "completed":
+			if verdict.TaskID != nil {
+				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+					return fmt.Errorf("failed to complete task: %w", err)
+				}
+			}
+
+		case "info_only":
+			// Ничего не делаем
+		}
+	}
+
+	return nil
 }
 
 // BuildPrompt — экспортируемая обёртка для тестирования.
@@ -72,12 +167,9 @@ func (o *Orchestrator) BuildPrompt(summary string, activeTasks []*store.Task, em
 	return o.buildPrompt(summary, activeTasks, email)
 }
 
-// determineThreadID определяет ID цепочки по References или Message-ID.
-func determineThreadID(email *extractor.ExtractedEmail) string {
-	if len(email.References) > 0 {
-		return email.References[0]
-	}
-	return email.MessageID
+// ParseResponse — экспортируемая обёртка для тестирования.
+func (o *Orchestrator) ParseResponse(response string) (*LLMResponse, error) {
+	return o.parseResponse(response)
 }
 
 // buildPrompt формирует промпт для LLM.
@@ -156,7 +248,6 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 
 // parseResponse парсит JSON-ответ LLM.
 func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
-	// Очищаем возможные markdown-обёртки
 	response = strings.TrimSpace(response)
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```")
@@ -169,44 +260,6 @@ func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
 	}
 
 	return &result, nil
-}
-
-// ApplyVerdicts применяет решения LLM к БД.
-func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
-	if response == nil || len(response.Verdicts) == 0 {
-		return nil
-	}
-
-	for _, verdict := range response.Verdicts {
-		switch verdict.Action {
-		case "new":
-			if verdict.Task != nil {
-				if err := o.createTaskFromVerdict(ctx, email, verdict); err != nil {
-					return fmt.Errorf("failed to create task: %w", err)
-				}
-			}
-
-		case "update":
-			if verdict.TaskID != nil && verdict.Updates != nil {
-				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
-					return fmt.Errorf("failed to update task: %w", err)
-				}
-			}
-
-		case "completed":
-			if verdict.TaskID != nil {
-				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
-					return fmt.Errorf("failed to complete task: %w", err)
-				}
-			}
-
-		case "info_only":
-			// Ничего не делаем, только сохраняем ai_verdict
-			// (будет реализовано позже при необходимости)
-		}
-	}
-
-	return nil
 }
 
 // createTaskFromVerdict создаёт новую задачу.
@@ -285,10 +338,12 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 	return nil
 }
 
-// verdictToJSON сериализует вердикт для аудита.
-func verdictToJSON(v Verdict) string {
-	data, _ := json.Marshal(v)
-	return string(data)
+// determineThreadID определяет ID цепочки по References или Message-ID.
+func determineThreadID(email *extractor.ExtractedEmail) string {
+	if len(email.References) > 0 {
+		return email.References[0]
+	}
+	return email.MessageID
 }
 
 // extractName извлекает имя из адреса вида "Имя Фамилия <email>".
@@ -302,56 +357,22 @@ func extractName(from string) string {
 	return name
 }
 
-// UpdateSummary обновляет резюме цепочки после обработки письма.
-func (o *Orchestrator) UpdateSummary(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
-	threadID := determineThreadID(email)
-
-	// Убеждаемся что тред существует
-	thread, err := o.store.GetThread(ctx, threadID)
-	if err != nil {
-		return fmt.Errorf("failed to get thread: %w", err)
-	}
-	if thread == nil {
-		if err := o.store.CreateThread(ctx, &store.Thread{ThreadID: threadID}); err != nil {
-			return fmt.Errorf("failed to create thread: %w", err)
-		}
-	}
-
-	// Формируем запрос на обновление summary
-	prompt := fmt.Sprintf(`Обнови краткое резюме цепочки писем на основе нового события.
-
-ТЕКУЩЕЕ РЕЗЮМЕ:
-%s
-
-НОВОЕ ПИСЬМО:
-От: %s
-Тема: %s
-%s
-
-ВЕРДИКТЫ:
-%s
-
-Новое резюме должно быть кратким (2-3 предложения) и отражать текущее состояние цепочки. Верни ТОЛЬКО текст резюме без кавычек и markdown.`,
-		o.getThreadSummary(ctx, threadID),
-		email.From,
-		email.Subject,
-		email.BodyText,
-		verdictsToJSON(response),
-	)
-
-	summary, err := o.client.Generate(ctx, prompt, nil)
-	if err != nil {
-		return fmt.Errorf("failed to generate summary: %w", err)
-	}
-
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return nil
-	}
-
-	return o.store.UpdateThreadSummary(ctx, threadID, summary)
+// verdictToJSON сериализует вердикт для аудита.
+func verdictToJSON(v Verdict) string {
+	data, _ := json.Marshal(v)
+	return string(data)
 }
 
+// verdictsToJSON сериализует вердикты для промпта summary.
+func verdictsToJSON(response *LLMResponse) string {
+	if response == nil {
+		return "[]"
+	}
+	data, _ := json.Marshal(response.Verdicts)
+	return string(data)
+}
+
+// getThreadSummary возвращает резюме цепочки.
 func (o *Orchestrator) getThreadSummary(ctx context.Context, threadID string) string {
 	thread, err := o.store.GetThread(ctx, threadID)
 	if err != nil || thread == nil {
@@ -360,10 +381,13 @@ func (o *Orchestrator) getThreadSummary(ctx context.Context, threadID string) st
 	return thread.Summary
 }
 
-func verdictsToJSON(response *LLMResponse) string {
-	if response == nil {
-		return "[]"
+// isImageAttachment проверяет является ли вложение изображением.
+func isImageAttachment(contentType string) bool {
+	imageTypes := []string{"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"}
+	for _, t := range imageTypes {
+		if contentType == t {
+			return true
+		}
 	}
-	data, _ := json.Marshal(response.Verdicts)
-	return string(data)
+	return false
 }
