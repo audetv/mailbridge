@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/classifier"
 	"github.com/audetv/mailbridge/internal/config"
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -40,15 +41,16 @@ type ProcessResult struct {
 
 // MessageProcessor оркестрирует обработку входящего письма.
 type MessageProcessor struct {
-	store      store.Store
-	classifier classifier.Classifier
-	extractor  *extractor.Extractor
-	parser     *parser.FieldParser
-	config     *config.Config
-	logger     *slog.Logger
-	// projectMap: имя проекта → проект (для маппинга имени на UUID, опционально)
-	projectMap map[string]string
-	broker     *web.EventBroker
+	store        store.Store
+	classifier   classifier.Classifier
+	extractor    *extractor.Extractor
+	parser       *parser.FieldParser
+	config       *config.Config
+	logger       *slog.Logger
+	projectMap   map[string]string
+	broker       *web.EventBroker
+	orchestrator *ai.Orchestrator
+	aiEnabled    bool
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -61,16 +63,20 @@ func NewMessageProcessor(
 	logger *slog.Logger,
 	projectMap map[string]string,
 	broker *web.EventBroker,
+	orchestrator *ai.Orchestrator,
+	aiEnabled bool,
 ) *MessageProcessor {
 	return &MessageProcessor{
-		store:      st,
-		classifier: cl,
-		extractor:  ext,
-		parser:     par,
-		config:     cfg,
-		logger:     logger,
-		projectMap: projectMap,
-		broker:     broker,
+		store:        st,
+		classifier:   cl,
+		extractor:    ext,
+		parser:       par,
+		config:       cfg,
+		logger:       logger,
+		projectMap:   projectMap,
+		broker:       broker,
+		orchestrator: orchestrator,
+		aiEnabled:    aiEnabled,
 	}
 }
 
@@ -113,6 +119,28 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		return &ProcessResult{Action: ActionIgnore, Extracted: email}, nil
 	}
 
+	// Если AI включён — пробуем обработать через LLM
+	if p.aiEnabled && p.orchestrator != nil {
+		aiResponse, err := p.orchestrator.ProcessEmail(ctx, email)
+		if err != nil {
+			p.logger.Warn("AI processing failed, fallback to rules", "error", err)
+		} else {
+			if err := p.orchestrator.ApplyVerdicts(ctx, email, aiResponse); err != nil {
+				p.logger.Error("AI verdicts failed, fallback to rules", "error", err)
+			} else {
+				// Обновляем summary асинхронно
+				go func() {
+					if err := p.orchestrator.UpdateSummary(context.Background(), email, aiResponse); err != nil {
+						p.logger.Warn("failed to update summary", "error", err)
+					}
+				}()
+
+				p.logger.Info("processed by AI", "verdicts", len(aiResponse.Verdicts))
+				return &ProcessResult{Action: ActionCreateIssue, Extracted: email}, nil
+			}
+		}
+	}
+
 	// Ищем существующую задачу по ID в теме или References
 	existingTaskID := p.findExistingTask(ctx, email)
 
@@ -125,7 +153,6 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 
 // findExistingTask ищет ID существующей задачи.
 func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extractor.ExtractedEmail) int64 {
-	// Проверяем тему на наличие [TASK-XXX]
 	taskID := extractTaskIDFromSubject(email.Subject)
 	if taskID > 0 {
 		task, err := p.store.GetTask(ctx, taskID)
@@ -137,7 +164,6 @@ func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extracto
 		)
 	}
 
-	// Проверяем References / In-Reply-To через email_mapping
 	refs := email.References
 	if email.InReplyTo != "" {
 		refs = append(refs, email.InReplyTo)
@@ -145,7 +171,6 @@ func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extracto
 	if len(refs) > 0 {
 		mapping, err := p.store.FindMappingByReferences(ctx, refs)
 		if err == nil && mapping != nil {
-			// Ищем задачу по message_id из mapping
 			task, err := p.store.GetTaskByMessageID(ctx, mapping.MessageID)
 			if err == nil && task != nil {
 				return task.ID
@@ -213,7 +238,6 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		})
 	}
 
-	// Сохраняем вложения
 	for _, att := range email.Attachments {
 		taskAtt := &store.TaskAttachment{
 			TaskID:      task.ID,
@@ -227,7 +251,6 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		}
 	}
 
-	// Сохраняем маппинг для обратной совместимости
 	mapping := &store.EmailMapping{
 		MessageID:        email.MessageID,
 		PlaneIssueID:     fmt.Sprintf("task-%d", task.ID),
@@ -272,12 +295,10 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 		"message_id", email.MessageID,
 	)
 
-	// Если это входящий комментарий — сбрасываем статус прочтения для всех
 	if err := p.store.ResetTaskReads(ctx, taskID); err != nil {
 		p.logger.Error("failed to reset task reads", "error", err)
 	}
 
-	// Уведомляем через WebSocket
 	if p.broker != nil {
 		p.broker.Publish(web.WSEvent{
 			Type:     "task_updated",
@@ -288,7 +309,6 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 		})
 	}
 
-	// Сохраняем вложения к существующей задаче
 	for _, att := range email.Attachments {
 		taskAtt := &store.TaskAttachment{
 			TaskID:      taskID,
@@ -311,7 +331,6 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 }
 
 // extractTaskIDFromSubject извлекает ID задачи из темы письма.
-// Поддерживает форматы: [TASK-123]
 func extractTaskIDFromSubject(subject string) int64 {
 	subject = strings.TrimSpace(subject)
 	for {

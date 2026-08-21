@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/classifier"
 	"github.com/audetv/mailbridge/internal/config"
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -115,6 +116,24 @@ func main() {
 	broker := web.NewEventBroker()
 
 	// ---------------------------------------------------------------------------
+	// AI Client (если включён в конфиге)
+	// ---------------------------------------------------------------------------
+	var aiClient ai.Client
+	if cfg.AI.Enabled {
+		switch cfg.AI.Provider {
+		case "ollama":
+			aiClient = ai.NewOllamaClient(cfg.AI.BaseURL, cfg.AI.Model)
+		case "openai":
+			aiClient = ai.NewOpenAIClient(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model)
+		}
+	}
+
+	var orchestrator *ai.Orchestrator
+	if aiClient != nil {
+		orchestrator = ai.NewOrchestrator(aiClient, st)
+	}
+
+	// ---------------------------------------------------------------------------
 	// Extractor и Processor
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
@@ -129,7 +148,7 @@ func main() {
 	}
 
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap, broker,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled,
 	)
 
 	// ---------------------------------------------------------------------------

@@ -53,9 +53,7 @@ func TestInboundWorker_Creation(t *testing.T) {
 		"Входящие": "INBOX",
 	}
 
-	proc := processor.NewMessageProcessor(st, cl, ext, par, &config.Config{
-		Plane: config.PlaneConfig{DefaultProject: "Входящие"},
-	}, logger, projectNameMap, nil)
+	proc := processor.NewMessageProcessor(st, cl, ext, par, &config.Config{Plane: config.PlaneConfig{DefaultProject: "Входящие"}}, logger, projectNameMap, nil, nil, false)
 
 	w := worker.NewInboundWorker(reader, proc, 30*time.Second, logger)
 

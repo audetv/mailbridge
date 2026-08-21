@@ -294,6 +294,17 @@ func extractName(from string) string {
 func (o *Orchestrator) UpdateSummary(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
 	threadID := determineThreadID(email)
 
+	// Убеждаемся что тред существует
+	thread, err := o.store.GetThread(ctx, threadID)
+	if err != nil {
+		return fmt.Errorf("failed to get thread: %w", err)
+	}
+	if thread == nil {
+		if err := o.store.CreateThread(ctx, &store.Thread{ThreadID: threadID}); err != nil {
+			return fmt.Errorf("failed to create thread: %w", err)
+		}
+	}
+
 	// Формируем запрос на обновление summary
 	prompt := fmt.Sprintf(`Обнови краткое резюме цепочки писем на основе нового события.
 
