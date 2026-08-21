@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -27,7 +28,6 @@ func NewOrchestrator(client Client, st store.Store) *Orchestrator {
 func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.ExtractedEmail) (*LLMResponse, error) {
 	threadID := determineThreadID(email)
 
-	// Загружаем контекст
 	thread, err := o.store.GetThread(ctx, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get thread: %w", err)
@@ -37,7 +37,6 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 	if thread != nil {
 		summary = thread.Summary
 	} else {
-		// Создаём новый тред
 		if err := o.store.CreateThread(ctx, &store.Thread{ThreadID: threadID}); err != nil {
 			return nil, fmt.Errorf("failed to create thread: %w", err)
 		}
@@ -48,16 +47,18 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		return nil, fmt.Errorf("failed to get active tasks: %w", err)
 	}
 
-	// Формируем промпт (следующий шаг)
 	prompt := o.buildPrompt(summary, activeTasks, email)
 
-	// Вызываем LLM
 	response, err := o.client.Generate(ctx, prompt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("LLM generate failed: %w", err)
 	}
 
-	// Парсим JSON (следующий шаг)
+	return o.parseResponse(response)
+}
+
+// ParseResponse — экспортируемая обёртка для тестирования.
+func (o *Orchestrator) ParseResponse(response string) (*LLMResponse, error) {
 	return o.parseResponse(response)
 }
 
@@ -141,7 +142,19 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	return sb.String()
 }
 
-// parseResponse — будет реализовано в шаге AI-4.3
-func (o *Orchestrator) parseResponse(_ string) (*LLMResponse, error) {
-	return nil, fmt.Errorf("not implemented")
+// parseResponse парсит JSON-ответ LLM.
+func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
+	// Очищаем возможные markdown-обёртки
+	response = strings.TrimSpace(response)
+	response = strings.TrimPrefix(response, "```json")
+	response = strings.TrimPrefix(response, "```")
+	response = strings.TrimSuffix(response, "```")
+	response = strings.TrimSpace(response)
+
+	var result LLMResponse
+	if err := json.Unmarshal([]byte(response), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return &result, nil
 }

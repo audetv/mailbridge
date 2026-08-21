@@ -39,3 +39,38 @@ func TestBuildPrompt(t *testing.T) {
 		t.Error("prompt does not contain JSON instruction")
 	}
 }
+
+func TestParseResponse_Valid(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+
+	jsonStr := `{"verdicts":[{"action":"new","task":{"title":"Test"}}]}`
+	result, err := o.ParseResponse(jsonStr)
+	if err != nil {
+		t.Fatalf("ParseResponse error: %v", err)
+	}
+	if len(result.Verdicts) != 1 {
+		t.Errorf("expected 1 verdict, got %d", len(result.Verdicts))
+	}
+}
+
+func TestParseResponse_MarkdownWrapper(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+
+	jsonStr := "```json\n{\"verdicts\":[]}\n```"
+	result, err := o.ParseResponse(jsonStr)
+	if err != nil {
+		t.Fatalf("ParseResponse error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+}
+
+func TestParseResponse_Invalid(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+
+	_, err := o.ParseResponse("не JSON")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
