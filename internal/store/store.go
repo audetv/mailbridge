@@ -27,6 +27,16 @@ type Task struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// Thread представляет цепочку писем.
+type Thread struct {
+	ID          int64      `json:"id"`
+	ThreadID    string     `json:"thread_id"`
+	Summary     string     `json:"summary"`
+	LastEmailAt *time.Time `json:"last_email_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 // TaskWithUnread расширяет Task полем UnreadComments для ответа API.
 type TaskWithUnread struct {
 	*Task
@@ -150,6 +160,12 @@ type Store interface {
 	// ResetTaskReads сбрасывает статус прочтения для всех пользователей задачи.
 	// Вызывается при добавлении нового входящего комментария.
 	ResetTaskReads(ctx context.Context, taskID int64) error
+
+	// Threads
+	CreateThread(ctx context.Context, thread *Thread) error
+	GetThread(ctx context.Context, threadID string) (*Thread, error)
+	UpdateThreadSummary(ctx context.Context, threadID, summary string) error
+	GetActiveTasksByThread(ctx context.Context, threadID string) ([]*Task, error)
 
 	// Ping
 	Ping(ctx context.Context) error

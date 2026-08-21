@@ -549,3 +549,79 @@ func TestMigrate_TaskAIColumns(t *testing.T) {
 		t.Errorf("Subject = %s", got.Subject)
 	}
 }
+
+func TestThreadsCRUD(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// CreateThread
+	thread := &store.Thread{ThreadID: "thread-001", Summary: ""}
+	if err := s.CreateThread(ctx, thread); err != nil {
+		t.Fatalf("CreateThread error: %v", err)
+	}
+	if thread.ID == 0 {
+		t.Error("thread ID is 0")
+	}
+
+	// GetThread
+	got, err := s.GetThread(ctx, "thread-001")
+	if err != nil {
+		t.Fatalf("GetThread error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("thread not found")
+	}
+	if got.ThreadID != "thread-001" {
+		t.Errorf("ThreadID = %s", got.ThreadID)
+	}
+
+	// UpdateThreadSummary
+	if err := s.UpdateThreadSummary(ctx, "thread-001", "Обновлённое резюме"); err != nil {
+		t.Fatalf("UpdateThreadSummary error: %v", err)
+	}
+
+	got, _ = s.GetThread(ctx, "thread-001")
+	if got.Summary != "Обновлённое резюме" {
+		t.Errorf("Summary = %s, want Обновлённое резюме", got.Summary)
+	}
+}
+
+func TestGetActiveTasksByThread(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Создаём тред
+	if err := s.CreateThread(ctx, &store.Thread{ThreadID: "thread-002"}); err != nil {
+		t.Fatalf("CreateThread error: %v", err)
+	}
+	// Создаём задачи
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a1", Subject: "Задача 1", BodyText: "B", FromEmail: "u@e.com",
+		Status: "new", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a2", Subject: "Задача 2", BodyText: "B", FromEmail: "u@e.com",
+		Status: "in_progress", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a3", Subject: "Задача 3", BodyText: "B", FromEmail: "u@e.com",
+		Status: "closed", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Проверяем активные задачи (new + in_progress + resolved, без closed)
+	tasks, err := s.GetActiveTasksByThread(ctx, "thread-002")
+	if err != nil {
+		t.Fatalf("GetActiveTasksByThread error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 active tasks, got %d", len(tasks))
+	}
+}

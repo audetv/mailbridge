@@ -670,3 +670,68 @@ func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMappi
 	m.CreatedAt = createdAt
 	return m, nil
 }
+
+// CreateThread создаёт новую цепочку писем.
+func (s *Store) CreateThread(ctx context.Context, thread *store.Thread) error {
+	query := `INSERT INTO threads (thread_id, summary, last_email_at) VALUES (?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query, thread.ThreadID, thread.Summary, thread.LastEmailAt)
+	if err != nil {
+		return fmt.Errorf("failed to create thread: %w", err)
+	}
+	id, _ := result.LastInsertId()
+	thread.ID = id
+	thread.CreatedAt = time.Now()
+	thread.UpdatedAt = time.Now()
+	return nil
+}
+
+// GetThread возвращает цепочку по thread_id.
+func (s *Store) GetThread(ctx context.Context, threadID string) (*store.Thread, error) {
+	query := `SELECT id, thread_id, summary, last_email_at, created_at, updated_at FROM threads WHERE thread_id = ?`
+	row := s.db.QueryRowContext(ctx, query, threadID)
+
+	t := &store.Thread{}
+	var lastEmailAt sql.NullTime
+	err := row.Scan(&t.ID, &t.ThreadID, &t.Summary, &lastEmailAt, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan thread: %w", err)
+	}
+	if lastEmailAt.Valid {
+		t.LastEmailAt = &lastEmailAt.Time
+	}
+	return t, nil
+}
+
+// UpdateThreadSummary обновляет summary цепочки.
+func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE threads SET summary = ?, updated_at = ? WHERE thread_id = ?",
+		summary, time.Now(), threadID)
+	return err
+}
+
+// GetActiveTasksByThread возвращает активные задачи цепочки.
+func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
+	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved') ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*store.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
