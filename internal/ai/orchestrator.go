@@ -158,3 +158,134 @@ func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
 
 	return &result, nil
 }
+
+// ApplyVerdicts применяет решения LLM к БД.
+func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse) error {
+	if response == nil || len(response.Verdicts) == 0 {
+		return nil
+	}
+
+	for _, verdict := range response.Verdicts {
+		switch verdict.Action {
+		case "new":
+			if verdict.Task != nil {
+				if err := o.createTaskFromVerdict(ctx, email, verdict); err != nil {
+					return fmt.Errorf("failed to create task: %w", err)
+				}
+			}
+
+		case "update":
+			if verdict.TaskID != nil && verdict.Updates != nil {
+				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+					return fmt.Errorf("failed to update task: %w", err)
+				}
+			}
+
+		case "completed":
+			if verdict.TaskID != nil {
+				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+					return fmt.Errorf("failed to complete task: %w", err)
+				}
+			}
+
+		case "info_only":
+			// Ничего не делаем, только сохраняем ai_verdict
+			// (будет реализовано позже при необходимости)
+		}
+	}
+
+	return nil
+}
+
+// createTaskFromVerdict создаёт новую задачу.
+func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict) error {
+	task := &store.Task{
+		MessageID:     email.MessageID,
+		Subject:       verdict.Task.Title,
+		BodyText:      verdict.Task.Description,
+		FromEmail:     email.From,
+		FromName:      extractName(email.From),
+		Project:       verdict.Task.Project,
+		Type:          verdict.Task.Type,
+		Priority:      verdict.Task.Priority,
+		Status:        "new",
+		ThreadID:      determineThreadID(email),
+		SourceEmailID: email.MessageID,
+		AIVerdict:     verdictToJSON(verdict),
+	}
+
+	return o.store.CreateTask(ctx, task)
+}
+
+// updateTaskFromVerdict обновляет существующую задачу.
+func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict) error {
+	updates := make(map[string]interface{})
+
+	if verdict.Updates.Priority != "" {
+		updates["priority"] = verdict.Updates.Priority
+	}
+	if verdict.Updates.ChangeStatus != "" {
+		updates["status"] = verdict.Updates.ChangeStatus
+	}
+
+	if len(updates) > 0 {
+		if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
+			return err
+		}
+	}
+
+	if verdict.Updates.AddComment != "" {
+		comment := &store.TaskComment{
+			TaskID:    int64(taskID),
+			Author:    "ai",
+			Body:      verdict.Updates.AddComment,
+			Direction: "in",
+		}
+		if err := o.store.AddTaskComment(ctx, comment); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// completeTaskFromVerdict завершает задачу.
+func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict) error {
+	updates := map[string]interface{}{
+		"status": "completed",
+	}
+	if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
+		return err
+	}
+
+	if verdict.Comment != "" {
+		comment := &store.TaskComment{
+			TaskID:    int64(taskID),
+			Author:    "ai",
+			Body:      verdict.Comment,
+			Direction: "in",
+		}
+		if err := o.store.AddTaskComment(ctx, comment); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// verdictToJSON сериализует вердикт для аудита.
+func verdictToJSON(v Verdict) string {
+	data, _ := json.Marshal(v)
+	return string(data)
+}
+
+// extractName извлекает имя из адреса вида "Имя Фамилия <email>".
+func extractName(from string) string {
+	idx := strings.Index(from, "<")
+	if idx == -1 {
+		return ""
+	}
+	name := strings.TrimSpace(from[:idx])
+	name = strings.Trim(name, `"`)
+	return name
+}

@@ -1,12 +1,14 @@
 package ai_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
+	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
 
 // BuildPrompt — экспортируемая обёртка для тестирования.
@@ -72,5 +74,47 @@ func TestParseResponse_Invalid(t *testing.T) {
 	_, err := o.ParseResponse("не JSON")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestApplyVerdicts_NewTask(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	o := ai.NewOrchestrator(nil, st)
+
+	email := &extractor.ExtractedEmail{
+		MessageID: "msg-1",
+		From:      "user@example.com",
+		Subject:   "Test",
+		BodyText:  "Body",
+	}
+
+	response := &ai.LLMResponse{
+		Verdicts: []ai.Verdict{
+			{
+				Action: "new",
+				Task: &ai.NewTaskData{
+					Title:       "Новая задача",
+					Description: "Описание",
+					Priority:    "high",
+					Project:     "ТРК",
+					Type:        "bug",
+				},
+			},
+		},
+	}
+
+	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+		t.Fatalf("ApplyVerdicts error: %v", err)
+	}
+
+	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-1")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Subject != "Новая задача" {
+		t.Errorf("Subject = %s", tasks[0].Subject)
 	}
 }
