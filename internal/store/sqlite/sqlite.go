@@ -60,6 +60,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 			priority TEXT NOT NULL DEFAULT 'medium',
 			status TEXT NOT NULL DEFAULT 'new',
 			assignee TEXT NOT NULL DEFAULT '',
+			thread_id TEXT NOT NULL DEFAULT '',
+			source_email_id TEXT NOT NULL DEFAULT '',
+			ai_verdict TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -67,6 +70,8 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_thread_id ON tasks(thread_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_source_email_id ON tasks(source_email_id)`,
 
 		// Таблица комментариев
 		`CREATE TABLE IF NOT EXISTS task_comments (
@@ -132,6 +137,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (task_id, username)
 		)`,
+
 		`CREATE TABLE IF NOT EXISTS threads (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			thread_id TEXT NOT NULL UNIQUE,
@@ -167,6 +173,36 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 			return fmt.Errorf("failed to add column plane_project_id: %w", err)
 		}
 	}
+
+	// Добавляем AI-колонки в tasks если их нет
+	aiColumns := map[string]string{
+		"thread_id":       "TEXT NOT NULL DEFAULT ''",
+		"source_email_id": "TEXT NOT NULL DEFAULT ''",
+		"ai_verdict":      "TEXT NOT NULL DEFAULT ''",
+	}
+	for col, typ := range aiColumns {
+		has, err := s.columnExists(ctx, "tasks", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	// Индексы для новых колонок
+	indexMigrations := []string{
+		`CREATE INDEX IF NOT EXISTS idx_tasks_thread_id ON tasks(thread_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_source_email_id ON tasks(source_email_id)`,
+	}
+	for _, idx := range indexMigrations {
+		if _, err := s.db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -195,13 +231,14 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 
 // CreateTask создаёт новую задачу.
 func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
-	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	result, err := s.db.ExecContext(ctx, query,
 		task.MessageID, task.Subject, task.BodyText, task.BodyHTML,
 		task.FromEmail, task.FromName, task.Project, task.Type,
-		task.Priority, task.Status, task.Assignee)
+		task.Priority, task.Status, task.Assignee,
+		task.ThreadID, task.SourceEmailID, task.AIVerdict)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -216,7 +253,7 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 // GetTask возвращает задачу по ID.
 func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
 		FROM tasks WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -226,7 +263,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 // GetTaskByMessageID возвращает задачу по Message-ID.
 func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
 		FROM tasks WHERE message_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, messageID)
@@ -296,7 +333,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -323,7 +360,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		unread := 0
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
@@ -600,7 +637,7 @@ func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) 
 	t := &store.Task{}
 	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
 		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

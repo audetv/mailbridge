@@ -8,20 +8,23 @@ import (
 
 // Task представляет задачу в helpdesk.
 type Task struct {
-	ID        int64     `json:"id"`
-	MessageID string    `json:"message_id"`
-	Subject   string    `json:"subject"`
-	BodyText  string    `json:"body_text"`
-	BodyHTML  string    `json:"body_html"`
-	FromEmail string    `json:"from_email"`
-	FromName  string    `json:"from_name"`
-	Project   string    `json:"project"`
-	Type      string    `json:"type"`
-	Priority  string    `json:"priority"`
-	Status    string    `json:"status"`
-	Assignee  string    `json:"assignee"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID            int64     `json:"id"`
+	MessageID     string    `json:"message_id"`
+	Subject       string    `json:"subject"`
+	BodyText      string    `json:"body_text"`
+	BodyHTML      string    `json:"body_html"`
+	FromEmail     string    `json:"from_email"`
+	FromName      string    `json:"from_name"`
+	Project       string    `json:"project"`
+	Type          string    `json:"type"`
+	Priority      string    `json:"priority"`
+	Status        string    `json:"status"`
+	Assignee      string    `json:"assignee"`
+	ThreadID      string    `json:"thread_id"`
+	SourceEmailID string    `json:"source_email_id"`
+	AIVerdict     string    `json:"ai_verdict"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // TaskWithUnread расширяет Task полем UnreadComments для ответа API.

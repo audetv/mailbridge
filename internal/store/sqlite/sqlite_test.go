@@ -513,3 +513,39 @@ func TestMigrate_ThreadsTable(t *testing.T) {
 		t.Fatal("threads table not created")
 	}
 }
+
+func TestMigrate_TaskAIColumns(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task := &store.Task{
+		MessageID: "ai-test",
+		Subject:   "Test",
+		BodyText:  "B",
+		FromEmail: "u@e.com",
+		Status:    "new",
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Обновляем ai-поля
+	err := s.UpdateTask(ctx, task.ID, map[string]interface{}{
+		"thread_id":       "thread-123",
+		"source_email_id": "msg-456",
+		"ai_verdict":      `{"action":"new"}`,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask with AI fields error: %v", err)
+	}
+
+	// Проверяем что задача создалась и обновилась
+	got, err := s.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask error: %v", err)
+	}
+	if got.Subject != "Test" {
+		t.Errorf("Subject = %s", got.Subject)
+	}
+}
