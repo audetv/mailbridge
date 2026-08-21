@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nguyenthenguyen/docx"
+	"github.com/xuri/excelize/v2"
 )
 
 // Preprocessor обрабатывает вложения писем.
@@ -43,6 +46,20 @@ func (p *Preprocessor) ProcessAttachment(path string) (*ProcessedAttachment, err
 			Content: base64.StdEncoding.EncodeToString(data),
 		}, nil
 
+	case ".docx":
+		text, err := extractDocxText(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract docx: %w", err)
+		}
+		return &ProcessedAttachment{Type: "text", Content: text}, nil
+
+	case ".xlsx":
+		text, err := extractXlsxText(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract xlsx: %w", err)
+		}
+		return &ProcessedAttachment{Type: "text", Content: text}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -52,4 +69,39 @@ func (p *Preprocessor) ProcessAttachment(path string) (*ProcessedAttachment, err
 type ProcessedAttachment struct {
 	Type    string // "text" или "image"
 	Content string // текст или Base64
+}
+
+// extractDocxText извлекает текст из DOCX-файла.
+// extractDocxText извлекает текст из DOCX-файла.
+func extractDocxText(path string) (string, error) {
+	doc, err := docx.ReadDocxFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	return doc.Editable().GetContent(), nil
+}
+
+// extractXlsxText извлекает текст из XLSX-файла.
+func extractXlsxText(path string) (string, error) {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var text strings.Builder
+	for _, sheet := range f.GetSheetList() {
+		text.WriteString("=== Лист: " + sheet + " ===\n")
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			text.WriteString(strings.Join(row, " | "))
+			text.WriteString("\n")
+		}
+	}
+	return text.String(), nil
 }
