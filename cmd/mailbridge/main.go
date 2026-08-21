@@ -24,6 +24,7 @@ import (
 	"github.com/audetv/mailbridge/internal/sender"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 	"github.com/audetv/mailbridge/internal/version"
+	"github.com/audetv/mailbridge/internal/web"
 	"github.com/audetv/mailbridge/internal/webhook"
 	"github.com/audetv/mailbridge/internal/worker"
 )
@@ -109,12 +110,26 @@ func main() {
 	)
 
 	// ---------------------------------------------------------------------------
+	// Websocket
+	// ---------------------------------------------------------------------------
+	broker := web.NewEventBroker()
+
+	// ---------------------------------------------------------------------------
 	// Extractor и Processor
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
 
+	// Преобразуем projectMap в map[string]string (имя → идентификатор)
+	projectNameMap := make(map[string]string, len(projectMap))
+	for name, proj := range projectMap {
+		projectNameMap[name] = proj.Identifier
+	}
+	if len(projectNameMap) == 0 {
+		projectNameMap["Входящие"] = "INBOX"
+	}
+
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, planeClient, cfg, logger, projectMap,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -195,6 +210,33 @@ func main() {
 		m.SetIMAPConnected(imapOk && mailReader.IsConnected())
 		_, _ = w.Write([]byte(m.PrometheusFormat()))
 	})
+
+	// Auth API
+	authHandler := web.NewAuthHandler()
+	mux.HandleFunc("/api/auth/login", authHandler.Login)
+	mux.HandleFunc("/api/auth/me", authHandler.Me)
+
+	taskHandler := web.NewTaskHandler(st)
+	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
+	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			taskHandler.GetTask(w, r)
+		case http.MethodPatch:
+			taskHandler.UpdateTask(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+	// Помечаем задачу прочитанной
+	mux.HandleFunc("/api/tasks/{id}/mark-read", taskHandler.MarkRead)
+	// Вложения
+	mux.HandleFunc("/api/attachments/{path...}", taskHandler.GetAttachment)
+
+	// WebSocket
+	wsHandler := web.NewWSHandler(broker)
+	mux.Handle("/api/ws", wsHandler)
 
 	// Webhook
 	whHandler := webhook.NewHandler(st, cfg.Webhook.Secret, logger)

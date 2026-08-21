@@ -261,3 +261,101 @@ Content-Type: text/plain
 		t.Errorf("InReplyTo = %q", result.InReplyTo)
 	}
 }
+
+func TestCleaner_SanitizeHTML(t *testing.T) {
+	c := extractor.NewCleaner()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty paragraphs",
+			input: `<p>&nbsp;</p><p>  </p><p>Текст</p>`,
+			want:  `<p>Текст</p>`,
+		},
+		{
+			name:  "multiple br",
+			input: `Текст<br><br><br><br>конец`,
+			want:  `Текст<br><br>конец`,
+		},
+		{
+			name:  "empty divs",
+			input: `<div></div><div>Содержимое</div><div> </div>`,
+			want:  `<div>Содержимое</div>`,
+		},
+		{
+			name:  "base tag removed",
+			input: `<base href="https://e.mail.ru/"><p>Текст</p>`,
+			want:  `<p>Текст</p>`,
+		},
+		{
+			name:  "cid images preserved for inline replacement",
+			input: `<p>Текст</p><img src="cid:ii_123">`,
+			want:  `<p>Текст</p><img src="cid:ii_123">`,
+		},
+		{
+			name:  "clean text passes through",
+			input: "Простой текст без HTML",
+			want:  "Простой текст без HTML",
+		},
+	}
+
+	for _, tt := range tests {
+		got := c.SanitizeHTML(tt.input)
+		if got != tt.want {
+			t.Errorf("%s: SanitizeHTML = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestExtractor_InlineImages(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Screenshot
+Message-ID: <inline-test@example.com>
+Content-Type: multipart/related; boundary="boundary456"
+
+--boundary456
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Смотрите скриншот:</p><img src="cid:img123"></body></html>
+
+--boundary456
+Content-Type: image/png; name="screenshot.png"
+Content-Disposition: inline; filename="screenshot.png"
+Content-ID: <img123>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGA
+WjR9awAAAABJRU5ErkJggg==
+
+--boundary456--`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	// HTML должен содержать путь к файлу вместо cid
+	if strings.Contains(result.BodyHTML, "cid:img123") {
+		t.Error("HTML should not contain cid: reference after extraction")
+	}
+	if !strings.Contains(result.BodyHTML, "/api/attachments/") {
+		t.Error("HTML should contain path to saved inline image")
+	}
+
+	// Вложение должно быть сохранено
+	if len(result.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(result.Attachments))
+	}
+}

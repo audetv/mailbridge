@@ -103,3 +103,31 @@ func defaultQuotePatterns() []*regexp.Regexp {
 
 	return compiled
 }
+
+// SanitizeHTML очищает HTML от пустых тегов, лишних br и схлопывает отступы.
+func (c *Cleaner) SanitizeHTML(html string) string {
+	if html == "" {
+		return ""
+	}
+
+	// Удаляем пустые <p> теги (с пробелами, &nbsp;, <br>)
+	emptyP := regexp.MustCompile(`(?i)<p[^>]*>(?:&nbsp;|\s|<br\s*/?>)*</p>`)
+	html = emptyP.ReplaceAllString(html, "")
+
+	// Схлопываем множественные <br> (больше 2 подряд)
+	multiBr := regexp.MustCompile(`(?i)(<br\s*/?>\s*){3,}`)
+	html = multiBr.ReplaceAllString(html, "<br><br>")
+
+	// Удаляем пустые <div>
+	emptyDiv := regexp.MustCompile(`(?i)<div[^>]*>(?:\s|&nbsp;)*</div>`)
+	html = emptyDiv.ReplaceAllString(html, "")
+
+	// Удаляем <base> теги — они меняют базовый URL страницы и ломают API-запросы
+	baseTag := regexp.MustCompile(`(?i)<base[^>]*>`)
+	html = baseTag.ReplaceAllString(html, "")
+
+	// Удаляем множественные пустые строки
+	html = regexp.MustCompile(`\n{3,}`).ReplaceAllString(html, "\n\n")
+
+	return strings.TrimSpace(html)
+}

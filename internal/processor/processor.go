@@ -13,8 +13,8 @@ import (
 	"github.com/audetv/mailbridge/internal/config"
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/parser"
-	"github.com/audetv/mailbridge/internal/plane"
 	"github.com/audetv/mailbridge/internal/store"
+	"github.com/audetv/mailbridge/internal/web"
 )
 
 // ActionType определяет тип действия над письмом.
@@ -31,25 +31,24 @@ const (
 
 // ProcessResult содержит результат обработки письма.
 type ProcessResult struct {
-	Action        ActionType
-	IssueID       string
-	IssueSequence string
-	Mapping       *store.EmailMapping
-	Extracted     *extractor.ExtractedEmail
-	Error         error
+	Action    ActionType
+	TaskID    int64
+	Task      *store.Task
+	Extracted *extractor.ExtractedEmail
+	Error     error
 }
 
 // MessageProcessor оркестрирует обработку входящего письма.
 type MessageProcessor struct {
-	store       store.Store
-	classifier  classifier.Classifier
-	extractor   *extractor.Extractor
-	parser      *parser.FieldParser
-	planeClient *plane.Client
-	config      *config.Config
-	logger      *slog.Logger
-	// projectMap: имя проекта → Project (содержит ID и Identifier)
-	projectMap map[string]*plane.Project
+	store      store.Store
+	classifier classifier.Classifier
+	extractor  *extractor.Extractor
+	parser     *parser.FieldParser
+	config     *config.Config
+	logger     *slog.Logger
+	// projectMap: имя проекта → проект (для маппинга имени на UUID, опционально)
+	projectMap map[string]string
+	broker     *web.EventBroker
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -58,20 +57,20 @@ func NewMessageProcessor(
 	cl classifier.Classifier,
 	ext *extractor.Extractor,
 	par *parser.FieldParser,
-	pc *plane.Client,
 	cfg *config.Config,
 	logger *slog.Logger,
-	projectMap map[string]*plane.Project,
+	projectMap map[string]string,
+	broker *web.EventBroker,
 ) *MessageProcessor {
 	return &MessageProcessor{
-		store:       st,
-		classifier:  cl,
-		extractor:   ext,
-		parser:      par,
-		planeClient: pc,
-		config:      cfg,
-		logger:      logger,
-		projectMap:  projectMap,
+		store:      st,
+		classifier: cl,
+		extractor:  ext,
+		parser:     par,
+		config:     cfg,
+		logger:     logger,
+		projectMap: projectMap,
+		broker:     broker,
 	}
 }
 
@@ -88,40 +87,57 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		"subject", email.Subject,
 	)
 
-	exists, err := p.store.MessageExists(ctx, email.MessageID)
+	// Проверяем дубликат по Message-ID через таблицу задач
+	existingTask, err := p.store.GetTaskByMessageID(ctx, email.MessageID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check message existence: %w", err)
+		p.logger.Debug("message_id not found, checking email_mapping", "error", err)
 	}
-	if exists {
-		p.logger.Info("duplicate email ignored", "message_id", email.MessageID)
+
+	if existingTask != nil {
+		p.logger.Info("duplicate email — task already exists",
+			"message_id", email.MessageID,
+			"task_id", existingTask.ID,
+		)
+		return &ProcessResult{
+			Action:    ActionIgnore,
+			TaskID:    existingTask.ID,
+			Task:      existingTask,
+			Extracted: email,
+		}, nil
+	}
+
+	// Проверяем старую таблицу email_mapping
+	exists, err := p.store.MessageExists(ctx, email.MessageID)
+	if err == nil && exists {
+		p.logger.Info("duplicate email ignored (mapping)", "message_id", email.MessageID)
 		return &ProcessResult{Action: ActionIgnore, Extracted: email}, nil
 	}
 
-	existingIssueID, existingProjectID := p.findExistingIssue(ctx, email)
+	// Ищем существующую задачу по ID в теме или References
+	existingTaskID := p.findExistingTask(ctx, email)
 
-	if existingIssueID != "" && existingProjectID != "" {
-		return p.addCommentToIssue(ctx, email, existingProjectID, existingIssueID)
+	if existingTaskID > 0 {
+		return p.addCommentToTask(ctx, email, existingTaskID)
 	}
 
-	return p.createNewIssue(ctx, email)
+	return p.createNewTask(ctx, email)
 }
 
-// findExistingIssue ищет ID существующей задачи и проекта.
-func (p *MessageProcessor) findExistingIssue(ctx context.Context, email *extractor.ExtractedEmail) (issueID, projectID string) {
-	// Проверяем тему на наличие [IDENTIFIER-XXX]
-	identifier, seq := extractIssueIDFromSubject(email.Subject)
-	if identifier != "" && seq > 0 {
-		workItem, err := p.planeClient.GetWorkItemByIdentifier(ctx, identifier, seq)
-		if err == nil && workItem != nil {
-			return workItem.ID, workItem.ProjectID
+// findExistingTask ищет ID существующей задачи.
+func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extractor.ExtractedEmail) int64 {
+	// Проверяем тему на наличие [TASK-XXX]
+	taskID := extractTaskIDFromSubject(email.Subject)
+	if taskID > 0 {
+		task, err := p.store.GetTask(ctx, taskID)
+		if err == nil && task != nil {
+			return task.ID
 		}
-		p.logger.Debug("work item not found by identifier",
-			"identifier", identifier,
-			"seq", seq,
+		p.logger.Debug("task not found by ID from subject",
+			"task_id", taskID,
 		)
 	}
 
-	// Проверяем References / In-Reply-To
+	// Проверяем References / In-Reply-To через email_mapping
 	refs := email.References
 	if email.InReplyTo != "" {
 		refs = append(refs, email.InReplyTo)
@@ -129,15 +145,19 @@ func (p *MessageProcessor) findExistingIssue(ctx context.Context, email *extract
 	if len(refs) > 0 {
 		mapping, err := p.store.FindMappingByReferences(ctx, refs)
 		if err == nil && mapping != nil {
-			return mapping.PlaneIssueID, mapping.PlaneProjectID
+			// Ищем задачу по message_id из mapping
+			task, err := p.store.GetTaskByMessageID(ctx, mapping.MessageID)
+			if err == nil && task != nil {
+				return task.ID
+			}
 		}
 	}
 
-	return "", ""
+	return 0
 }
 
-// createNewIssue создаёт новую задачу в Plane.
-func (p *MessageProcessor) createNewIssue(ctx context.Context, email *extractor.ExtractedEmail) (*ProcessResult, error) {
+// createNewTask создаёт новую задачу в БД.
+func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.ExtractedEmail) (*ProcessResult, error) {
 	text := email.BodyText
 	if text == "" {
 		text = email.Subject
@@ -155,201 +175,144 @@ func (p *MessageProcessor) createNewIssue(ctx context.Context, email *extractor.
 		"confidence", classification.Confidence,
 	)
 
-	// Определяем проект
-	targetProject := p.resolveProject(classification.Project)
-
-	// Разрешаем метки
-	labelIDs := p.resolveLabels(ctx, targetProject.ID, classification)
-
-	// Создаём задачу
-	description := formatIssueDescription(email)
-
-	workItem, err := p.planeClient.CreateWorkItem(ctx, &plane.CreateWorkItemRequest{
-		ProjectID:      targetProject.ID,
-		Name:           email.Subject,
-		Description:    description,
-		Priority:       classification.Priority,
-		Labels:         labelIDs,
-		ExternalID:     email.MessageID,
-		ExternalSource: "mailbridge",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create work item: %w", err)
+	project := classification.Project
+	if project == "" {
+		project = p.config.Plane.DefaultProject
 	}
 
-	issueSeq := fmt.Sprintf("%s-%d", targetProject.Identifier, workItem.SequenceID)
+	task := &store.Task{
+		MessageID: email.MessageID,
+		Subject:   email.Subject,
+		BodyText:  email.BodyText,
+		BodyHTML:  email.BodyHTML,
+		FromEmail: email.From,
+		FromName:  extractName(email.From),
+		Project:   project,
+		Type:      classification.Type,
+		Priority:  classification.Priority,
+		Status:    "new",
+	}
 
-	p.logger.Info("work item created",
-		"work_item_id", workItem.ID,
-		"project_id", targetProject.ID,
-		"issue_seq", issueSeq,
+	if err := p.store.CreateTask(ctx, task); err != nil {
+		return nil, fmt.Errorf("failed to create task: %w", err)
+	}
+
+	p.logger.Info("task created",
+		"task_id", task.ID,
+		"project", task.Project,
+		"type", task.Type,
 	)
 
+	if p.broker != nil {
+		p.broker.Publish(web.WSEvent{
+			Type:     "task_created",
+			TaskID:   task.ID,
+			Username: task.Assignee,
+			Message:  fmt.Sprintf("Новая задача #%d: %s", task.ID, task.Subject),
+			Data:     task,
+		})
+	}
+
+	// Сохраняем вложения
+	for _, att := range email.Attachments {
+		taskAtt := &store.TaskAttachment{
+			TaskID:      task.ID,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
+		}
+		if err := p.store.AddTaskAttachment(ctx, taskAtt); err != nil {
+			p.logger.Error("failed to save task attachment", "error", err)
+		}
+	}
+
+	// Сохраняем маппинг для обратной совместимости
 	mapping := &store.EmailMapping{
 		MessageID:        email.MessageID,
-		PlaneIssueID:     workItem.ID,
-		PlaneProjectID:   targetProject.ID,
-		PlaneIssueSeq:    issueSeq,
+		PlaneIssueID:     fmt.Sprintf("task-%d", task.ID),
+		PlaneIssueSeq:    fmt.Sprintf("TASK-%d", task.ID),
 		OriginalFrom:     email.From,
 		OriginalSubject:  email.Subject,
 		ThreadReferences: append(email.References, email.MessageID),
 		ActionType:       string(ActionCreateIssue),
 	}
-
 	if err := p.store.SaveMapping(ctx, mapping); err != nil {
 		p.logger.Error("failed to save mapping", "error", err)
 	}
 
 	return &ProcessResult{
-		Action:        ActionCreateIssue,
-		IssueID:       workItem.ID,
-		IssueSequence: issueSeq,
-		Mapping:       mapping,
-		Extracted:     email,
-	}, nil
-}
-
-// addCommentToIssue добавляет комментарий к существующей задаче.
-func (p *MessageProcessor) addCommentToIssue(ctx context.Context, email *extractor.ExtractedEmail, projectID, issueID string) (*ProcessResult, error) {
-	commentText := formatCommentText(email)
-
-	_, err := p.planeClient.AddComment(ctx, projectID, issueID, commentText, email.MessageID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add comment: %w", err)
-	}
-
-	p.logger.Info("comment added",
-		"issue_id", issueID,
-		"message_id", email.MessageID,
-	)
-
-	mapping := &store.EmailMapping{
-		MessageID:        email.MessageID,
-		PlaneIssueID:     issueID,
-		PlaneProjectID:   projectID,
-		OriginalFrom:     email.From,
-		OriginalSubject:  email.Subject,
-		ThreadReferences: append(email.References, email.MessageID),
-		ActionType:       string(ActionAddComment),
-	}
-
-	if err := p.store.SaveMapping(ctx, mapping); err != nil {
-		p.logger.Error("failed to save mapping", "error", err)
-	}
-
-	issueSeq := ""
-	workItem, err := p.planeClient.GetWorkItemByIdentifier(ctx, projectID, 0)
-	if err == nil && workItem != nil {
-		// Не можем получить seq без identifier, но он есть в mapping ответа
-		_ = workItem
-	}
-	_ = issueSeq
-
-	return &ProcessResult{
-		Action:    ActionAddComment,
-		IssueID:   issueID,
-		Mapping:   mapping,
+		Action:    ActionCreateIssue,
+		TaskID:    task.ID,
+		Task:      task,
 		Extracted: email,
 	}, nil
 }
 
-// resolveProject находит проект по имени или возвращает проект по умолчанию.
-func (p *MessageProcessor) resolveProject(name string) *plane.Project {
-	if name != "" {
-		if proj, ok := p.projectMap[name]; ok {
-			return proj
-		}
-	}
-	// Проект по умолчанию
-	for _, proj := range p.projectMap {
-		if proj.Name == p.config.Plane.DefaultProject {
-			return proj
-		}
-	}
-	// Возвращаем первый попавшийся
-	for _, proj := range p.projectMap {
-		return proj
-	}
-	return &plane.Project{ID: "", Identifier: "INBOX"}
-}
-
-// resolveLabels разрешает имена меток в UUID'ы, создавая отсутствующие.
-func (p *MessageProcessor) resolveLabels(ctx context.Context, projectID string, classification *classifier.Classification) []string {
-	if projectID == "" {
-		return nil
+// addCommentToTask добавляет комментарий к существующей задаче.
+func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extractor.ExtractedEmail, taskID int64) (*ProcessResult, error) {
+	task, err := p.store.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, fmt.Errorf("task %d not found: %w", taskID, err)
 	}
 
-	// Загружаем существующие метки
-	existingLabels, err := p.planeClient.GetLabels(ctx, projectID)
-	if err != nil {
-		p.logger.Warn("failed to get labels", "error", err)
+	comment := &store.TaskComment{
+		TaskID:    taskID,
+		Author:    email.From,
+		Body:      email.BodyText,
+		Direction: "in",
 	}
 
-	labelMap := make(map[string]string) // имя → UUID
-	for _, l := range existingLabels {
-		labelMap[strings.ToLower(l.Name)] = l.ID
+	if err := p.store.AddTaskComment(ctx, comment); err != nil {
+		return nil, fmt.Errorf("failed to add comment: %w", err)
 	}
 
-	var labelIDs []string
-	labelsToCreate := []string{"from:email"}
+	p.logger.Info("comment added to task",
+		"task_id", taskID,
+		"message_id", email.MessageID,
+	)
 
-	if classification.Type != "" {
-		labelsToCreate = append(labelsToCreate, classification.Type)
+	// Если это входящий комментарий — сбрасываем статус прочтения для всех
+	if err := p.store.ResetTaskReads(ctx, taskID); err != nil {
+		p.logger.Error("failed to reset task reads", "error", err)
 	}
-	if classification.NeedsTriage {
-		labelsToCreate = append(labelsToCreate, "needs_triage")
-	}
 
-	for _, name := range labelsToCreate {
-		key := strings.ToLower(name)
-		if id, ok := labelMap[key]; ok {
-			labelIDs = append(labelIDs, id)
-			continue
-		}
-
-		// Создаём метку
-		label, err := p.planeClient.CreateLabel(ctx, projectID, &plane.CreateLabelRequest{
-			Name:           name,
-			Color:          labelColor(name),
-			Description:    name,
-			ExternalSource: "mailbridge",
+	// Уведомляем через WebSocket
+	if p.broker != nil {
+		p.broker.Publish(web.WSEvent{
+			Type:     "task_updated",
+			TaskID:   taskID,
+			Username: task.Assignee,
+			Message:  fmt.Sprintf("Новый комментарий в задаче #%d от %s", taskID, email.From),
+			Data:     map[string]interface{}{"task_id": taskID, "from": email.From},
 		})
-		if err != nil {
-			p.logger.Warn("failed to create label", "name", name, "error", err)
-			continue
+	}
+
+	// Сохраняем вложения к существующей задаче
+	for _, att := range email.Attachments {
+		taskAtt := &store.TaskAttachment{
+			TaskID:      taskID,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
 		}
-		labelMap[key] = label.ID
-		labelIDs = append(labelIDs, label.ID)
+		if err := p.store.AddTaskAttachment(ctx, taskAtt); err != nil {
+			p.logger.Error("failed to save attachment", "error", err)
+		}
 	}
 
-	return labelIDs
+	return &ProcessResult{
+		Action:    ActionAddComment,
+		TaskID:    taskID,
+		Task:      task,
+		Extracted: email,
+	}, nil
 }
 
-// labelColor возвращает цвет для метки по имени.
-func labelColor(name string) string {
-	colors := map[string]string{
-		"bug":          "#ff0000",
-		"feature":      "#00ff00",
-		"support":      "#0000ff",
-		"access":       "#ffaa00",
-		"seo":          "#aa00ff",
-		"content":      "#00aaaa",
-		"urgent":       "#ff0000",
-		"high":         "#ff6600",
-		"medium":       "#ffaa00",
-		"low":          "#00aa00",
-		"needs_triage": "#888888",
-		"from:email":   "#666666",
-	}
-	if c, ok := colors[strings.ToLower(name)]; ok {
-		return c
-	}
-	return "#666666"
-}
-
-// extractIssueIDFromSubject извлекает идентификатор проекта и номер задачи из темы.
-// Поддерживает форматы: [INBOX-123], [TRK-5], #INBOX-123
-func extractIssueIDFromSubject(subject string) (identifier string, seq int) {
+// extractTaskIDFromSubject извлекает ID задачи из темы письма.
+// Поддерживает форматы: [TASK-123]
+func extractTaskIDFromSubject(subject string) int64 {
 	subject = strings.TrimSpace(subject)
 	for {
 		lower := strings.ToLower(subject)
@@ -362,74 +325,22 @@ func extractIssueIDFromSubject(subject string) (identifier string, seq int) {
 		}
 	}
 
-	// Ищем [XXX-NNN] или #XXX-NNN
-	re := regexp.MustCompile(`[\[#]([A-Za-z0-9]+)-(\d+)[\]\s]`)
+	re := regexp.MustCompile(`\[TASK-(\d+)\]`)
 	matches := re.FindStringSubmatch(subject)
-	if len(matches) == 3 {
-		identifier = strings.ToUpper(matches[1])
-		seq, _ = strconv.Atoi(matches[2])
-		return
+	if len(matches) == 2 {
+		id, _ := strconv.ParseInt(matches[1], 10, 64)
+		return id
 	}
 
-	return "", 0
+	return 0
 }
 
-// formatIssueDescription форматирует описание задачи.
-func formatIssueDescription(email *extractor.ExtractedEmail) string {
-	author := email.From
-	if idx := strings.LastIndex(email.From, "<"); idx != -1 {
-		author = strings.TrimSpace(email.From[:idx])
+// extractName извлекает имя из адреса вида "Имя Фамилия <email>" или просто email.
+func extractName(from string) string {
+	if idx := strings.LastIndex(from, "<"); idx != -1 {
+		name := strings.TrimSpace(from[:idx])
+		name = strings.Trim(name, `"`)
+		return name
 	}
-
-	var parts []string
-	parts = append(parts, fmt.Sprintf("<p><strong>От:</strong> %s (%s)</p>", author, email.From))
-	parts = append(parts, fmt.Sprintf("<p><strong>Тема:</strong> %s</p>", email.Subject))
-
-	if email.BodyText != "" {
-		escaped := strings.ReplaceAll(email.BodyText, "&", "&amp;")
-		escaped = strings.ReplaceAll(escaped, "<", "&lt;")
-		escaped = strings.ReplaceAll(escaped, ">", "&gt;")
-		escaped = strings.ReplaceAll(escaped, "\n", "<br>")
-		parts = append(parts, fmt.Sprintf("<p>%s</p>", escaped))
-	}
-
-	if len(email.Attachments) > 0 {
-		parts = append(parts, "<p><strong>Вложения:</strong></p><ul>")
-		for _, att := range email.Attachments {
-			parts = append(parts, fmt.Sprintf("<li>%s (%s, %d байт)</li>",
-				att.Filename, att.ContentType, att.Size))
-		}
-		parts = append(parts, "</ul>")
-	}
-
-	return strings.Join(parts, "\n")
-}
-
-// formatCommentText форматирует текст комментария.
-func formatCommentText(email *extractor.ExtractedEmail) string {
-	author := email.From
-	if idx := strings.LastIndex(email.From, "<"); idx != -1 {
-		author = strings.TrimSpace(email.From[:idx])
-	}
-
-	var parts []string
-	parts = append(parts, fmt.Sprintf("<p><strong>Ответ от:</strong> %s (%s)</p>", author, email.From))
-
-	if email.BodyText != "" {
-		escaped := strings.ReplaceAll(email.BodyText, "&", "&amp;")
-		escaped = strings.ReplaceAll(escaped, "<", "&lt;")
-		escaped = strings.ReplaceAll(escaped, ">", "&gt;")
-		escaped = strings.ReplaceAll(escaped, "\n", "<br>")
-		parts = append(parts, fmt.Sprintf("<p>%s</p>", escaped))
-	}
-
-	if len(email.Attachments) > 0 {
-		parts = append(parts, "<p><em>Вложения:</em></p><ul>")
-		for _, att := range email.Attachments {
-			parts = append(parts, fmt.Sprintf("<li>%s (%s)</li>", att.Filename, att.StoragePath))
-		}
-		parts = append(parts, "</ul>")
-	}
-
-	return strings.Join(parts, "\n")
+	return ""
 }
