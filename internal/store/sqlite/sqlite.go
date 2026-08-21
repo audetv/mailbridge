@@ -132,6 +132,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 			read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (task_id, username)
 		)`,
+		`CREATE TABLE IF NOT EXISTS threads (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			thread_id TEXT NOT NULL UNIQUE,
+			summary TEXT NOT NULL DEFAULT '',
+			last_email_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_threads_thread_id ON threads(thread_id)`,
 	}
 
 	for _, m := range migrations {
@@ -576,6 +585,14 @@ func (s *Store) Ping(ctx context.Context) error {
 // Close закрывает соединение с БД.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// TableExists проверяет существование таблицы.
+func (s *Store) TableExists(ctx context.Context, table string) (bool, error) {
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`
+	var count int
+	err := s.db.QueryRowContext(ctx, query, table).Scan(&count)
+	return count > 0, err
 }
 
 // scanTask сканирует строку в Task.

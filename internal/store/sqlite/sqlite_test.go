@@ -500,3 +500,16 @@ func TestPing(t *testing.T) {
 		t.Errorf("Ping failed: %v", err)
 	}
 }
+
+func TestMigrate_ThreadsTable(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	exists, err := s.TableExists(context.Background(), "threads")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	if !exists {
+		t.Fatal("threads table not created")
+	}
+}
