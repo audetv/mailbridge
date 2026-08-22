@@ -171,6 +171,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_inbox_items_thread_id ON inbox_items(thread_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_items_ai_processed ON inbox_items(ai_processed)`,
+
+		`CREATE TABLE IF NOT EXISTS task_inbox_items (
+			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			inbox_item_id INTEGER NOT NULL REFERENCES inbox_items(id) ON DELETE CASCADE,
+			relation TEXT NOT NULL DEFAULT 'created_from',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (task_id, inbox_item_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_task_id ON task_inbox_items(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_inbox_item_id ON task_inbox_items(inbox_item_id)`,
 	}
 
 	for _, m := range migrations {

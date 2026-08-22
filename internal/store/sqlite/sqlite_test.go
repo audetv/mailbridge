@@ -673,3 +673,16 @@ func TestMigrate_ThreadsColumns(t *testing.T) {
 		t.Errorf("Subject = %s", got.Subject)
 	}
 }
+
+func TestMigrate_TaskInboxItemsTable(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	exists, err := s.TableExists(context.Background(), "task_inbox_items")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	if !exists {
+		t.Fatal("task_inbox_items table not created")
+	}
+}
