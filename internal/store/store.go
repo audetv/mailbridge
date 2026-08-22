@@ -88,20 +88,6 @@ type TaskListResult struct {
 	PerPage int               `json:"per_page"`
 }
 
-// EmailMapping связывает email-сообщение с задачей.
-type EmailMapping struct {
-	ID               int64
-	MessageID        string
-	PlaneIssueID     string
-	PlaneProjectID   string
-	PlaneIssueSeq    string
-	OriginalFrom     string
-	OriginalSubject  string
-	ThreadReferences []string
-	ActionType       string
-	CreatedAt        time.Time
-}
-
 // ReplyLog записывает отправленный ответ для предотвращения дубликатов.
 type ReplyLog struct {
 	ID           int64
@@ -140,13 +126,6 @@ type Store interface {
 	// Task Attachments
 	AddTaskAttachment(ctx context.Context, att *TaskAttachment) error
 	GetTaskAttachments(ctx context.Context, taskID int64) ([]*TaskAttachment, error)
-
-	// Email Mapping
-	SaveMapping(ctx context.Context, m *EmailMapping) error
-	GetMappingByMessageID(ctx context.Context, msgID string) (*EmailMapping, error)
-	GetLatestMappingByIssueID(ctx context.Context, issueID string) (*EmailMapping, error)
-	MessageExists(ctx context.Context, msgID string) (bool, error)
-	FindMappingByReferences(ctx context.Context, refs []string) (*EmailMapping, error)
 
 	// Reply Log
 	SaveReplyLog(ctx context.Context, log *ReplyLog) error

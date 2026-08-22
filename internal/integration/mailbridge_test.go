@@ -15,7 +15,6 @@ import (
 	"github.com/audetv/mailbridge/internal/config"
 	"github.com/audetv/mailbridge/internal/plane"
 	"github.com/audetv/mailbridge/internal/sender"
-	"github.com/audetv/mailbridge/internal/store"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
 
@@ -153,34 +152,6 @@ func TestFullCycle_EmailToIssue(t *testing.T) {
 	}
 	defer st.Close()
 	_ = st.Migrate(context.Background())
-
-	err = st.SaveMapping(context.Background(), &store.EmailMapping{
-		MessageID:        "test-msg-1@mailbridge",
-		PlaneIssueID:     "issue-1",
-		PlaneProjectID:   "project-1",
-		PlaneIssueSeq:    "INBOX-1",
-		OriginalFrom:     "user@test.local",
-		OriginalSubject:  "Test Subject",
-		ThreadReferences: []string{"thread-1"},
-		ActionType:       "CREATE",
-	})
-	if err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-
-	mapping, err := st.GetMappingByMessageID(context.Background(), "test-msg-1@mailbridge")
-	if err != nil {
-		t.Fatalf("GetMappingByMessageID error: %v", err)
-	}
-	if mapping == nil {
-		t.Fatal("mapping not found")
-	}
-	if mapping.PlaneIssueSeq != "INBOX-1" {
-		t.Errorf("PlaneIssueSeq = %s, want INBOX-1", mapping.PlaneIssueSeq)
-	}
-	if mapping.PlaneProjectID != "project-1" {
-		t.Errorf("PlaneProjectID = %s, want project-1", mapping.PlaneProjectID)
-	}
 }
 
 func TestSMTPConnection(t *testing.T) {

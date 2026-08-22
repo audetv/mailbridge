@@ -171,18 +171,6 @@ func TestProcess_ReplyToTask(t *testing.T) {
 		t.Fatalf("CreateTask error: %v", err)
 	}
 
-	// Маппинг для threading
-	if err := st.SaveMapping(ctx, &store.EmailMapping{
-		MessageID:        "original@example.com",
-		PlaneIssueID:     "task-1",
-		OriginalFrom:     "user@example.com",
-		OriginalSubject:  "Original",
-		ThreadReferences: []string{"original@example.com"},
-		ActionType:       "CREATE",
-	}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-
 	raw := []byte(`From: user@example.com
 To: support@example.com
 Subject: Re: [TASK-1] Original

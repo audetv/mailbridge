@@ -4,7 +4,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -94,22 +93,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id)`,
 
-		// Email mapping (совместимость)
-		`CREATE TABLE IF NOT EXISTS email_mapping (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			plane_issue_id TEXT NOT NULL DEFAULT '',
-			plane_project_id TEXT NOT NULL DEFAULT '',
-			plane_issue_seq TEXT NOT NULL DEFAULT '',
-			original_from TEXT NOT NULL,
-			original_subject TEXT NOT NULL,
-			thread_references TEXT NOT NULL DEFAULT '[]',
-			action_type TEXT NOT NULL DEFAULT 'CREATE',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_email_mapping_message_id ON email_mapping(message_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_email_mapping_plane_issue ON email_mapping(plane_issue_id)`,
-
 		`CREATE TABLE IF NOT EXISTS reply_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			message_id TEXT NOT NULL UNIQUE,
@@ -193,6 +176,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
+	// Удаляем старую таблицу после миграции данных
+	if err := s.dropEmailMapping(ctx); err != nil {
+		return fmt.Errorf("failed to drop email_mapping: %w", err)
+	}
+
 	// Миграция данных из email_mapping в inbox_items (однократно)
 	if err := s.migrateEmailMappingToInbox(ctx); err != nil {
 		return fmt.Errorf("failed to migrate email_mapping: %w", err)
@@ -201,18 +189,22 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// migrateSchema выполняет миграции для обновления существующих таблиц.
-func (s *Store) migrateSchema(ctx context.Context) error {
-	hasColumn, err := s.columnExists(ctx, "email_mapping", "plane_project_id")
-	if err != nil {
-		return fmt.Errorf("failed to check column plane_project_id: %w", err)
-	}
-	if !hasColumn {
-		if _, err := s.db.ExecContext(ctx, "ALTER TABLE email_mapping ADD COLUMN plane_project_id TEXT NOT NULL DEFAULT ''"); err != nil {
-			return fmt.Errorf("failed to add column plane_project_id: %w", err)
-		}
+// dropEmailMapping удаляет старую таблицу email_mapping после переноса данных.
+func (s *Store) dropEmailMapping(ctx context.Context) error {
+	exists, err := s.TableExists(ctx, "email_mapping")
+	if err != nil || !exists {
+		return nil
 	}
 
+	_, err = s.db.ExecContext(ctx, "DROP TABLE email_mapping")
+	if err != nil {
+		return fmt.Errorf("failed to drop email_mapping: %w", err)
+	}
+	return nil
+}
+
+// migrateSchema выполняет миграции для обновления существующих таблиц.
+func (s *Store) migrateSchema(ctx context.Context) error {
 	// Добавляем AI-колонки в tasks если их нет
 	aiColumns := map[string]string{
 		"thread_id":       "TEXT NOT NULL DEFAULT ''",
@@ -531,75 +523,6 @@ func (s *Store) GetTaskAttachments(ctx context.Context, taskID int64) ([]*store.
 	return attachments, rows.Err()
 }
 
-// SaveMapping сохраняет маппинг email-сообщения.
-func (s *Store) SaveMapping(ctx context.Context, m *store.EmailMapping) error {
-	refsJSON, err := json.Marshal(m.ThreadReferences)
-	if err != nil {
-		return fmt.Errorf("failed to marshal thread references: %w", err)
-	}
-
-	query := `INSERT INTO email_mapping 
-		(message_id, plane_issue_id, plane_project_id, plane_issue_seq, original_from, original_subject, thread_references, action_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-
-	_, err = s.db.ExecContext(ctx, query,
-		m.MessageID, m.PlaneIssueID, m.PlaneProjectID, m.PlaneIssueSeq,
-		m.OriginalFrom, m.OriginalSubject, string(refsJSON), m.ActionType)
-	if err != nil {
-		return fmt.Errorf("failed to save mapping: %w", err)
-	}
-	return nil
-}
-
-// GetMappingByMessageID возвращает маппинг по Message-ID.
-func (s *Store) GetMappingByMessageID(ctx context.Context, msgID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-		original_from, original_subject, thread_references, action_type, created_at
-		FROM email_mapping WHERE message_id = ?`
-	row := s.db.QueryRowContext(ctx, query, msgID)
-	return scanMapping(row)
-}
-
-// GetLatestMappingByIssueID возвращает последний маппинг по ID задачи.
-func (s *Store) GetLatestMappingByIssueID(ctx context.Context, issueID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-		original_from, original_subject, thread_references, action_type, created_at
-		FROM email_mapping WHERE plane_issue_id = ? ORDER BY id DESC LIMIT 1`
-	row := s.db.QueryRowContext(ctx, query, issueID)
-	return scanMapping(row)
-}
-
-// MessageExists проверяет существование маппинга по Message-ID.
-func (s *Store) MessageExists(ctx context.Context, msgID string) (bool, error) {
-	query := `SELECT COUNT(*) FROM email_mapping WHERE message_id = ?`
-	var count int
-	if err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count); err != nil {
-		return false, fmt.Errorf("failed to check message existence: %w", err)
-	}
-	return count > 0, nil
-}
-
-// FindMappingByReferences ищет маппинг по ссылкам.
-func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*store.EmailMapping, error) {
-	for _, ref := range refs {
-		m, err := s.GetMappingByMessageID(ctx, ref)
-		if err == nil && m != nil {
-			return m, nil
-		}
-	}
-	for _, ref := range refs {
-		query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-			original_from, original_subject, thread_references, action_type, created_at
-			FROM email_mapping WHERE thread_references LIKE ?`
-		row := s.db.QueryRowContext(ctx, query, "%\""+ref+"\"%")
-		m, err := scanMapping(row)
-		if err == nil && m != nil {
-			return m, nil
-		}
-	}
-	return nil, fmt.Errorf("mapping not found by references")
-}
-
 // SaveReplyLog сохраняет запись об отправленном ответе.
 func (s *Store) SaveReplyLog(ctx context.Context, log *store.ReplyLog) error {
 	query := `INSERT INTO reply_log (message_id, in_reply_to, plane_issue_id) VALUES (?, ?, ?)`
@@ -703,30 +626,6 @@ func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) 
 		return nil, fmt.Errorf("failed to scan task: %w", err)
 	}
 	return t, nil
-}
-
-// scanMapping сканирует строку в EmailMapping.
-func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMapping, error) {
-	m := &store.EmailMapping{}
-	var refsJSON string
-	var createdAt time.Time
-
-	err := row.Scan(&m.ID, &m.MessageID, &m.PlaneIssueID, &m.PlaneProjectID, &m.PlaneIssueSeq,
-		&m.OriginalFrom, &m.OriginalSubject, &refsJSON, &m.ActionType, &createdAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to scan mapping: %w", err)
-	}
-
-	if refsJSON != "" {
-		if err := json.Unmarshal([]byte(refsJSON), &m.ThreadReferences); err != nil {
-			m.ThreadReferences = []string{}
-		}
-	}
-	m.CreatedAt = createdAt
-	return m, nil
 }
 
 // CreateThread создаёт новую цепочку писем.

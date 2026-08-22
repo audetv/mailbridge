@@ -112,13 +112,6 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		}, nil
 	}
 
-	// Проверяем старую таблицу email_mapping
-	exists, err := p.store.MessageExists(ctx, email.MessageID)
-	if err == nil && exists {
-		p.logger.Info("duplicate email ignored (mapping)", "message_id", email.MessageID)
-		return &ProcessResult{Action: ActionIgnore, Extracted: email}, nil
-	}
-
 	// Если AI включён — пробуем обработать через LLM
 	if p.aiEnabled && p.orchestrator != nil {
 		aiResponse, err := p.orchestrator.ProcessEmail(ctx, email)
@@ -151,7 +144,7 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 	return p.createNewTask(ctx, email)
 }
 
-// findExistingTask ищет ID существующей задачи.
+// findExistingTask ищет ID существующей задачи по ID в теме письма.
 func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extractor.ExtractedEmail) int64 {
 	taskID := extractTaskIDFromSubject(email.Subject)
 	if taskID > 0 {
@@ -163,21 +156,6 @@ func (p *MessageProcessor) findExistingTask(ctx context.Context, email *extracto
 			"task_id", taskID,
 		)
 	}
-
-	refs := email.References
-	if email.InReplyTo != "" {
-		refs = append(refs, email.InReplyTo)
-	}
-	if len(refs) > 0 {
-		mapping, err := p.store.FindMappingByReferences(ctx, refs)
-		if err == nil && mapping != nil {
-			task, err := p.store.GetTaskByMessageID(ctx, mapping.MessageID)
-			if err == nil && task != nil {
-				return task.ID
-			}
-		}
-	}
-
 	return 0
 }
 
@@ -249,19 +227,6 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		if err := p.store.AddTaskAttachment(ctx, taskAtt); err != nil {
 			p.logger.Error("failed to save task attachment", "error", err)
 		}
-	}
-
-	mapping := &store.EmailMapping{
-		MessageID:        email.MessageID,
-		PlaneIssueID:     fmt.Sprintf("task-%d", task.ID),
-		PlaneIssueSeq:    fmt.Sprintf("TASK-%d", task.ID),
-		OriginalFrom:     email.From,
-		OriginalSubject:  email.Subject,
-		ThreadReferences: append(email.References, email.MessageID),
-		ActionType:       string(ActionCreateIssue),
-	}
-	if err := p.store.SaveMapping(ctx, mapping); err != nil {
-		p.logger.Error("failed to save mapping", "error", err)
 	}
 
 	return &ProcessResult{
