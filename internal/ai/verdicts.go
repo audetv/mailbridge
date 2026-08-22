@@ -15,11 +15,11 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 		return nil
 	}
 
-	for _, verdict := range response.Verdicts {
+	for i, verdict := range response.Verdicts {
 		switch verdict.Action {
 		case "new":
 			if verdict.Task != nil {
-				if err := o.createTaskFromVerdict(ctx, email, verdict, inboxItemID); err != nil {
+				if err := o.createTaskFromVerdict(ctx, email, verdict, inboxItemID, i); err != nil {
 					return fmt.Errorf("failed to create task: %w", err)
 				}
 			}
@@ -38,14 +38,14 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 				}
 			} else {
 				if verdict.Comment != "" {
-					if err := o.createCompletedTaskFromVerdict(ctx, email, verdict, inboxItemID); err != nil {
+					if err := o.createCompletedTaskFromVerdict(ctx, email, verdict, inboxItemID, i); err != nil {
 						return fmt.Errorf("failed to create resolved task: %w", err)
 					}
 				}
 			}
 
 		case "none":
-			// Ничего не делаем — письмо остаётся в ленте
+			// Ничего не делаем
 		}
 	}
 
@@ -53,9 +53,12 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 }
 
 // createTaskFromVerdict создаёт новую задачу.
-func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64) error {
+func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64, verdictIndex int) error {
+	// Уникальный MessageID для каждой задачи из одного письма
+	uniqueMessageID := fmt.Sprintf("%s-task-%d", email.MessageID, verdictIndex)
+
 	task := &store.Task{
-		MessageID:     email.MessageID,
+		MessageID:     uniqueMessageID,
 		Subject:       verdict.Task.Title,
 		BodyText:      verdict.Task.Description,
 		FromEmail:     email.From,
@@ -63,7 +66,7 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		Project:       verdict.Task.Project,
 		Type:          verdict.Task.Type,
 		Priority:      verdict.Task.Priority,
-		Status:        string(store.StatusNew),
+		Status:        "new",
 		ThreadID:      determineThreadID(email),
 		SourceEmailID: email.MessageID,
 		AIVerdict:     verdictToJSON(verdict),
@@ -81,7 +84,6 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		return err
 	}
 
-	// Сохраняем вложения
 	for _, att := range email.Attachments {
 		taskAtt := &store.TaskAttachment{
 			TaskID:      task.ID,
@@ -95,7 +97,6 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		}
 	}
 
-	// Связываем задачу с элементом ленты
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, task.ID, inboxItemID, "created_from"); err != nil {
 			log.Printf("[AI] failed to link task to inbox: %v", err)
@@ -175,7 +176,8 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 }
 
 // createCompletedTaskFromVerdict создаёт задачу со статусом completed (из пересланного письма).
-func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64) error {
+func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64, verdictIndex int) error {
+	uniqueMessageID := fmt.Sprintf("%s-task-%d", email.MessageID, verdictIndex)
 	title := "Выполнено: " + email.Subject
 	desc := verdict.Comment
 	proj := "Входящие"
@@ -209,7 +211,7 @@ func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email
 	}
 
 	task := &store.Task{
-		MessageID:     email.MessageID,
+		MessageID:     uniqueMessageID,
 		Subject:       title,
 		BodyText:      desc,
 		FromEmail:     email.From,
