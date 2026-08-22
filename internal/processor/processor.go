@@ -3,7 +3,6 @@ package processor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -55,6 +54,7 @@ type MessageProcessor struct {
 	orchestrator *ai.Orchestrator
 	aiEnabled    bool
 	adapter      adapters.Adapter
+	aiQueue      *ai.Queue
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -70,6 +70,7 @@ func NewMessageProcessor(
 	orchestrator *ai.Orchestrator,
 	aiEnabled bool,
 	adapter adapters.Adapter,
+	aiQueue *ai.Queue,
 ) *MessageProcessor {
 	return &MessageProcessor{
 		store:        st,
@@ -83,6 +84,7 @@ func NewMessageProcessor(
 		orchestrator: orchestrator,
 		aiEnabled:    aiEnabled,
 		adapter:      adapter,
+		aiQueue:      aiQueue,
 	}
 }
 
@@ -148,51 +150,17 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		)
 	}
 
-	// Если AI включён — обрабатываем через LLM
-	if p.aiEnabled && p.orchestrator != nil {
-		aiResponse, err := p.orchestrator.ProcessEmail(ctx, email)
-		if err != nil {
-			p.logger.Warn("AI processing failed, fallback to rules", "error", err)
-		} else {
-			var inboxID int64
-			if inboxItem != nil {
-				inboxID = inboxItem.ID
-			}
-			if err := p.orchestrator.ApplyVerdicts(ctx, email, aiResponse, inboxID); err != nil {
-				p.logger.Error("AI verdicts failed, fallback to rules", "error", err)
-			} else {
-				// Сохраняем вердикты в inbox_item
-				if inboxItem != nil {
-					if err := p.store.UpdateInboxItemAI(ctx, inboxItem.ID, 1, verdictsToString(aiResponse), ""); err != nil {
-						p.logger.Error("failed to update inbox item AI", "error", err)
-					}
-				}
-
-				go func() {
-					if err := p.orchestrator.UpdateSummary(context.Background(), email, aiResponse); err != nil {
-						p.logger.Warn("failed to update summary", "error", err)
-					}
-					// После обновления summary — обновляем ai_summary в inbox_items
-					threadID := email.MessageID
-					if len(email.References) > 0 {
-						threadID = email.References[0]
-					}
-					thread, err := p.store.GetThread(context.Background(), threadID)
-					if err == nil && thread != nil && inboxItem != nil {
-						if err := p.store.UpdateInboxItemAI(context.Background(), inboxItem.ID, 1, verdictsToString(aiResponse), thread.Summary); err != nil {
-							p.logger.Error("failed to update inbox item summary", "error", err)
-						}
-					}
-				}()
-
-				p.logger.Info("processed by AI", "verdicts", len(aiResponse.Verdicts))
-				return &ProcessResult{
-					Action:    ActionCreateIssue,
-					InboxItem: inboxItem,
-					Extracted: email,
-				}, nil
-			}
-		}
+	// Если AI включён — ставим в очередь и не обрабатываем синхронно
+	if p.aiEnabled && p.aiQueue != nil {
+		p.aiQueue.Enqueue(inboxItem.ID)
+		p.logger.Info("inbox item queued for AI processing",
+			"inbox_item_id", inboxItem.ID,
+		)
+		return &ProcessResult{
+			Action:    ActionCreateIssue,
+			InboxItem: inboxItem,
+			Extracted: email,
+		}, nil
 	}
 
 	// Ищем существующую задачу по ID в теме
@@ -354,15 +322,6 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 		Task:      task,
 		Extracted: email,
 	}, nil
-}
-
-// verdictsToString сериализует вердикты для сохранения в inbox_items.
-func verdictsToString(response *ai.LLMResponse) string {
-	if response == nil {
-		return "[]"
-	}
-	data, _ := json.Marshal(response.Verdicts)
-	return string(data)
 }
 
 // extractTaskIDFromSubject извлекает ID задачи из темы письма.

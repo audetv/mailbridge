@@ -62,6 +62,15 @@ func main() {
 	)
 
 	// ---------------------------------------------------------------------------
+	// Контекст с graceful shutdown
+	// ---------------------------------------------------------------------------
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// ---------------------------------------------------------------------------
 	// Хранилище
 	// ---------------------------------------------------------------------------
 	st, err := sqlite.NewStore(cfg.Storage.DSN)
@@ -156,9 +165,24 @@ func main() {
 		orchestrator.SetProjects(projectNames)
 	}
 
+	var aiQueue *ai.Queue
+	var aiWorker *ai.Worker
+	if aiClient != nil {
+		aiQueue = ai.NewQueue(st, 100)
+		aiWorker = ai.NewWorker(aiQueue, orchestrator, st, logger)
+
+		// Загружаем pending при старте
+		if err := aiQueue.LoadPending(context.Background()); err != nil {
+			logger.Error("failed to load pending AI items", "error", err)
+		}
+
+		// Запускаем воркер
+		go aiWorker.Start(ctx)
+	}
+
 	emailAdapter := adapters.NewEmailAdapter(ext)
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter, aiQueue,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -283,15 +307,6 @@ func main() {
 	// ---------------------------------------------------------------------------
 	inboundWorker := worker.NewInboundWorker(mailReader, proc, cfg.IMAP.ScanInterval, logger)
 	outboundWorker := worker.NewOutboundWorker(st, emailSender, 15*time.Second, logger)
-
-	// ---------------------------------------------------------------------------
-	// Контекст с graceful shutdown
-	// ---------------------------------------------------------------------------
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// ---------------------------------------------------------------------------
 	// Запуск HTTP

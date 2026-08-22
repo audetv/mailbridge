@@ -2,7 +2,7 @@ package ai
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -14,11 +14,11 @@ type Worker struct {
 	queue        *Queue
 	orchestrator *Orchestrator
 	store        store.Store
-	logger       *log.Logger
+	logger       *slog.Logger
 }
 
 // NewWorker создаёт новый Worker.
-func NewWorker(queue *Queue, orchestrator *Orchestrator, st store.Store, logger *log.Logger) *Worker {
+func NewWorker(queue *Queue, orchestrator *Orchestrator, st store.Store, logger *slog.Logger) *Worker {
 	return &Worker{
 		queue:        queue,
 		orchestrator: orchestrator,
@@ -29,12 +29,12 @@ func NewWorker(queue *Queue, orchestrator *Orchestrator, st store.Store, logger 
 
 // Start запускает обработку очереди.
 func (w *Worker) Start(ctx context.Context) {
-	w.logger.Println("[AIWorker] started")
+	w.logger.Info("[AIWorker] started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			w.logger.Println("[AIWorker] stopped")
+			w.logger.Info("[AIWorker] stopped")
 			return
 		case inboxItemID := <-w.queue.Channel():
 			w.process(ctx, inboxItemID)
@@ -46,14 +46,14 @@ func (w *Worker) Start(ctx context.Context) {
 func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 	item, err := w.store.GetInboxItemByID(ctx, inboxItemID)
 	if err != nil || item == nil {
-		w.logger.Printf("[AIWorker] inbox item %d not found: %v", inboxItemID, err)
+		w.logger.Error("[AIWorker] inbox item not found", "inbox_item_id", inboxItemID, "error", err)
 		return
 	}
 
 	// Увеличиваем счётчик попыток
 	attempts := item.AIAttempts + 1
 	if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, 0, "[]", ""); err != nil {
-		w.logger.Printf("[AIWorker] failed to update attempts: %v", err)
+		w.logger.Error("[AIWorker] failed to update attempts", "error", err)
 	}
 
 	// Восстанавливаем ExtractedEmail из InboxItem
@@ -62,13 +62,13 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 	// Обрабатываем через оркестратор
 	response, err := w.orchestrator.ProcessEmail(ctx, email)
 	if err != nil {
-		w.logger.Printf("[AIWorker] failed to process %d: %v", inboxItemID, err)
+		w.logger.Error("[AIWorker] failed to process", "inbox_item_id", inboxItemID, "error", err)
 		// Если попыток больше 5 — помечаем как ошибку
 		if attempts >= 5 {
 			if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, -1, "[]", ""); err != nil {
-				w.logger.Printf("[AIWorker] failed to mark failed: %v", err)
+				w.logger.Error("[AIWorker] failed to mark failed", "error", err)
 			}
-			w.logger.Printf("[AIWorker] inbox item %d marked as failed", inboxItemID)
+			w.logger.Info("[AIWorker] inbox item marked as failed", "inbox_item_id", inboxItemID)
 		} else {
 			// Вернуть в очередь через backoff
 			go func(id int64) {
@@ -81,15 +81,15 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 
 	// Применяем вердикты
 	if err := w.orchestrator.ApplyVerdicts(ctx, email, response, inboxItemID); err != nil {
-		w.logger.Printf("[AIWorker] failed to apply verdicts for %d: %v", inboxItemID, err)
+		w.logger.Error("[AIWorker] failed to apply verdicts", "inbox_item_id", inboxItemID, "error", err)
 		return
 	}
 
 	// Обновляем ai_processed = 1
 	if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, 1, verdictsToJSON(response), ""); err != nil {
-		w.logger.Printf("[AIWorker] failed to update processed: %v", err)
+		w.logger.Error("[AIWorker] failed to update processed", "error", err)
 	}
-	w.logger.Printf("[AIWorker] inbox item %d processed successfully", inboxItemID)
+	w.logger.Info("[AIWorker] inbox item processed successfully", "inbox_item_id", inboxItemID)
 }
 
 // convertToEmail преобразует InboxItem в ExtractedEmail.

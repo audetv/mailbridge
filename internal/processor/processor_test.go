@@ -64,7 +64,7 @@ func setupProcessor(t *testing.T) (*processor.MessageProcessor, *sqlite.Store, f
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, projectMap, nil, nil, false, nil)
+	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, projectMap, nil, nil, false, nil, nil)
 
 	cleanup := func() {
 		st.Close()
