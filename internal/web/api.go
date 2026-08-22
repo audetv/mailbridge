@@ -21,6 +21,44 @@ func NewTaskHandler(st store.Store) *TaskHandler {
 	return &TaskHandler{store: st}
 }
 
+// ListInbox обрабатывает GET /api/inbox
+func (h *TaskHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+
+	filter := &store.InboxFilter{
+		Status:  q.Get("status"),
+		Source:  q.Get("source"),
+		Page:    page,
+		PerPage: perPage,
+	}
+
+	result, err := h.store.ListInboxItems(r.Context(), filter)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	if result.Items == nil {
+		result.Items = []*store.InboxItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
 // ListTasks обрабатывает GET /api/tasks
 func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -37,6 +37,20 @@ func setupAPI(t *testing.T) (*web.TaskHandler, *sqlite.Store, func()) {
 	return handler, st, cleanup
 }
 
+func TestListInbox_Empty(t *testing.T) {
+	handler, _, cleanup := setupAPI(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/inbox", nil)
+	w := httptest.NewRecorder()
+
+	handler.ListInbox(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
 func TestListTasks_Empty(t *testing.T) {
 	handler, _, cleanup := setupAPI(t)
 	defer cleanup()

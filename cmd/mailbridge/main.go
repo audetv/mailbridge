@@ -246,6 +246,7 @@ func main() {
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
 	taskHandler := web.NewTaskHandler(st)
+	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
 	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
