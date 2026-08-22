@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/audetv/mailbridge/internal/adapters"
 	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/classifier"
 	"github.com/audetv/mailbridge/internal/config"
@@ -155,8 +156,9 @@ func main() {
 		orchestrator.SetProjects(projectNames)
 	}
 
+	emailAdapter := adapters.NewEmailAdapter(ext)
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter,
 	)
 
 	// ---------------------------------------------------------------------------

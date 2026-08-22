@@ -3,12 +3,14 @@ package processor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/audetv/mailbridge/internal/adapters"
 	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/classifier"
 	"github.com/audetv/mailbridge/internal/config"
@@ -35,6 +37,7 @@ type ProcessResult struct {
 	Action    ActionType
 	TaskID    int64
 	Task      *store.Task
+	InboxItem *store.InboxItem
 	Extracted *extractor.ExtractedEmail
 	Error     error
 }
@@ -51,6 +54,7 @@ type MessageProcessor struct {
 	broker       *web.EventBroker
 	orchestrator *ai.Orchestrator
 	aiEnabled    bool
+	adapter      adapters.Adapter
 }
 
 // NewMessageProcessor создаёт новый MessageProcessor.
@@ -65,6 +69,7 @@ func NewMessageProcessor(
 	broker *web.EventBroker,
 	orchestrator *ai.Orchestrator,
 	aiEnabled bool,
+	adapter adapters.Adapter,
 ) *MessageProcessor {
 	return &MessageProcessor{
 		store:        st,
@@ -77,29 +82,21 @@ func NewMessageProcessor(
 		broker:       broker,
 		orchestrator: orchestrator,
 		aiEnabled:    aiEnabled,
+		adapter:      adapter,
 	}
 }
 
 // Process обрабатывает сырое письмо и возвращает результат.
 func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*ProcessResult, error) {
+	// Извлекаем данные письма
 	email, err := p.extractor.Extract(rawEmail)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract email: %w", err)
 	}
 
-	p.logger.Debug("processing email",
-		"message_id", email.MessageID,
-		"from", email.From,
-		"subject", email.Subject,
-	)
-
-	// Проверяем дубликат по Message-ID через таблицу задач
+	// Проверяем что задача с таким Message-ID уже существует
 	existingTask, err := p.store.GetTaskByMessageID(ctx, email.MessageID)
-	if err != nil {
-		p.logger.Debug("message_id not found", "error", err)
-	}
-
-	if existingTask != nil {
+	if err == nil && existingTask != nil {
 		p.logger.Info("duplicate email — task already exists",
 			"message_id", email.MessageID,
 			"task_id", existingTask.ID,
@@ -112,7 +109,40 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		}, nil
 	}
 
-	// Если AI включён — пробуем обработать через LLM
+	// Парсим через адаптер и сохраняем в ленту (если адаптер задан)
+	var inboxItem *store.InboxItem
+	if p.adapter != nil {
+		inboxItem, err = p.adapter.Parse(rawEmail)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse incoming: %w", err)
+		}
+
+		// Проверяем дубликат
+		existingItem, err := p.store.GetInboxItemBySourceID(ctx, inboxItem.Source, inboxItem.SourceID)
+		if err == nil && existingItem != nil {
+			p.logger.Info("duplicate inbox item, skipping",
+				"source", inboxItem.Source,
+				"source_id", inboxItem.SourceID,
+			)
+			return &ProcessResult{
+				Action:    ActionIgnore,
+				InboxItem: existingItem,
+				Extracted: email,
+			}, nil
+		}
+
+		if err := p.store.CreateInboxItem(ctx, inboxItem); err != nil {
+			return nil, fmt.Errorf("failed to save inbox item: %w", err)
+		}
+
+		p.logger.Info("inbox item created",
+			"source", inboxItem.Source,
+			"source_id", inboxItem.SourceID,
+			"thread_id", inboxItem.ThreadID,
+		)
+	}
+
+	// Если AI включён — обрабатываем через LLM
 	if p.aiEnabled && p.orchestrator != nil {
 		aiResponse, err := p.orchestrator.ProcessEmail(ctx, email)
 		if err != nil {
@@ -121,7 +151,13 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 			if err := p.orchestrator.ApplyVerdicts(ctx, email, aiResponse); err != nil {
 				p.logger.Error("AI verdicts failed, fallback to rules", "error", err)
 			} else {
-				// Обновляем summary асинхронно
+				// Сохраняем вердикты в inbox_item
+				if inboxItem != nil {
+					if err := p.store.UpdateInboxItemAI(ctx, inboxItem.ID, 1, verdictsToString(aiResponse), ""); err != nil {
+						p.logger.Error("failed to update inbox item AI", "error", err)
+					}
+				}
+
 				go func() {
 					if err := p.orchestrator.UpdateSummary(context.Background(), email, aiResponse); err != nil {
 						p.logger.Warn("failed to update summary", "error", err)
@@ -129,12 +165,16 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 				}()
 
 				p.logger.Info("processed by AI", "verdicts", len(aiResponse.Verdicts))
-				return &ProcessResult{Action: ActionCreateIssue, Extracted: email}, nil
+				return &ProcessResult{
+					Action:    ActionCreateIssue,
+					InboxItem: inboxItem,
+					Extracted: email,
+				}, nil
 			}
 		}
 	}
 
-	// Ищем существующую задачу по ID в теме или References
+	// Ищем существующую задачу по ID в теме
 	existingTaskID := p.findExistingTask(ctx, email)
 
 	if existingTaskID > 0 {
@@ -295,6 +335,15 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 	}, nil
 }
 
+// verdictsToString сериализует вердикты для сохранения в inbox_items.
+func verdictsToString(response *ai.LLMResponse) string {
+	if response == nil {
+		return "[]"
+	}
+	data, _ := json.Marshal(response.Verdicts)
+	return string(data)
+}
+
 // extractTaskIDFromSubject извлекает ID задачи из темы письма.
 func extractTaskIDFromSubject(subject string) int64 {
 	subject = strings.TrimSpace(subject)
@@ -319,7 +368,7 @@ func extractTaskIDFromSubject(subject string) int64 {
 	return 0
 }
 
-// extractName извлекает имя из адреса вида "Имя Фамилия <email>" или просто email.
+// extractName извлекает имя из адреса вида "Имя Фамилия <email>".
 func extractName(from string) string {
 	if idx := strings.LastIndex(from, "<"); idx != -1 {
 		name := strings.TrimSpace(from[:idx])
