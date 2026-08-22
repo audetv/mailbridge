@@ -13,8 +13,11 @@
     </header>
     <main class="dashboard-content">
       <TabBar :tabs="tabItems" :activeTab="activeTab" @select="onTabSelect" />
-      <FilterBar />
-      <TaskTable />
+      <InboxView v-if="activeTab === 'inbox'" />
+      <template v-else>
+        <FilterBar />
+        <TaskTable />
+      </template>
     </main>
   </div>
 </template>
@@ -31,6 +34,7 @@ import { useWebSocket } from '@/stores/websocket'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
+import InboxView from '@/views/InboxView.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,33 +46,37 @@ const wsStore = useWebSocket()
 const activeTab = ref('active')
 
 const tabItems = computed(() => [
+  { key: 'inbox', label: 'Лента', count: 0 },
   { key: 'active', label: 'Активные', count: 0 },
-  { key: 'resolved', label: 'Решённые', count: 0 },
+  { key: 'backlog', label: 'Бэклог', count: 0 },
+  { key: 'completed', label: 'Выполненные', count: 0 },
   { key: 'closed', label: 'Закрытые', count: 0 }
 ])
 
 const tabStatuses = {
   active: ['new', 'in_progress'],
-  resolved: ['resolved'],
+  backlog: ['backlog'],
+  completed: ['completed'],
   closed: ['closed']
 }
 
 onMounted(() => {
   wsStore.connect(authStore.token)
   
-  // Определяем активную вкладку
   const tabFromUrl = route.query.tab
   const saved = localStorage.getItem('mailbridge_active_tab')
   
   let tab = 'active'
-  if (tabFromUrl && tabStatuses[tabFromUrl]) {
+  if (tabFromUrl && (tabStatuses[tabFromUrl] || tabFromUrl === 'inbox')) {
     tab = tabFromUrl
-  } else if (saved && tabStatuses[saved]) {
+  } else if (saved && (tabStatuses[saved] || saved === 'inbox')) {
     tab = saved
   }
   
   activeTab.value = tab
-  store.setStatuses(tabStatuses[tab])
+  if (tab !== 'inbox') {
+    store.setStatuses(tabStatuses[tab])
+  }
 })
 
 onUnmounted(() => {
@@ -79,7 +87,9 @@ function onTabSelect(key) {
   activeTab.value = key
   localStorage.setItem('mailbridge_active_tab', key)
   router.replace({ query: { ...route.query, tab: key } })
-  store.setStatuses(tabStatuses[key])
+  if (key !== 'inbox') {
+    store.setStatuses(tabStatuses[key])
+  }
 }
 
 watch(() => wsStore.events.length, () => {
