@@ -94,6 +94,12 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		return nil, fmt.Errorf("failed to extract email: %w", err)
 	}
 
+	p.logger.Debug("processing email",
+		"message_id", email.MessageID,
+		"from", email.From,
+		"subject", email.Subject,
+	)
+
 	// Проверяем что задача с таким Message-ID уже существует
 	existingTask, err := p.store.GetTaskByMessageID(ctx, email.MessageID)
 	if err == nil && existingTask != nil {
@@ -117,7 +123,7 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 			return nil, fmt.Errorf("failed to parse incoming: %w", err)
 		}
 
-		// Проверяем дубликат
+		// Проверяем дубликат в ленте
 		existingItem, err := p.store.GetInboxItemBySourceID(ctx, inboxItem.Source, inboxItem.SourceID)
 		if err == nil && existingItem != nil {
 			p.logger.Info("duplicate inbox item, skipping",
@@ -161,6 +167,17 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 				go func() {
 					if err := p.orchestrator.UpdateSummary(context.Background(), email, aiResponse); err != nil {
 						p.logger.Warn("failed to update summary", "error", err)
+					}
+					// После обновления summary — обновляем ai_summary в inbox_items
+					threadID := email.MessageID
+					if len(email.References) > 0 {
+						threadID = email.References[0]
+					}
+					thread, err := p.store.GetThread(context.Background(), threadID)
+					if err == nil && thread != nil && inboxItem != nil {
+						if err := p.store.UpdateInboxItemAI(context.Background(), inboxItem.ID, 1, verdictsToString(aiResponse), thread.Summary); err != nil {
+							p.logger.Error("failed to update inbox item summary", "error", err)
+						}
 					}
 				}()
 
