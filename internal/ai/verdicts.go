@@ -44,12 +44,8 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 				}
 			}
 
-		case "info_only":
-			if verdict.Summary != "" {
-				if err := o.createInfoTask(ctx, email, verdict, inboxItemID); err != nil {
-					return fmt.Errorf("failed to create info task: %w", err)
-				}
-			}
+		case "none":
+			// Ничего не делаем — письмо остаётся в ленте
 		}
 	}
 
@@ -100,54 +96,6 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 	}
 
 	// Связываем задачу с элементом ленты
-	if inboxItemID > 0 {
-		if err := o.store.LinkTaskToInboxItem(ctx, task.ID, inboxItemID, "created_from"); err != nil {
-			log.Printf("[AI] failed to link task to inbox: %v", err)
-		}
-	}
-
-	return nil
-}
-
-// createInfoTask создаёт информационную задачу (info_only).
-func (o *Orchestrator) createInfoTask(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64) error {
-	bodyText := verdict.Summary
-	if verdict.ImageNote != "" {
-		bodyText = verdict.Summary + "\n\n[Изображение]: " + verdict.ImageNote
-	}
-
-	task := &store.Task{
-		MessageID:     email.MessageID,
-		Subject:       "Информация: " + email.Subject,
-		BodyText:      bodyText,
-		FromEmail:     email.From,
-		FromName:      extractName(email.From),
-		Project:       "Входящие",
-		Type:          "info",
-		Priority:      "low",
-		Status:        "info_only",
-		ThreadID:      determineThreadID(email),
-		SourceEmailID: email.MessageID,
-		AIVerdict:     verdictToJSON(verdict),
-	}
-
-	if err := o.store.CreateTask(ctx, task); err != nil {
-		return err
-	}
-
-	for _, att := range email.Attachments {
-		taskAtt := &store.TaskAttachment{
-			TaskID:      task.ID,
-			Filename:    att.Filename,
-			ContentType: att.ContentType,
-			Size:        att.Size,
-			StoragePath: att.StoragePath,
-		}
-		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
-			log.Printf("[AI] failed to save attachment: %v", err)
-		}
-	}
-
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, task.ID, inboxItemID, "created_from"); err != nil {
 			log.Printf("[AI] failed to link task to inbox: %v", err)

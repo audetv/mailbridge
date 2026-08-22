@@ -243,7 +243,7 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
       "comment": "Дополнительный комментарий (опционально)"
     },
     {
-      "action": "info_only",
+      "action": "none",
       "summary": "Краткая информация, которая не требует действий"
     }
   ]

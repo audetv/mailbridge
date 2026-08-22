@@ -142,49 +142,6 @@ func TestApplyVerdicts_NewTask(t *testing.T) {
 	}
 }
 
-func TestApplyVerdicts_InfoOnly(t *testing.T) {
-	st, _ := sqlite.NewStore(":memory:")
-	_ = st.Migrate(context.Background())
-	defer st.Close()
-
-	o := ai.NewOrchestrator(nil, st)
-
-	email := &extractor.ExtractedEmail{
-		MessageID: "msg-info-1",
-		From:      "user@example.com",
-		Subject:   "Совещание перенесено",
-		BodyText:  "Совещание будет завтра в 14:00",
-	}
-
-	response := &ai.LLMResponse{
-		Verdicts: []ai.Verdict{
-			{
-				Action:    "info_only",
-				Summary:   "Совещание перенесено на завтра 14:00",
-				ImageNote: "На скриншоте календарь с отметкой 14:00",
-			},
-		},
-	}
-
-	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
-		t.Fatalf("ApplyVerdicts error: %v", err)
-	}
-
-	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-info-1")
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 info task, got %d", len(tasks))
-	}
-	if tasks[0].Status != "info_only" {
-		t.Errorf("Status = %s, want info_only", tasks[0].Status)
-	}
-	if tasks[0].Type != "info" {
-		t.Errorf("Type = %s, want info", tasks[0].Type)
-	}
-	if !strings.Contains(tasks[0].BodyText, "календарь") {
-		t.Error("ImageNote not included in info task BodyText")
-	}
-}
-
 func TestUpdateSummary(t *testing.T) {
 	st, _ := sqlite.NewStore(":memory:")
 	_ = st.Migrate(context.Background())

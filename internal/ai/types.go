@@ -37,7 +37,7 @@ type TaskUpdates struct {
 
 // Verdict — одно решение LLM по письму.
 type Verdict struct {
-	Action    string       `json:"action"` // "new", "update", "completed", "info_only"
+	Action    string       `json:"action"` // "new", "update", "completed", "none"
 	TaskID    *int         `json:"task_id,omitempty"`
 	Task      *NewTaskData `json:"task,omitempty"`
 	Updates   *TaskUpdates `json:"updates,omitempty"`
