@@ -169,6 +169,9 @@ type Store interface {
 	GetInboxItemsByTask(ctx context.Context, taskID int64) ([]*TaskInboxItem, error)
 	GetTasksByInboxItem(ctx context.Context, inboxItemID int64) ([]*TaskInboxItem, error)
 
+	// GetPendingAIItems возвращает входящие, ожидающие AI-обработки.
+	GetPendingAIItems(ctx context.Context) ([]*InboxItem, error)
+
 	// Tasks
 	CreateTask(ctx context.Context, task *Task) error
 	GetTask(ctx context.Context, id int64) (*Task, error)

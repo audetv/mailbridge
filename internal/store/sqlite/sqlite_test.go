@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/store"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
@@ -609,5 +610,51 @@ func TestTaskInboxLink(t *testing.T) {
 	}
 	if items[0].Relation != "created_from" {
 		t.Errorf("Relation = %s", items[0].Relation)
+	}
+}
+
+func TestAIQueue_Enqueue(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	queue := ai.NewQueue(st, 10)
+	queue.Enqueue(42)
+
+	select {
+	case id := <-queue.Channel():
+		if id != 42 {
+			t.Errorf("id = %d, want 42", id)
+		}
+	default:
+		t.Fatal("expected item in queue")
+	}
+}
+
+func TestAIQueue_LoadPending(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	ctx := context.Background()
+	if err := st.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "m1", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+	if err := st.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "m2", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	queue := ai.NewQueue(st, 10)
+	if err := queue.LoadPending(ctx); err != nil {
+		t.Fatalf("LoadPending error: %v", err)
+	}
+
+	// Оба должны быть в очереди
+	for i := 0; i < 2; i++ {
+		select {
+		case <-queue.Channel():
+		default:
+			t.Fatalf("expected item %d in queue", i)
+		}
 	}
 }

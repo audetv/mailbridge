@@ -852,3 +852,25 @@ func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]
 func (s *Store) QueryRowForTest(ctx context.Context, query string) *sql.Row {
 	return s.db.QueryRowContext(ctx, query)
 }
+
+// GetPendingAIItems возвращает входящие с ai_processed = 0.
+func (s *Store) GetPendingAIItems(ctx context.Context) ([]*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE ai_processed = 0 ORDER BY received_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending AI items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*store.InboxItem
+	for rows.Next() {
+		item, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
