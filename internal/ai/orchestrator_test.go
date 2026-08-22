@@ -126,7 +126,7 @@ func TestApplyVerdicts_NewTask(t *testing.T) {
 		},
 	}
 
-	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
 		t.Fatalf("ApplyVerdicts error: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestApplyVerdicts_InfoOnly(t *testing.T) {
 		},
 	}
 
-	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
 		t.Fatalf("ApplyVerdicts error: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestApplyVerdicts_SavesAttachments(t *testing.T) {
 		},
 	}
 
-	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
 		t.Fatalf("ApplyVerdicts error: %v", err)
 	}
 

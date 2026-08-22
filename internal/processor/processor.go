@@ -154,7 +154,11 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 		if err != nil {
 			p.logger.Warn("AI processing failed, fallback to rules", "error", err)
 		} else {
-			if err := p.orchestrator.ApplyVerdicts(ctx, email, aiResponse); err != nil {
+			var inboxID int64
+			if inboxItem != nil {
+				inboxID = inboxItem.ID
+			}
+			if err := p.orchestrator.ApplyVerdicts(ctx, email, aiResponse, inboxID); err != nil {
 				p.logger.Error("AI verdicts failed, fallback to rules", "error", err)
 			} else {
 				// Сохраняем вердикты в inbox_item
