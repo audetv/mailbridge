@@ -96,7 +96,7 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 	// Проверяем дубликат по Message-ID через таблицу задач
 	existingTask, err := p.store.GetTaskByMessageID(ctx, email.MessageID)
 	if err != nil {
-		p.logger.Debug("message_id not found, checking email_mapping", "error", err)
+		p.logger.Debug("message_id not found", "error", err)
 	}
 
 	if existingTask != nil {

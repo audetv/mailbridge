@@ -324,7 +324,7 @@ func TestAddAndGetTaskAttachments(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Existing tests (email_mapping, reply_log, outbox)
+// Existing tests (reply_log, outbox)
 // ---------------------------------------------------------------------------
 
 func TestReplyLog(t *testing.T) {

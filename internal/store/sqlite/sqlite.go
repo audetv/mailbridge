@@ -176,30 +176,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
-	// Удаляем старую таблицу после миграции данных
-	if err := s.dropEmailMapping(ctx); err != nil {
-		return fmt.Errorf("failed to drop email_mapping: %w", err)
-	}
-
-	// Миграция данных из email_mapping в inbox_items (однократно)
-	if err := s.migrateEmailMappingToInbox(ctx); err != nil {
-		return fmt.Errorf("failed to migrate email_mapping: %w", err)
-	}
-
-	return nil
-}
-
-// dropEmailMapping удаляет старую таблицу email_mapping после переноса данных.
-func (s *Store) dropEmailMapping(ctx context.Context) error {
-	exists, err := s.TableExists(ctx, "email_mapping")
-	if err != nil || !exists {
-		return nil
-	}
-
-	_, err = s.db.ExecContext(ctx, "DROP TABLE email_mapping")
-	if err != nil {
-		return fmt.Errorf("failed to drop email_mapping: %w", err)
-	}
 	return nil
 }
 
@@ -870,43 +846,6 @@ func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]
 		tasks = append(tasks, task)
 	}
 	return tasks, rows.Err()
-}
-
-// migrateEmailMappingToInbox переносит данные из старой таблицы email_mapping в inbox_items.
-func (s *Store) migrateEmailMappingToInbox(ctx context.Context) error {
-	// Проверяем что email_mapping существует
-	exists, err := s.TableExists(ctx, "email_mapping")
-	if err != nil || !exists {
-		return nil
-	}
-
-	// Переносим данные (INSERT OR IGNORE для идемпотентности)
-	query := `INSERT OR IGNORE INTO inbox_items 
-		(source, source_id, thread_id, from_contact, from_name, subject, body_text, meta, received_at, status)
-		SELECT 
-			'email',
-			message_id,
-			message_id,  -- thread_id = message_id (нет данных о цепочке в старой схеме)
-			original_from,
-			'',
-			original_subject,
-			'',
-			'{}',
-			created_at,
-			'read'  -- старые письма считаем прочитанными
-		FROM email_mapping`
-
-	_, err = s.db.ExecContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("failed to migrate email_mapping: %w", err)
-	}
-
-	return nil
-}
-
-// MigrateEmailMappingToInboxForTest — экспортируемая обёртка для тестов.
-func (s *Store) MigrateEmailMappingToInboxForTest(ctx context.Context) error {
-	return s.migrateEmailMappingToInbox(ctx)
 }
 
 // QueryRowForTest — экспортируемый метод для тестов.
