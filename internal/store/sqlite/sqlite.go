@@ -139,8 +139,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS threads (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			thread_id TEXT NOT NULL UNIQUE,
+			source TEXT NOT NULL DEFAULT 'email',
+			subject TEXT NOT NULL DEFAULT '',
+			participants TEXT NOT NULL DEFAULT '[]',
 			summary TEXT NOT NULL DEFAULT '',
-			last_email_at TIMESTAMP,
+			last_item_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -221,6 +224,25 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 	for _, idx := range indexMigrations {
 		if _, err := s.db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
+	// Добавляем новые колонки в threads если их нет
+	threadColumns := map[string]string{
+		"source":       "TEXT NOT NULL DEFAULT 'email'",
+		"subject":      "TEXT NOT NULL DEFAULT ''",
+		"participants": "TEXT NOT NULL DEFAULT '[]'",
+		"last_item_at": "TIMESTAMP",
+	}
+	for col, typ := range threadColumns {
+		has, err := s.columnExists(ctx, "threads", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE threads ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
 		}
 	}
 
@@ -694,8 +716,9 @@ func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMappi
 
 // CreateThread создаёт новую цепочку писем.
 func (s *Store) CreateThread(ctx context.Context, thread *store.Thread) error {
-	query := `INSERT INTO threads (thread_id, summary, last_email_at) VALUES (?, ?, ?)`
-	result, err := s.db.ExecContext(ctx, query, thread.ThreadID, thread.Summary, thread.LastEmailAt)
+	query := `INSERT INTO threads (thread_id, source, subject, participants, summary, last_item_at) VALUES (?, ?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query,
+		thread.ThreadID, thread.Source, thread.Subject, thread.Participants, thread.Summary, thread.LastItemAt)
 	if err != nil {
 		return fmt.Errorf("failed to create thread: %w", err)
 	}
@@ -708,20 +731,20 @@ func (s *Store) CreateThread(ctx context.Context, thread *store.Thread) error {
 
 // GetThread возвращает цепочку по thread_id.
 func (s *Store) GetThread(ctx context.Context, threadID string) (*store.Thread, error) {
-	query := `SELECT id, thread_id, summary, last_email_at, created_at, updated_at FROM threads WHERE thread_id = ?`
+	query := `SELECT id, thread_id, source, subject, participants, summary, last_item_at, created_at, updated_at FROM threads WHERE thread_id = ?`
 	row := s.db.QueryRowContext(ctx, query, threadID)
 
 	t := &store.Thread{}
-	var lastEmailAt sql.NullTime
-	err := row.Scan(&t.ID, &t.ThreadID, &t.Summary, &lastEmailAt, &t.CreatedAt, &t.UpdatedAt)
+	var lastItemAt sql.NullTime
+	err := row.Scan(&t.ID, &t.ThreadID, &t.Source, &t.Subject, &t.Participants, &t.Summary, &lastItemAt, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to scan thread: %w", err)
 	}
-	if lastEmailAt.Valid {
-		t.LastEmailAt = &lastEmailAt.Time
+	if lastItemAt.Valid {
+		t.LastItemAt = &lastItemAt.Time
 	}
 	return t, nil
 }

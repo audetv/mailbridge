@@ -27,14 +27,17 @@ type Task struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// Thread представляет цепочку писем.
+// Thread представляет цепочку входящих.
 type Thread struct {
-	ID          int64      `json:"id"`
-	ThreadID    string     `json:"thread_id"`
-	Summary     string     `json:"summary"`
-	LastEmailAt *time.Time `json:"last_email_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID           int64      `json:"id"`
+	ThreadID     string     `json:"thread_id"`
+	Source       string     `json:"source"`
+	Subject      string     `json:"subject"`
+	Participants string     `json:"participants"` // JSON-массив
+	Summary      string     `json:"summary"`
+	LastItemAt   *time.Time `json:"last_item_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // TaskWithUnread расширяет Task полем UnreadComments для ответа API.
