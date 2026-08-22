@@ -14,31 +14,45 @@
                             <span><strong>От:</strong> {{ store.currentTask.from_email }}</span>
                             <span><strong>Дата:</strong> {{ formatDate(store.currentTask.created_at) }}</span>
                         </div>
-                        <div class="task-body"
+                        <div class="task-body" @click="handleImageClick"
                             v-html="store.currentTask.body_html || escapeHtml(store.currentTask.body_text)"></div>
-
-                        <div v-if="store.currentAttachments.length > 0" class="attachments">
-                            <h4>Вложения</h4>
-                            <div v-for="att in store.currentAttachments" :key="att.id" class="attachment-item">
-                                <i class="pi pi-paperclip" />
-                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
-                                <span class="size">{{ formatSize(att.size) }}</span>
-                            </div>
-                        </div>
+                    </template>
+                    <template #footer>
+                        <WorkflowButtons :currentStatus="status" @transition="onWorkflowTransition" />
                     </template>
                 </Card>
 
+                <!-- Оригинальное письмо — аккордеон -->
                 <Card v-if="inboxItems.length > 0" class="inbox-context">
-                    <template #title>📧 Оригинальное письмо</template>
+                    <template #title>
+                        <div class="inbox-context-header">
+                            <span>📧 Оригинальное письмо</span>
+                            <i :class="expanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                                @click="expanded = !expanded" />
+                        </div>
+                    </template>
                     <template #content>
-                        <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
-                            <div class="inbox-context-header">
-                                <span class="inbox-context-subject">{{ item.subject }}</span>
-                                <router-link :to="`/inbox/${item.id}`" class="inbox-link">
-                                    Открыть в ленте
-                                </router-link>
+                        <div v-if="expanded">
+                            <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
+                                <div class="inbox-context-meta">
+                                    <span class="inbox-context-subject">{{ item.subject }}</span>
+                                    <router-link :to="`/inbox/${item.id}`" class="inbox-link">Открыть в
+                                        ленте</router-link>
+                                </div>
+                                <div class="item-body"  @click="handleImageClick" v-html="item.body_html || escapeHtml(item.body_text)"></div>
                             </div>
-                            <div class="item-body" v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                        </div>
+                        <div v-else>
+                            <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
+                                <div class="inbox-context-meta">
+                                    <span class="inbox-context-subject">{{ item.subject }}</span>
+                                    <router-link :to="`/inbox/${item.id}`" class="inbox-link">Открыть в
+                                        ленте</router-link>
+                                </div>
+                                <div class="item-body-preview" v-html="previewHtml(item)"></div>
+                                <Button v-if="needExpand(item)" label="Показать полностью" text size="small"
+                                    @click="expanded = true" class="expand-btn" />
+                            </div>
                         </div>
                     </template>
                 </Card>
@@ -89,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import Card from 'primevue/card'
@@ -98,6 +112,7 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import CommentList from '@/components/CommentList.vue'
 import ReplyForm from '@/components/ReplyForm.vue'
+import WorkflowButtons from '@/components/WorkflowButtons.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,6 +124,7 @@ const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
 const inboxItems = ref([])
+const expanded = ref(false)
 
 const projectOptions = [
     { label: 'Входящие', value: 'Входящие' },
@@ -124,8 +140,9 @@ const projectOptions = [
 
 const statusOptions = [
     { label: 'Новая', value: 'new' },
+    { label: 'Бэклог', value: 'backlog' },
     { label: 'В работе', value: 'in_progress' },
-    { label: 'Решена', value: 'resolved' },
+    { label: 'Выполнена', value: 'completed' },
     { label: 'Закрыта', value: 'closed' }
 ]
 
@@ -167,6 +184,31 @@ async function updateField(field, value) {
     await store.updateTask(route.params.id, { [field]: value })
 }
 
+async function onWorkflowTransition(newStatus) {
+    status.value = newStatus
+    await updateField('status', newStatus)
+}
+
+function previewHtml(item) {
+    const html = item.body_html || escapeHtml(item.body_text)
+    // Ограничиваем ~2000 символов
+    if (html.length > 5000) {
+        return html.slice(0, 5000) + '...'
+    }
+    return html
+}
+
+function needExpand(item) {
+    const html = item.body_html || escapeHtml(item.body_text)
+    return html.length > 2000
+}
+
+function handleImageClick(event) {
+    if (event.target.tagName === 'IMG' && event.target.src) {
+        window.open(event.target.src, '_blank')
+    }
+}
+
 function onReplySent() {
     // Комментарий уже добавлен в store.currentComments через replyTask
 }
@@ -194,6 +236,48 @@ function escapeHtml(text) {
 </script>
 
 <style scoped>
+.task-detail {
+    overflow-x: hidden;
+    min-height: 100vh;
+    background: var(--p-surface-100);
+}
+
+.task-body,
+.item-body,
+.item-body-preview {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    max-width: 100%;
+}
+
+/*
+.item-body :deep(pre),
+.item-body :deep(code),
+.task-body :deep(pre),
+.task-body :deep(code) {
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.item-body :deep(table),
+.task-body :deep(table) {
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+*/
+.item-body :deep(img),
+.task-body :deep(img) {
+    max-width: 100%;
+    max-height: 400px;
+    height: auto;
+    object-fit: contain;
+    cursor: pointer;
+}
+
 .task-detail {
     min-height: 100vh;
     background: var(--p-surface-100);
@@ -303,13 +387,55 @@ function escapeHtml(text) {
     font-weight: 600;
 }
 
-.inbox-link {
-    text-decoration: none;
-    color: var(--p-primary-color);
-    font-size: 0.85rem;
+.inbox-context-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
 }
 
 .inbox-context-item {
     margin-bottom: 1rem;
+}
+
+.inbox-context-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.inbox-collapsed {
+    color: var(--p-text-muted-color);
+    font-size: 0.85rem;
+}
+
+.item-body-preview {
+    max-height: 400px;
+    overflow: hidden;
+    position: relative;
+    line-height: 1.5;
+}
+
+.item-body-preview::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: linear-gradient(transparent, var(--p-surface-0));
+}
+
+.expand-btn {
+    margin-top: 0.5rem;
+}
+
+.workflow-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 </style>

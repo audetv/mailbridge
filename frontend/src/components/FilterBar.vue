@@ -30,10 +30,11 @@ const projectOptions = [
 ]
 
 const statusOptions = [
-    { label: 'Новая', value: 'new' },
-    { label: 'В работе', value: 'in_progress' },
-    { label: 'Решена', value: 'resolved' },
-    { label: 'Закрыта', value: 'closed' }
+  { label: 'Новая', value: 'new' },
+  { label: 'Бэклог', value: 'backlog' },
+  { label: 'В работе', value: 'in_progress' },
+  { label: 'Выполнена', value: 'completed' },
+  { label: 'Закрыта', value: 'closed' }
 ]
 
 onMounted(() => {

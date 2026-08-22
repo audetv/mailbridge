@@ -2,11 +2,11 @@
   <div class="inbox-view">
     <div class="inbox-header">
       <h2>Лента входящих</h2>
-      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value"
-        placeholder="Все" @change="onFilterChange" showClear class="status-filter" />
+      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value" placeholder="Все"
+        @change="onFilterChange" showClear class="status-filter" />
     </div>
-    <DataTable :value="items" :loading="loading" paginator :rows="20" :totalRecords="total"
-      @page="onPage" lazy stripedRows @row-click="openItem" class="inbox-table">
+    <DataTable :value="items" :loading="loading" paginator :rows="20" :totalRecords="total" @page="onPage" lazy
+      stripedRows @row-click="openItem" class="inbox-table">
       <Column field="received_at" header="Дата" style="width: 140px">
         <template #body="{ data }">{{ formatDate(data.received_at) }}</template>
       </Column>
@@ -34,7 +34,7 @@
         </template>
       </Column>
       <Column header="" style="width: 100px">
-        <template #body="{ data }">          
+        <template #body="{ data }">
           <Button icon="pi pi-inbox" text size="small" @click="archiveItem(data)" />
           <Button icon="pi pi-plus" text size="small" @click="createTask(data)" />
         </template>
@@ -65,9 +65,11 @@ const statusFilter = ref(null)
 const page = ref(1)
 
 const statusOptions = [
-  { label: 'Непрочитанные', value: 'unread' },
-  { label: 'Прочитанные', value: 'read' },
-  { label: 'Архив', value: 'archived' }
+  { label: 'Новая', value: 'new' },
+  { label: 'Бэклог', value: 'backlog' },
+  { label: 'В работе', value: 'in_progress' },
+  { label: 'Выполнена', value: 'completed' },
+  { label: 'Закрыта', value: 'closed' }
 ]
 
 onMounted(() => {

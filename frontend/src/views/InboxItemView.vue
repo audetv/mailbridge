@@ -47,7 +47,7 @@
                             <span><strong>От:</strong> {{ item.from_name }} ({{ item.from_contact }})</span>
                             <span><strong>Дата:</strong> {{ formatDate(item.received_at) }}</span>
                         </div>
-                        <div class="item-body" v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                        <div class="item-body" @click="handleImageClick" v-html="item.body_html || escapeHtml(item.body_text)"></div>
                     </template>
                 </Card>
             </div>
@@ -146,12 +146,58 @@ async function createTask() {
     }
 }
 
+function handleImageClick(event) {
+    if (event.target.tagName === 'IMG' && event.target.src) {
+        window.open(event.target.src, '_blank')
+    }
+}
+
 function goBack() {
     router.push('/?tab=inbox')
 }
 </script>
 
 <style scoped>
+.inbox-item {
+    overflow-x: hidden;
+    min-height: 100vh;
+    background: var(--p-surface-100);
+}
+.task-body,
+.item-body,
+.item-body-preview {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    max-width: 100%;
+}
+
+/*
+.item-body :deep(pre),
+.item-body :deep(code),
+.task-body :deep(pre),
+.task-body :deep(code) {
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.item-body :deep(table),
+.task-body :deep(table) {
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+*/
+.item-body :deep(img),
+.task-body :deep(img) {
+    max-width: 100%;
+    max-height: 400px;
+    height: auto;
+    object-fit: contain;
+    cursor: pointer;
+}
 .inbox-item {
     min-height: 100vh;
     background: var(--p-surface-100);
