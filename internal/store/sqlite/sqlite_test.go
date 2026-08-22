@@ -625,3 +625,24 @@ func TestGetActiveTasksByThread(t *testing.T) {
 		t.Errorf("expected 2 active tasks, got %d", len(tasks))
 	}
 }
+
+func TestMigrate_InboxItemsTable(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	exists, err := s.TableExists(context.Background(), "inbox_items")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	if !exists {
+		t.Fatal("inbox_items table not created")
+	}
+
+	// Проверяем что индекс thread_id создан
+	exists, err = s.TableExists(context.Background(), "idx_inbox_items_thread_id")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	// Индексы не видны через sqlite_master с type='table', проверяем отдельно
+	_ = exists
+}

@@ -145,6 +145,29 @@ func (s *Store) Migrate(ctx context.Context) error {
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_threads_thread_id ON threads(thread_id)`,
+
+		`CREATE TABLE IF NOT EXISTS inbox_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source TEXT NOT NULL DEFAULT 'email',
+			source_id TEXT NOT NULL,
+			thread_id TEXT NOT NULL DEFAULT '',
+			from_contact TEXT NOT NULL DEFAULT '',
+			from_name TEXT NOT NULL DEFAULT '',
+			subject TEXT NOT NULL DEFAULT '',
+			body_text TEXT NOT NULL DEFAULT '',
+			body_html TEXT NOT NULL DEFAULT '',
+			meta TEXT NOT NULL DEFAULT '{}',
+			received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			ai_processed INTEGER NOT NULL DEFAULT 0,
+			ai_attempts INTEGER NOT NULL DEFAULT 0,
+			ai_verdict TEXT NOT NULL DEFAULT '[]',
+			ai_summary TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'unread',
+			UNIQUE(source, source_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_items_thread_id ON inbox_items(thread_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_items_ai_processed ON inbox_items(ai_processed)`,
 	}
 
 	for _, m := range migrations {
