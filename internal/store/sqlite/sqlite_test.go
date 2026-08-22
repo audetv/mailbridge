@@ -686,3 +686,33 @@ func TestMigrate_TaskInboxItemsTable(t *testing.T) {
 		t.Fatal("task_inbox_items table not created")
 	}
 }
+
+func TestMigrate_EmailMappingToInbox(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Вставляем старую запись ПОСЛЕ миграции
+	if err := s.SaveMapping(ctx, &store.EmailMapping{
+		MessageID:       "migrate-test-1",
+		OriginalFrom:    "user@example.com",
+		OriginalSubject: "Test",
+		ActionType:      "CREATE",
+	}); err != nil {
+		t.Fatalf("SaveMapping error: %v", err)
+	}
+
+	// Вызываем миграцию данных вручную
+	if err := s.MigrateEmailMappingToInboxForTest(ctx); err != nil {
+		t.Fatalf("migrate error: %v", err)
+	}
+
+	// Проверяем
+	var count int
+	if err := s.QueryRowForTest(ctx, "SELECT COUNT(*) FROM inbox_items WHERE source_id = 'migrate-test-1'").Scan(&count); err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 migrated record, got %d", count)
+	}
+}
