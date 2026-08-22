@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/audetv/mailbridge/internal/store"
 )
@@ -55,6 +56,50 @@ func (h *TaskHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// UpdateInboxStatus обрабатывает POST /api/inbox/{id}/read, /unread, /archive
+func (h *TaskHandler) UpdateInboxStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Определяем новый статус по URL
+	var newStatus string
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/read"):
+		newStatus = "read"
+	case strings.HasSuffix(r.URL.Path, "/unread"):
+		newStatus = "unread"
+	case strings.HasSuffix(r.URL.Path, "/archive"):
+		newStatus = "archived"
+	default:
+		http.Error(w, `{"error":"unknown action"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.UpdateInboxItemStatus(r.Context(), id, newStatus); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": newStatus}); err != nil {
 		log.Printf("encode error: %v", err)
 	}
 }
