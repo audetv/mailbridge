@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -236,5 +237,25 @@ func TestApplyVerdicts_SavesAttachments(t *testing.T) {
 	}
 	if atts[0].Filename != "image001.png" {
 		t.Errorf("Filename = %s", atts[0].Filename)
+	}
+}
+
+func TestBackoff(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, 1 * time.Minute},
+		{2, 5 * time.Minute},
+		{3, 15 * time.Minute},
+		{4, 1 * time.Hour},
+		{5, 1 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		got := ai.BackoffForTest(tt.attempt)
+		if got != tt.want {
+			t.Errorf("backoff(%d) = %v, want %v", tt.attempt, got, tt.want)
+		}
 	}
 }
