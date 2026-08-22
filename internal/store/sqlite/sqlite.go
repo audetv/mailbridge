@@ -279,6 +279,137 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 	return false, rows.Err()
 }
 
+// CreateInboxItem создаёт новый элемент ленты.
+func (s *Store) CreateInboxItem(ctx context.Context, item *store.InboxItem) error {
+	query := `INSERT INTO inbox_items 
+		(source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	result, err := s.db.ExecContext(ctx, query,
+		item.Source, item.SourceID, item.ThreadID,
+		item.FromContact, item.FromName, item.Subject,
+		item.BodyText, item.BodyHTML, item.Meta, item.Status)
+	if err != nil {
+		return fmt.Errorf("failed to create inbox item: %w", err)
+	}
+
+	id, _ := result.LastInsertId()
+	item.ID = id
+	item.ReceivedAt = time.Now()
+	return nil
+}
+
+// GetInboxItemByID возвращает элемент ленты по ID.
+func (s *Store) GetInboxItemByID(ctx context.Context, id int64) (*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, id)
+	return scanInboxItem(row)
+}
+
+// GetInboxItemBySourceID возвращает элемент ленты по source и source_id.
+func (s *Store) GetInboxItemBySourceID(ctx context.Context, source, sourceID string) (*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE source = ? AND source_id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, source, sourceID)
+	return scanInboxItem(row)
+}
+
+// ListInboxItems возвращает список элементов ленты.
+func (s *Store) ListInboxItems(ctx context.Context, filter *store.InboxFilter) (*store.InboxListResult, error) {
+	if filter == nil {
+		filter = &store.InboxFilter{Page: 1, PerPage: 50}
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PerPage < 1 || filter.PerPage > 200 {
+		filter.PerPage = 50
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	if filter.Status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.Source != "" {
+		conditions = append(conditions, "source = ?")
+		args = append(args, filter.Source)
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var total int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM inbox_items %s", where)
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count inbox items: %w", err)
+	}
+
+	offset := (filter.Page - 1) * filter.PerPage
+	dataQuery := fmt.Sprintf(`SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items %s ORDER BY received_at DESC LIMIT ? OFFSET ?`, where)
+
+	dataArgs := append(args, filter.PerPage, offset)
+	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list inbox items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*store.InboxItem
+	for rows.Next() {
+		item, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return &store.InboxListResult{
+		Items:   items,
+		Total:   total,
+		Page:    filter.Page,
+		PerPage: filter.PerPage,
+	}, rows.Err()
+}
+
+// UpdateInboxItemStatus обновляет статус элемента ленты.
+func (s *Store) UpdateInboxItemStatus(ctx context.Context, id int64, status string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE inbox_items SET status = ? WHERE id = ?", status, id)
+	return err
+}
+
+// UpdateInboxItemAI обновляет AI-поля элемента ленты.
+func (s *Store) UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE inbox_items SET ai_processed = ?, ai_verdict = ?, ai_summary = ? WHERE id = ?",
+		processed, verdict, summary, id)
+	return err
+}
+
+// scanInboxItem сканирует строку в InboxItem.
+func scanInboxItem(row interface{ Scan(...interface{}) error }) (*store.InboxItem, error) {
+	item := &store.InboxItem{}
+	err := row.Scan(&item.ID, &item.Source, &item.SourceID, &item.ThreadID,
+		&item.FromContact, &item.FromName, &item.Subject,
+		&item.BodyText, &item.BodyHTML, &item.Meta, &item.ReceivedAt,
+		&item.AIProcessed, &item.AIAttempts, &item.AIVerdict, &item.AISummary, &item.Status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan inbox item: %w", err)
+	}
+	return item, nil
+}
+
 // CreateTask создаёт новую задачу.
 func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict)

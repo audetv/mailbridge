@@ -6,6 +6,26 @@ import (
 	"time"
 )
 
+// InboxItem представляет элемент ленты входящих.
+type InboxItem struct {
+	ID          int64     `json:"id"`
+	Source      string    `json:"source"`
+	SourceID    string    `json:"source_id"`
+	ThreadID    string    `json:"thread_id"`
+	FromContact string    `json:"from_contact"`
+	FromName    string    `json:"from_name"`
+	Subject     string    `json:"subject"`
+	BodyText    string    `json:"body_text"`
+	BodyHTML    string    `json:"body_html"`
+	Meta        string    `json:"meta"` // JSON
+	ReceivedAt  time.Time `json:"received_at"`
+	AIProcessed int       `json:"ai_processed"`
+	AIAttempts  int       `json:"ai_attempts"`
+	AIVerdict   string    `json:"ai_verdict"`
+	AISummary   string    `json:"ai_summary"`
+	Status      string    `json:"status"`
+}
+
 // Task представляет задачу в helpdesk.
 type Task struct {
 	ID            int64     `json:"id"`
@@ -107,10 +127,34 @@ type OutboxItem struct {
 	CreatedAt   time.Time
 }
 
+// InboxFilter содержит параметры фильтрации ленты.
+type InboxFilter struct {
+	Status  string // unread, read, archived, "" = все
+	Source  string
+	Page    int
+	PerPage int
+}
+
+// InboxListResult содержит результат запроса ленты.
+type InboxListResult struct {
+	Items   []*InboxItem `json:"items"`
+	Total   int64        `json:"total"`
+	Page    int          `json:"page"`
+	PerPage int          `json:"per_page"`
+}
+
 // Store определяет интерфейс хранилища данных.
 type Store interface {
 	// Migrate выполняет миграции схемы.
 	Migrate(ctx context.Context) error
+
+	// Inbox Items
+	CreateInboxItem(ctx context.Context, item *InboxItem) error
+	GetInboxItemByID(ctx context.Context, id int64) (*InboxItem, error)
+	GetInboxItemBySourceID(ctx context.Context, source, sourceID string) (*InboxItem, error)
+	ListInboxItems(ctx context.Context, filter *InboxFilter) (*InboxListResult, error)
+	UpdateInboxItemStatus(ctx context.Context, id int64, status string) error
+	UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error
 
 	// Tasks
 	CreateTask(ctx context.Context, task *Task) error
