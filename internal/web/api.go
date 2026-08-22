@@ -104,6 +104,65 @@ func (h *TaskHandler) UpdateInboxStatus(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// CreateTaskFromInbox обрабатывает POST /api/inbox/{id}/task
+func (h *TaskHandler) CreateTaskFromInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	item, err := h.store.GetInboxItemByID(r.Context(), id)
+	if err != nil || item == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "inbox item not found"}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Создаём задачу из ленты
+	task := &store.Task{
+		MessageID:     item.SourceID,
+		Subject:       item.Subject,
+		BodyText:      item.BodyText,
+		BodyHTML:      item.BodyHTML,
+		FromEmail:     item.FromContact,
+		FromName:      item.FromName,
+		Project:       "Входящие",
+		Status:        string(store.StatusNew),
+		ThreadID:      item.ThreadID,
+		SourceEmailID: item.SourceID,
+	}
+
+	if err := h.store.CreateTask(r.Context(), task); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Связываем с лентой
+	if err := h.store.LinkTaskToInboxItem(r.Context(), task.ID, item.ID, "created_manually"); err != nil {
+		log.Printf("failed to link task to inbox: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"task": task}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
 // ListTasks обрабатывает GET /api/tasks
 func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -250,6 +250,7 @@ func main() {
 	mux.HandleFunc("/api/inbox/{id}/read", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
+	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
 	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -51,6 +51,31 @@ func TestListInbox_Empty(t *testing.T) {
 	}
 }
 
+func TestCreateTaskFromInbox(t *testing.T) {
+	handler, st, cleanup := setupAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := st.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "msg-1", Subject: "Test", BodyText: "Body", FromContact: "u@e.com", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/inbox/1/task", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+
+	handler.CreateTaskFromInbox(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	tasks, _ := st.GetTasksByInboxItem(ctx, 1)
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task link, got %d", len(tasks))
+	}
+}
+
 func TestUpdateInboxStatus_Read(t *testing.T) {
 	handler, st, cleanup := setupAPI(t)
 	defer cleanup()
