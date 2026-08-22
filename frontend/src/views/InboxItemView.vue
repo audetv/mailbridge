@@ -188,7 +188,7 @@ function goBack() {
     gap: 2rem;
     margin-bottom: 1rem;
     color: var(--p-text-muted-color);
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .item-body {
@@ -225,7 +225,7 @@ function goBack() {
 
 .verdict-desc {
     margin-top: 0.25rem;
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .verdict-meta {
@@ -237,7 +237,7 @@ function goBack() {
 
 .verdict-summary {
     margin-top: 0.5rem;
-    font-size: 0.9rem;
+    font-size: 1rem;
     color: var(--p-text-muted-color);
 }
 

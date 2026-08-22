@@ -178,7 +178,7 @@ function handleLogout() {
 .task-count,
 .inbox-count {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 .dashboard-content {

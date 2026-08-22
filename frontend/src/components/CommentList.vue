@@ -58,7 +58,7 @@ function formatDate(dateStr) {
 
 .author {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .date {
@@ -67,7 +67,7 @@ function formatDate(dateStr) {
 }
 
 .comment-body {
-    font-size: 0.9rem;
+    font-size: 1rem;
     white-space: pre-wrap;
 }
 </style>

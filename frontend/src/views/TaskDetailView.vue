@@ -213,7 +213,7 @@ function escapeHtml(text) {
     gap: 2rem;
     margin-bottom: 1rem;
     color: var(--p-text-muted-color);
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .task-body {
@@ -268,6 +268,6 @@ function escapeHtml(text) {
     display: block;
     margin-bottom: 0.25rem;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 </style>
