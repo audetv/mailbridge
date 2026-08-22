@@ -90,6 +90,49 @@ func (h *TaskHandler) GetInboxItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetTaskInboxItems обрабатывает GET /api/tasks/{id}/inbox
+func (h *TaskHandler) GetTaskInboxItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	links, err := h.store.GetInboxItemsByTask(r.Context(), id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Загружаем полные InboxItem для каждой связи
+	var items []*store.InboxItem
+	for _, link := range links {
+		item, err := h.store.GetInboxItemByID(r.Context(), link.InboxItemID)
+		if err == nil && item != nil {
+			items = append(items, item)
+		}
+	}
+
+	if items == nil {
+		items = []*store.InboxItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(items); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
 // GetInboxItemTasks обрабатывает GET /api/inbox/{id}/tasks
 func (h *TaskHandler) GetInboxItemTasks(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
