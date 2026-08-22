@@ -109,7 +109,7 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 	sb.WriteString("## Промпт\n\n```\n")
 	sb.WriteString(prompt)
 	sb.WriteString("\n```\n\n")
-	sb.WriteString(fmt.Sprintf("## Изображения: %d\n\n", len(images)))
+	fmt.Fprintf(&sb, "## Изображения: %d\n\n", len(images))
 	sb.WriteString("## Ответ\n\n```json\n")
 	sb.WriteString(response)
 	sb.WriteString("\n```\n")
