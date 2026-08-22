@@ -143,6 +143,15 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 			return nil, fmt.Errorf("failed to save inbox item: %w", err)
 		}
 
+		// Публикуем WebSocket-событие о новом входящем
+		if p.broker != nil {
+			p.broker.Publish(web.WSEvent{
+				Type:    "inbox_created",
+				Message: fmt.Sprintf("Новое входящее: %s", inboxItem.Subject),
+				Data:    inboxItem,
+			})
+		}
+
 		p.logger.Info("inbox item created",
 			"source", inboxItem.Source,
 			"source_id", inboxItem.SourceID,

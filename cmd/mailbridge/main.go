@@ -169,7 +169,7 @@ func main() {
 	var aiWorker *ai.Worker
 	if aiClient != nil {
 		aiQueue = ai.NewQueue(st, 100)
-		aiWorker = ai.NewWorker(aiQueue, orchestrator, st, logger)
+		aiWorker = ai.NewWorker(aiQueue, orchestrator, st, logger, broker)
 
 		// Загружаем pending при старте
 		if err := aiQueue.LoadPending(context.Background()); err != nil {

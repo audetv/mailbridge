@@ -133,6 +133,9 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 		if err := o.store.AddTaskComment(ctx, comment); err != nil {
 			return err
 		}
+		if err := o.store.ResetTaskReads(ctx, int64(taskID)); err != nil {
+			log.Printf("[AI] failed to reset task reads: %v", err)
+		}
 	}
 
 	// Связываем задачу с элементом ленты
@@ -163,6 +166,9 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 		}
 		if err := o.store.AddTaskComment(ctx, comment); err != nil {
 			return err
+		}
+		if err := o.store.ResetTaskReads(ctx, int64(taskID)); err != nil {
+			log.Printf("[AI] failed to reset task reads: %v", err)
 		}
 	}
 

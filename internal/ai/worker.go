@@ -2,11 +2,13 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
+	"github.com/audetv/mailbridge/internal/web"
 )
 
 // Worker обрабатывает элементы очереди через LLM.
@@ -15,15 +17,17 @@ type Worker struct {
 	orchestrator *Orchestrator
 	store        store.Store
 	logger       *slog.Logger
+	broker       *web.EventBroker
 }
 
 // NewWorker создаёт новый Worker.
-func NewWorker(queue *Queue, orchestrator *Orchestrator, st store.Store, logger *slog.Logger) *Worker {
+func NewWorker(queue *Queue, orchestrator *Orchestrator, st store.Store, logger *slog.Logger, broker *web.EventBroker) *Worker {
 	return &Worker{
 		queue:        queue,
 		orchestrator: orchestrator,
 		store:        st,
 		logger:       logger,
+		broker:       broker,
 	}
 }
 
@@ -50,27 +54,22 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 		return
 	}
 
-	// Увеличиваем счётчик попыток
 	attempts := item.AIAttempts + 1
 	if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, 0, "[]", ""); err != nil {
 		w.logger.Error("[AIWorker] failed to update attempts", "error", err)
 	}
 
-	// Восстанавливаем ExtractedEmail из InboxItem
 	email := w.convertToEmail(item)
 
-	// Обрабатываем через оркестратор
 	response, err := w.orchestrator.ProcessEmail(ctx, email)
 	if err != nil {
 		w.logger.Error("[AIWorker] failed to process", "inbox_item_id", inboxItemID, "error", err)
-		// Если попыток больше 5 — помечаем как ошибку
 		if attempts >= 5 {
 			if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, -1, "[]", ""); err != nil {
 				w.logger.Error("[AIWorker] failed to mark failed", "error", err)
 			}
 			w.logger.Info("[AIWorker] inbox item marked as failed", "inbox_item_id", inboxItemID)
 		} else {
-			// Вернуть в очередь через backoff
 			go func(id int64) {
 				time.Sleep(backoff(attempts))
 				w.queue.Enqueue(id)
@@ -79,16 +78,31 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 		return
 	}
 
-	// Применяем вердикты
 	if err := w.orchestrator.ApplyVerdicts(ctx, email, response, inboxItemID); err != nil {
 		w.logger.Error("[AIWorker] failed to apply verdicts", "inbox_item_id", inboxItemID, "error", err)
 		return
 	}
 
-	// Обновляем ai_processed = 1
 	if err := w.store.UpdateInboxItemAI(ctx, inboxItemID, 1, verdictsToJSON(response), ""); err != nil {
 		w.logger.Error("[AIWorker] failed to update processed", "error", err)
 	}
+
+	// Публикуем события о созданных задачах
+	if w.broker != nil {
+		links, _ := w.store.GetTasksByInboxItem(ctx, inboxItemID)
+		for _, link := range links {
+			task, _ := w.store.GetTask(ctx, link.TaskID)
+			if task != nil {
+				w.broker.Publish(web.WSEvent{
+					Type:    "task_created",
+					TaskID:  task.ID,
+					Message: fmt.Sprintf("Новая задача #%d: %s", task.ID, task.Subject),
+					Data:    task,
+				})
+			}
+		}
+	}
+
 	w.logger.Info("[AIWorker] inbox item processed successfully", "inbox_item_id", inboxItemID)
 }
 
@@ -100,7 +114,6 @@ func (w *Worker) convertToEmail(item *store.InboxItem) *extractor.ExtractedEmail
 		Subject:   item.Subject,
 		BodyText:  item.BodyText,
 		BodyHTML:  item.BodyHTML,
-		// Attachments не восстанавливаем — для AI-обработки они уже в inbox_attachments
 	}
 }
 
