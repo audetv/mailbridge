@@ -359,3 +359,53 @@ WjR9awAAAABJRU5ErkJggg==
 		t.Fatalf("expected 1 attachment, got %d", len(result.Attachments))
 	}
 }
+
+func TestExtractor_InlineImageInAttachments(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Screenshot
+Message-ID: <inline-test@example.com>
+Content-Type: multipart/related; boundary="boundary456"
+
+--boundary456
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Смотрите скриншот:</p><img src="cid:img123"></body></html>
+
+--boundary456
+Content-Type: image/png; name="image001.png"
+Content-Disposition: inline; filename="image001.png"
+Content-ID: <img123>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGA
+WjR9awAAAABJRU5ErkJggg==
+
+--boundary456--`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	if len(result.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(result.Attachments))
+	}
+
+	att := result.Attachments[0]
+	if att.ContentType != "image/png" {
+		t.Errorf("ContentType = %s, want image/png", att.ContentType)
+	}
+	if att.StoragePath == "" {
+		t.Error("StoragePath is empty")
+	}
+	t.Logf("Attachment: filename=%s, type=%s, path=%s", att.Filename, att.ContentType, att.StoragePath)
+}

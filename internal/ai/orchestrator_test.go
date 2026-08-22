@@ -11,15 +11,6 @@ import (
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
 
-type mockSummaryClient struct {
-	response string
-}
-
-func (m *mockSummaryClient) Generate(_ context.Context, _ string, _ []string) (string, error) {
-	return m.response, nil
-}
-
-// BuildPrompt — экспортируемая обёртка для тестирования.
 func TestBuildPrompt(t *testing.T) {
 	o := ai.NewOrchestrator(nil, nil)
 
@@ -47,6 +38,26 @@ func TestBuildPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "ОТВЕТЬ СТРОГО В JSON") {
 		t.Error("prompt does not contain JSON instruction")
+	}
+}
+
+func TestBuildPrompt_WithProjects(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+	o.SetProjects([]string{"ТРК", "Отель", "Входящие"})
+
+	email := &extractor.ExtractedEmail{
+		From:     "user@example.com",
+		Subject:  "Тестовое письмо",
+		BodyText: "Текст письма",
+	}
+
+	prompt := o.BuildPrompt("Резюме", []*store.Task{}, email)
+
+	if !strings.Contains(prompt, "=== ДОСТУПНЫЕ ПРОЕКТЫ ===") {
+		t.Error("prompt does not contain projects section")
+	}
+	if !strings.Contains(prompt, "ТРК, Отель, Входящие") {
+		t.Error("prompt does not contain project names")
 	}
 }
 
@@ -109,6 +120,7 @@ func TestApplyVerdicts_NewTask(t *testing.T) {
 					Priority:    "high",
 					Project:     "ТРК",
 					Type:        "bug",
+					ImageNote:   "На скриншоте ошибка 500",
 				},
 			},
 		},
@@ -124,6 +136,52 @@ func TestApplyVerdicts_NewTask(t *testing.T) {
 	}
 	if tasks[0].Subject != "Новая задача" {
 		t.Errorf("Subject = %s", tasks[0].Subject)
+	}
+	if !strings.Contains(tasks[0].BodyText, "ошибка 500") {
+		t.Error("ImageNote not included in BodyText")
+	}
+}
+
+func TestApplyVerdicts_InfoOnly(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	o := ai.NewOrchestrator(nil, st)
+
+	email := &extractor.ExtractedEmail{
+		MessageID: "msg-info-1",
+		From:      "user@example.com",
+		Subject:   "Совещание перенесено",
+		BodyText:  "Совещание будет завтра в 14:00",
+	}
+
+	response := &ai.LLMResponse{
+		Verdicts: []ai.Verdict{
+			{
+				Action:    "info_only",
+				Summary:   "Совещание перенесено на завтра 14:00",
+				ImageNote: "На скриншоте календарь с отметкой 14:00",
+			},
+		},
+	}
+
+	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+		t.Fatalf("ApplyVerdicts error: %v", err)
+	}
+
+	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-info-1")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 info task, got %d", len(tasks))
+	}
+	if tasks[0].Status != "info_only" {
+		t.Errorf("Status = %s, want info_only", tasks[0].Status)
+	}
+	if tasks[0].Type != "info" {
+		t.Errorf("Type = %s, want info", tasks[0].Type)
+	}
+	if !strings.Contains(tasks[0].BodyText, "календарь") {
+		t.Error("ImageNote not included in info task BodyText")
 	}
 }
 
@@ -159,22 +217,67 @@ func TestUpdateSummary(t *testing.T) {
 	}
 }
 
-func TestBuildPrompt_WithProjects(t *testing.T) {
-	o := ai.NewOrchestrator(nil, nil)
-	o.SetProjects([]string{"ТРК", "Отель", "Входящие"})
+type mockSummaryClient struct {
+	response string
+}
+
+func (m *mockSummaryClient) Generate(_ context.Context, _ string, _ []string) (string, error) {
+	return m.response, nil
+}
+
+func TestApplyVerdicts_SavesAttachments(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	o := ai.NewOrchestrator(nil, st)
 
 	email := &extractor.ExtractedEmail{
-		From:     "user@example.com",
-		Subject:  "Тестовое письмо",
-		BodyText: "Текст письма",
+		MessageID: "msg-att-1",
+		From:      "user@example.com",
+		Subject:   "Скриншот ошибки",
+		BodyText:  "Прикладываю скриншот",
+		Attachments: []extractor.Attachment{
+			{
+				Filename:    "image001.png",
+				ContentType: "image/png",
+				Size:        54133,
+				StoragePath: "/tmp/test/image001.png",
+			},
+		},
 	}
 
-	prompt := o.BuildPrompt("Резюме", []*store.Task{}, email)
-
-	if !strings.Contains(prompt, "=== ДОСТУПНЫЕ ПРОЕКТЫ ===") {
-		t.Error("prompt does not contain projects section")
+	response := &ai.LLMResponse{
+		Verdicts: []ai.Verdict{
+			{
+				Action: "new",
+				Task: &ai.NewTaskData{
+					Title:       "Ошибка",
+					Description: "Ошибка на скриншоте",
+					Priority:    "high",
+					Project:     "Входящие",
+					Type:        "bug",
+				},
+			},
+		},
 	}
-	if !strings.Contains(prompt, "ТРК, Отель, Входящие") {
-		t.Error("prompt does not contain project names")
+
+	if err := o.ApplyVerdicts(context.Background(), email, response); err != nil {
+		t.Fatalf("ApplyVerdicts error: %v", err)
+	}
+
+	// Проверяем что задача создана
+	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-att-1")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	// Проверяем что вложение сохранено в БД
+	atts, _ := st.GetTaskAttachments(context.Background(), tasks[0].ID)
+	if len(atts) != 1 {
+		t.Fatalf("expected 1 attachment in DB, got %d", len(atts))
+	}
+	if atts[0].Filename != "image001.png" {
+		t.Errorf("Filename = %s", atts[0].Filename)
 	}
 }

@@ -5,8 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
@@ -61,12 +64,22 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 	var images []string
 	for _, att := range email.Attachments {
 		if isImageAttachment(att.ContentType) && att.StoragePath != "" {
-			data, err := os.ReadFile(att.StoragePath)
+			fullPath := filepath.Join("data/attachments", att.StoragePath)
+			data, err := os.ReadFile(fullPath)
 			if err != nil {
+				log.Printf("[AI] failed to read image %s: %v", fullPath, err)
 				continue
 			}
 			images = append(images, base64.StdEncoding.EncodeToString(data))
 		}
+	}
+
+	// Логируем промпт для отладки
+	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
+	if len(images) > 0 {
+		log.Printf("[AI] Изображений: %d", len(images))
+	} else {
+		log.Printf("[AI] Изображений: 0")
 	}
 
 	response, err := o.client.Generate(ctx, prompt, images)
@@ -74,7 +87,34 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		return nil, fmt.Errorf("LLM generate failed: %w", err)
 	}
 
+	// Логируем ответ
+	log.Printf("[AI] Ответ LLM:\n%s", response)
+
+	// Сохраняем отладочную информацию
+	o.saveDebugLog(threadID, prompt, response, images)
+
 	return o.parseResponse(response)
+}
+
+// saveDebugLog сохраняет промпт и ответ LLM в файл для отладки.
+func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []string) {
+	dir := "data/ai-debug"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+
+	filename := filepath.Join(dir, fmt.Sprintf("%s-%d.md", threadID, time.Now().Unix()))
+	var sb strings.Builder
+	sb.WriteString("# AI Debug Log\n\n")
+	sb.WriteString("## Промпт\n\n```\n")
+	sb.WriteString(prompt)
+	sb.WriteString("\n```\n\n")
+	sb.WriteString(fmt.Sprintf("## Изображения: %d\n\n", len(images)))
+	sb.WriteString("## Ответ\n\n```json\n")
+	sb.WriteString(response)
+	sb.WriteString("\n```\n")
+
+	_ = os.WriteFile(filename, []byte(sb.String()), 0o644)
 }
 
 // UpdateSummary обновляет резюме цепочки после обработки письма.
@@ -155,7 +195,11 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 			}
 
 		case "info_only":
-			// Ничего не делаем
+			if verdict.Summary != "" {
+				if err := o.createInfoTask(ctx, email, verdict); err != nil {
+					return fmt.Errorf("failed to create info task: %w", err)
+				}
+			}
 		}
 	}
 
@@ -219,7 +263,8 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
         "priority": "high|medium|low",
         "project": "Название проекта",
         "type": "bug|feature|support|access|seo|content",
-        "source_email_id": "message-id"
+        "source_email_id": "message-id",
+        "image_note": "Описание скриншота или null"
       }
     },
     {
@@ -238,7 +283,7 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
     },
     {
       "action": "info_only",
-      "summary": "Краткое резюме"
+      "summary": "Краткая информация, которая не требует действий"
     }
   ]
 }`)
@@ -279,7 +324,75 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		AIVerdict:     verdictToJSON(verdict),
 	}
 
-	return o.store.CreateTask(ctx, task)
+	imageNote := verdict.ImageNote
+	if imageNote == "" && verdict.Task != nil {
+		imageNote = verdict.Task.ImageNote
+	}
+	if imageNote != "" {
+		task.BodyText = verdict.Task.Description + "\n\n[Изображение]: " + imageNote
+	}
+
+	if err := o.store.CreateTask(ctx, task); err != nil {
+		return err
+	}
+
+	// Сохраняем вложения
+	for _, att := range email.Attachments {
+		taskAtt := &store.TaskAttachment{
+			TaskID:      task.ID,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
+		}
+		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
+			log.Printf("[AI] failed to save attachment: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (o *Orchestrator) createInfoTask(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict) error {
+	bodyText := verdict.Summary
+	if verdict.ImageNote != "" {
+		bodyText = verdict.Summary + "\n\n[Изображение]: " + verdict.ImageNote
+	}
+
+	task := &store.Task{
+		MessageID:     email.MessageID,
+		Subject:       "Информация: " + email.Subject,
+		BodyText:      bodyText,
+		FromEmail:     email.From,
+		FromName:      extractName(email.From),
+		Project:       "Входящие",
+		Type:          "info",
+		Priority:      "low",
+		Status:        "info_only",
+		ThreadID:      determineThreadID(email),
+		SourceEmailID: email.MessageID,
+		AIVerdict:     verdictToJSON(verdict),
+	}
+
+	if err := o.store.CreateTask(ctx, task); err != nil {
+		return err
+	}
+
+	// Сохраняем вложения
+	for _, att := range email.Attachments {
+		taskAtt := &store.TaskAttachment{
+			TaskID:      task.ID,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
+		}
+		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
+			log.Printf("[AI] failed to save attachment: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // updateTaskFromVerdict обновляет существующую задачу.

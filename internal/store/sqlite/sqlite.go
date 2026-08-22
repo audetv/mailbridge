@@ -715,7 +715,7 @@ func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary strin
 func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
 		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
-		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved') ORDER BY created_at ASC`
+		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved', 'info_only') ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, threadID)
 	if err != nil {

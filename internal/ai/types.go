@@ -25,6 +25,7 @@ type NewTaskData struct {
 	Project       string `json:"project"`
 	Type          string `json:"type"`
 	SourceEmailID string `json:"source_email_id"`
+	ImageNote     string `json:"image_note,omitempty"`
 }
 
 // TaskUpdates — поля для обновления существующей задачи.
@@ -36,12 +37,13 @@ type TaskUpdates struct {
 
 // Verdict — одно решение LLM по письму.
 type Verdict struct {
-	Action  string       `json:"action"` // "new", "update", "completed", "info_only"
-	TaskID  *int         `json:"task_id,omitempty"`
-	Task    *NewTaskData `json:"task,omitempty"`
-	Updates *TaskUpdates `json:"updates,omitempty"`
-	Comment string       `json:"comment,omitempty"`
-	Summary string       `json:"summary,omitempty"`
+	Action    string       `json:"action"` // "new", "update", "completed", "info_only"
+	TaskID    *int         `json:"task_id,omitempty"`
+	Task      *NewTaskData `json:"task,omitempty"`
+	Updates   *TaskUpdates `json:"updates,omitempty"`
+	Comment   string       `json:"comment,omitempty"`
+	Summary   string       `json:"summary,omitempty"`
+	ImageNote string       `json:"image_note,omitempty"`
 }
 
 // LLMResponse — ответ модели.
