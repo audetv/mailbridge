@@ -189,8 +189,17 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 
 		case "completed":
 			if verdict.TaskID != nil {
+				// Обновляем существующую задачу
 				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
 					return fmt.Errorf("failed to complete task: %w", err)
+				}
+			} else {
+				// КРИТИЧЕСКИ ВАЖНО: Создаем новую задачу в статусе resolved,
+				// если модель сообщает о выполненном действии, которого не было в трекере (task_id == nil)
+				if verdict.Comment != "" {
+					if err := o.createCompletedTaskFromVerdict(ctx, email, verdict); err != nil {
+						return fmt.Errorf("failed to create resolved task: %w", err)
+					}
 				}
 			}
 
@@ -221,13 +230,12 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	var sb strings.Builder
 
 	sb.WriteString("Ты — интеллектуальный ассистент для управления задачами.\n\n")
-	sb.WriteString("Проанализируй НОВОЕ письмо в контексте цепочки и определи действия.\n\n")
+	sb.WriteString("Проанализируй НОВОЕ письмо (включая пересланные цепочки) в контексте истории.\n\n")
 
 	if len(o.projects) > 0 {
 		sb.WriteString("=== ДОСТУПНЫЕ ПРОЕКТЫ ===\n")
 		sb.WriteString(strings.Join(o.projects, ", "))
-		sb.WriteString("\n\n")
-		sb.WriteString("ВАЖНО: Выбирай проект ТОЛЬКО из этого списка. Если не уверен — используй \"Входящие\".\n\n")
+		sb.WriteString("\nВАЖНО: Выбирай проект ТОЛЬКО из этого списка. Если не уверен — используй \"Входящие\".\n\n")
 	}
 
 	if summary != "" {
@@ -258,12 +266,12 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
     {
       "action": "new",
       "task": {
-        "title": "...",
-        "description": "...",
+        "title": "Краткий заголовок (до 60 символов)",
+        "description": "Суть задачи",
         "priority": "high|medium|low",
         "project": "Название проекта",
         "type": "bug|feature|support|access|seo|content",
-        "source_email_id": "message-id",
+        "source_email_id": "message-id из заголовка",
         "image_note": "Описание скриншота или null"
       }
     },
@@ -278,12 +286,39 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
     },
     {
       "action": "completed",
-      "task_id": 42,
-      "comment": "Автор подтвердил"
+      "task_id": null, 
+      "task": {
+        "title": "Краткий заголовок выполненного действия",
+        "description": "Что именно было сделано (извлеки из текста)",
+        "priority": "medium",
+        "project": "Входящие",
+        "type": "support",
+        "source_email_id": "message-id из заголовка"
+      },
+      "comment": "Дополнительный комментарий (опционально)"
     },
     {
       "action": "info_only",
       "summary": "Краткая информация, которая не требует действий"
+    }
+  ]
+}
+
+ПРИМЕР для completed с task_id = null (Пересланное письмо о выполненной работе):
+{
+  "verdicts": [
+    {
+      "action": "completed",
+      "task_id": null,
+      "task": {
+        "title": "Размещение документа на сайте Lider Sport",
+        "description": "Документ успешно размещён по ссылке https://lider-sport.ru/info/documents. Заказчик подтвердил получение.",
+        "priority": "medium",
+        "project": "Входящие",
+        "type": "content",
+        "source_email_id": "<message-id-письма>"
+      },
+      "comment": "Работа закрыта, подтверждение получено."
     }
   ]
 }`)
@@ -430,7 +465,7 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 // completeTaskFromVerdict завершает задачу.
 func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict) error {
 	updates := map[string]interface{}{
-		"status": "completed",
+		"status": "res",
 	}
 	if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
 		return err
@@ -448,6 +483,80 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 		}
 	}
 
+	return nil
+}
+
+// createCompletedTaskFromVerdict создаёт задачу, которая уже выполнена.
+// Теперь она использует блок verdict.Task универсально, как и createTaskFromVerdict,
+// но принудительно устанавливает статус "resolved".
+func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict) error {
+	// Значения по умолчанию (fallback)
+	title := "Выполнено: " + email.Subject
+	desc := verdict.Comment
+	proj := "Входящие"
+	tType := "support"
+	prio := "medium"
+	sourceID := email.MessageID
+
+	// Если модель вернула блок task (а теперь она обязана это делать по промпту), используем его данные
+	if verdict.Task != nil {
+		if verdict.Task.Title != "" {
+			title = verdict.Task.Title
+		}
+		if verdict.Task.Description != "" {
+			desc = verdict.Task.Description
+		}
+		if verdict.Task.Project != "" {
+			proj = verdict.Task.Project
+		}
+		if verdict.Task.Type != "" {
+			tType = verdict.Task.Type
+		}
+		if verdict.Task.Priority != "" {
+			prio = verdict.Task.Priority
+		}
+		if verdict.Task.SourceEmailID != "" {
+			sourceID = verdict.Task.SourceEmailID
+		}
+	}
+
+	// Добавляем комментарий к описанию, если он есть
+	if verdict.Comment != "" && desc != verdict.Comment {
+		desc = desc + "\n\nКомментарий: " + verdict.Comment
+	}
+
+	task := &store.Task{
+		MessageID:     email.MessageID,
+		Subject:       title,
+		BodyText:      desc,
+		FromEmail:     email.From,
+		FromName:      extractName(email.From),
+		Project:       proj,
+		Type:          tType,
+		Priority:      prio,
+		Status:        "resolved",
+		ThreadID:      determineThreadID(email),
+		SourceEmailID: sourceID,
+		AIVerdict:     verdictToJSON(verdict),
+	}
+
+	if err := o.store.CreateTask(ctx, task); err != nil {
+		return err
+	}
+
+	// Сохраняем вложения, если они были в этом письме
+	for _, att := range email.Attachments {
+		taskAtt := &store.TaskAttachment{
+			TaskID:      task.ID,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
+		}
+		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
+			log.Printf("[AI] failed to save attachment: %v", err)
+		}
+	}
 	return nil
 }
 
