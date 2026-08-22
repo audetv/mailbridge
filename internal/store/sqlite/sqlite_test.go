@@ -574,3 +574,40 @@ func TestMigrate_TaskInboxItemsTable(t *testing.T) {
 		t.Fatal("task_inbox_items table not created")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Inbox Items
+// ---------------------------------------------------------------------------
+
+func TestTaskInboxLink(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Создаём задачу
+	if err := s.CreateTask(ctx, &store.Task{MessageID: "m-link", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Создаём inbox_item
+	if err := s.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "msg-link-1", ThreadID: "thread-1", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	// Связываем
+	if err := s.LinkTaskToInboxItem(ctx, 1, 1, "created_from"); err != nil {
+		t.Fatalf("LinkTaskToInboxItem error: %v", err)
+	}
+
+	// Проверяем связь
+	items, err := s.GetInboxItemsByTask(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetInboxItemsByTask error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("expected 1 link, got %d", len(items))
+	}
+	if items[0].Relation != "created_from" {
+		t.Errorf("Relation = %s", items[0].Relation)
+	}
+}

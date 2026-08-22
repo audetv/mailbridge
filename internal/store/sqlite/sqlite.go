@@ -410,6 +410,53 @@ func scanInboxItem(row interface{ Scan(...interface{}) error }) (*store.InboxIte
 	return item, nil
 }
 
+// LinkTaskToInboxItem создаёт связь между задачей и элементом ленты.
+func (s *Store) LinkTaskToInboxItem(ctx context.Context, taskID, inboxItemID int64, relation string) error {
+	query := `INSERT OR IGNORE INTO task_inbox_items (task_id, inbox_item_id, relation) VALUES (?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, taskID, inboxItemID, relation)
+	return err
+}
+
+// GetInboxItemsByTask возвращает элементы ленты, связанные с задачей.
+func (s *Store) GetInboxItemsByTask(ctx context.Context, taskID int64) ([]*store.TaskInboxItem, error) {
+	query := `SELECT task_id, inbox_item_id, relation, created_at FROM task_inbox_items WHERE task_id = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*store.TaskInboxItem
+	for rows.Next() {
+		link := &store.TaskInboxItem{}
+		if err := rows.Scan(&link.TaskID, &link.InboxItemID, &link.Relation, &link.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
+}
+
+// GetTasksByInboxItem возвращает задачи, связанные с элементом ленты.
+func (s *Store) GetTasksByInboxItem(ctx context.Context, inboxItemID int64) ([]*store.TaskInboxItem, error) {
+	query := `SELECT task_id, inbox_item_id, relation, created_at FROM task_inbox_items WHERE inbox_item_id = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, inboxItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*store.TaskInboxItem
+	for rows.Next() {
+		link := &store.TaskInboxItem{}
+		if err := rows.Scan(&link.TaskID, &link.InboxItemID, &link.Relation, &link.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
+}
+
 // CreateTask создаёт новую задачу.
 func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict)

@@ -26,6 +26,14 @@ type InboxItem struct {
 	Status      string    `json:"status"`
 }
 
+// TaskInboxItem связывает задачу с элементом ленты.
+type TaskInboxItem struct {
+	TaskID      int64     `json:"task_id"`
+	InboxItemID int64     `json:"inbox_item_id"`
+	Relation    string    `json:"relation"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // Task представляет задачу в helpdesk.
 type Task struct {
 	ID            int64     `json:"id"`
@@ -155,6 +163,11 @@ type Store interface {
 	ListInboxItems(ctx context.Context, filter *InboxFilter) (*InboxListResult, error)
 	UpdateInboxItemStatus(ctx context.Context, id int64, status string) error
 	UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error
+
+	// Task-Inbox связь
+	LinkTaskToInboxItem(ctx context.Context, taskID, inboxItemID int64, relation string) error
+	GetInboxItemsByTask(ctx context.Context, taskID int64) ([]*TaskInboxItem, error)
+	GetTasksByInboxItem(ctx context.Context, inboxItemID int64) ([]*TaskInboxItem, error)
 
 	// Tasks
 	CreateTask(ctx context.Context, task *Task) error
