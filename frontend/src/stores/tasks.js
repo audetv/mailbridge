@@ -48,6 +48,11 @@ export const useTasksStore = defineStore('tasks', () => {
         }
     }
 
+    async function fetchTaskInbox(id) {
+        const { data } = await apiClient.get(`/tasks/${id}/inbox`)
+        return data
+    }
+
     async function fetchTask(id) {
         const { data } = await apiClient.get(`/tasks/${id}`)
         currentTask.value = data.task
@@ -88,6 +93,6 @@ export const useTasksStore = defineStore('tasks', () => {
         tasks, total, loading, inboxCount,
         currentTask, currentComments, currentAttachments,
         filters, fetchTasks, fetchTask, updateTask, replyTask,
-        markAsRead, setFilter, setStatuses, fetchInboxCount
+        markAsRead, setFilter, setStatuses, fetchInboxCount, fetchTaskInbox
     }
 })

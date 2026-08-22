@@ -28,6 +28,21 @@
                     </template>
                 </Card>
 
+                <Card v-if="inboxItems.length > 0" class="inbox-context">
+                    <template #title>📧 Оригинальное письмо</template>
+                    <template #content>
+                        <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
+                            <div class="inbox-context-header">
+                                <span class="inbox-context-subject">{{ item.subject }}</span>
+                                <router-link :to="`/inbox/${item.id}`" class="inbox-link">
+                                    Открыть в ленте
+                                </router-link>
+                            </div>
+                            <div class="item-body" v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                        </div>
+                    </template>
+                </Card>
+
                 <Card>
                     <template #title>Комментарии</template>
                     <template #content>
@@ -93,6 +108,7 @@ const status = ref(null)
 const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
+const inboxItems = ref([])
 
 const projectOptions = [
     { label: 'Входящие', value: 'Входящие' },
@@ -133,6 +149,7 @@ onMounted(async () => {
     await store.fetchTask(route.params.id)
     syncFields()
     store.markAsRead(route.params.id)
+    inboxItems.value = await store.fetchTaskInbox(route.params.id)
 })
 
 watch(() => store.currentTask, syncFields)
@@ -155,8 +172,8 @@ function onReplySent() {
 }
 
 function goBack() {
-  const tab = route.query.tab
-  router.push({ path: '/', query: tab ? { tab } : {} })
+    const tab = route.query.tab
+    router.push({ path: '/', query: tab ? { tab } : {} })
 }
 
 function formatDate(dateStr) {
@@ -269,5 +286,30 @@ function escapeHtml(text) {
     margin-bottom: 0.25rem;
     font-weight: 600;
     font-size: 1rem;
+}
+
+.inbox-context {
+    border-left: 3px solid var(--p-primary-300);
+}
+
+.inbox-context-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.inbox-context-subject {
+    font-weight: 600;
+}
+
+.inbox-link {
+    text-decoration: none;
+    color: var(--p-primary-color);
+    font-size: 0.85rem;
+}
+
+.inbox-context-item {
+    margin-bottom: 1rem;
 }
 </style>
