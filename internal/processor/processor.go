@@ -254,7 +254,7 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 		Project:   project,
 		Type:      classification.Type,
 		Priority:  classification.Priority,
-		Status:    "new",
+		Status:    string(store.StatusNew),
 	}
 
 	if err := p.store.CreateTask(ctx, task); err != nil {

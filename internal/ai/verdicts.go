@@ -63,7 +63,7 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		Project:       verdict.Task.Project,
 		Type:          verdict.Task.Type,
 		Priority:      verdict.Task.Priority,
-		Status:        "new",
+		Status:        string(store.StatusNew),
 		ThreadID:      determineThreadID(email),
 		SourceEmailID: email.MessageID,
 		AIVerdict:     verdictToJSON(verdict),
@@ -147,7 +147,7 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 // completeTaskFromVerdict завершает задачу.
 func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
 	updates := map[string]interface{}{
-		"status": "completed",
+		"status": string(store.StatusCompleted),
 	}
 	if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
 		return err
@@ -217,7 +217,7 @@ func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email
 		Project:       proj,
 		Type:          tType,
 		Priority:      prio,
-		Status:        "completed",
+		Status:        string(store.StatusCompleted),
 		ThreadID:      determineThreadID(email),
 		SourceEmailID: sourceID,
 		AIVerdict:     verdictToJSON(verdict),
