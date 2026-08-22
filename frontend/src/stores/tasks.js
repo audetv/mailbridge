@@ -6,6 +6,7 @@ export const useTasksStore = defineStore('tasks', () => {
     const tasks = ref([])
     const total = ref(0)
     const loading = ref(false)
+    const inboxCount = ref(0)
     const currentTask = ref(null)
     const currentComments = ref([])
     const currentAttachments = ref([])
@@ -33,6 +34,17 @@ export const useTasksStore = defineStore('tasks', () => {
             total.value = data.total
         } finally {
             loading.value = false
+        }
+    }
+
+    async function fetchInboxCount() {
+        try {
+            const { data } = await apiClient.get('/inbox', {
+                params: { status: 'unread', page: 1, per_page: 1 }
+            })
+            inboxCount.value = data.total || 0
+        } catch {
+            inboxCount.value = 0
         }
     }
 
@@ -72,5 +84,10 @@ export const useTasksStore = defineStore('tasks', () => {
         fetchTasks()
     }
 
-    return { tasks, total, loading, currentTask, currentComments, currentAttachments, filters, fetchTasks, fetchTask, updateTask, replyTask, markAsRead, setFilter, setStatuses }
+    return {
+        tasks, total, loading, inboxCount,
+        currentTask, currentComments, currentAttachments,
+        filters, fetchTasks, fetchTask, updateTask, replyTask,
+        markAsRead, setFilter, setStatuses, fetchInboxCount
+    }
 })

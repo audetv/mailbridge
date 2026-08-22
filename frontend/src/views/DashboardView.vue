@@ -7,7 +7,8 @@
         <span class="connection-status" :class="{ connected: wsStore.connected }">
           {{ wsStore.connected ? '● Онлайн' : '○ Офлайн' }}
         </span>
-        <span class="task-count">Всего задач: {{ store.total }}</span>
+        <span class="task-count">Задачи: {{ activeCount }}</span>
+        <span class="inbox-count">Входящие: {{ store.inboxCount }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
       </div>
     </header>
@@ -31,6 +32,7 @@ import Button from 'primevue/button'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import { useWebSocket } from '@/stores/websocket'
+import apiClient from '@/api/client'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
@@ -44,6 +46,7 @@ const store = useTasksStore()
 const wsStore = useWebSocket()
 
 const activeTab = ref('active')
+const activeCount = ref(0)
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },
@@ -62,26 +65,40 @@ const tabStatuses = {
 
 onMounted(() => {
   wsStore.connect(authStore.token)
-  
+
   const tabFromUrl = route.query.tab
   const saved = localStorage.getItem('mailbridge_active_tab')
-  
+
   let tab = 'active'
   if (tabFromUrl && (tabStatuses[tabFromUrl] || tabFromUrl === 'inbox')) {
     tab = tabFromUrl
   } else if (saved && (tabStatuses[saved] || saved === 'inbox')) {
     tab = saved
   }
-  
+
   activeTab.value = tab
   if (tab !== 'inbox') {
     store.setStatuses(tabStatuses[tab])
   }
+
+  fetchActiveCount()
+  store.fetchInboxCount()
 })
 
 onUnmounted(() => {
   wsStore.disconnect()
 })
+
+async function fetchActiveCount() {
+  try {
+    const { data } = await apiClient.get('/tasks', {
+      params: { status: ['new', 'in_progress'], page: 1, per_page: 1 }
+    })
+    activeCount.value = data.total || 0
+  } catch {
+    activeCount.value = 0
+  }
+}
 
 function onTabSelect(key) {
   activeTab.value = key
@@ -100,11 +117,17 @@ watch(() => wsStore.events.length, () => {
   switch (latest.type) {
     case 'task_created':
       store.fetchTasks()
+      fetchActiveCount()
       toast.add({ severity: 'info', summary: latest.message, life: 5000 })
       break
     case 'task_updated':
       store.fetchTasks()
+      fetchActiveCount()
       toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
+      break
+    case 'inbox_created':
+      store.fetchInboxCount()
+      toast.add({ severity: 'info', summary: latest.message, life: 5000 })
       break
     case 'connected':
       toast.add({ severity: 'success', summary: latest.message, life: 2000 })
@@ -152,8 +175,10 @@ function handleLogout() {
   color: var(--p-green-500);
 }
 
-.task-count {
+.task-count,
+.inbox-count {
   color: var(--p-text-muted-color);
+  font-size: 0.9rem;
 }
 
 .dashboard-content {
