@@ -26,14 +26,14 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 
 		case "update":
 			if verdict.TaskID != nil && verdict.Updates != nil {
-				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict, inboxItemID); err != nil {
 					return fmt.Errorf("failed to update task: %w", err)
 				}
 			}
 
 		case "completed":
 			if verdict.TaskID != nil {
-				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict); err != nil {
+				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict, inboxItemID); err != nil {
 					return fmt.Errorf("failed to complete task: %w", err)
 				}
 			} else {
@@ -158,7 +158,7 @@ func (o *Orchestrator) createInfoTask(ctx context.Context, email *extractor.Extr
 }
 
 // updateTaskFromVerdict обновляет существующую задачу.
-func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict) error {
+func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
 	updates := make(map[string]interface{})
 
 	if verdict.Updates.Priority != "" {
@@ -186,11 +186,18 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 		}
 	}
 
+	// Связываем задачу с элементом ленты
+	if inboxItemID > 0 {
+		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "updated_by"); err != nil {
+			log.Printf("[AI] failed to link task to inbox: %v", err)
+		}
+	}
+
 	return nil
 }
 
 // completeTaskFromVerdict завершает задачу.
-func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict) error {
+func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
 	updates := map[string]interface{}{
 		"status": "completed",
 	}
@@ -207,6 +214,12 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 		}
 		if err := o.store.AddTaskComment(ctx, comment); err != nil {
 			return err
+		}
+	}
+
+	if inboxItemID > 0 {
+		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "completed_by"); err != nil {
+			log.Printf("[AI] failed to link task to inbox: %v", err)
 		}
 	}
 
