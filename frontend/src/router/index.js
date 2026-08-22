@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/inbox/:id',
+      name: 'inbox-item',
+      component: () => import('@/views/InboxItemView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/tasks/:id',
       name: 'task-detail',
       component: () => import('@/views/TaskDetailView.vue'),

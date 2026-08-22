@@ -46,6 +46,9 @@ func (a *EmailAdapter) Parse(raw []byte) (*store.InboxItem, error) {
 	}
 	metaJSON, _ := json.Marshal(meta)
 
+	cleaner := extractor.NewCleaner()
+	bodyHTML := cleaner.SanitizeHTML(email.BodyHTML)
+
 	return &store.InboxItem{
 		Source:      "email",
 		SourceID:    email.MessageID,
@@ -54,7 +57,7 @@ func (a *EmailAdapter) Parse(raw []byte) (*store.InboxItem, error) {
 		FromName:    extractNameFromEmail(email.From),
 		Subject:     email.Subject,
 		BodyText:    email.BodyText,
-		BodyHTML:    email.BodyHTML,
+		BodyHTML:    bodyHTML,
 		Meta:        string(metaJSON),
 		Status:      "unread",
 	}, nil

@@ -247,6 +247,8 @@ func main() {
 
 	taskHandler := web.NewTaskHandler(st)
 	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
+	mux.HandleFunc("/api/inbox/{id}", taskHandler.GetInboxItem)
+	mux.HandleFunc("/api/inbox/{id}/tasks", taskHandler.GetInboxItemTasks)
 	mux.HandleFunc("/api/inbox/{id}/read", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)

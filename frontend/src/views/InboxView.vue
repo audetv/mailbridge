@@ -2,18 +2,22 @@
   <div class="inbox-view">
     <div class="inbox-header">
       <h2>Лента входящих</h2>
-      <div class="inbox-filters">
-        <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value"
-          placeholder="Все" @change="onFilterChange" showClear />
-      </div>
+      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value"
+        placeholder="Все" @change="onFilterChange" showClear class="status-filter" />
     </div>
     <DataTable :value="items" :loading="loading" paginator :rows="20" :totalRecords="total"
-      @page="onPage" lazy stripedRows>
-      <Column field="id" header="ID" style="width: 60px" />
+      @page="onPage" lazy stripedRows @row-click="openItem" class="inbox-table">
       <Column field="received_at" header="Дата" style="width: 140px">
         <template #body="{ data }">{{ formatDate(data.received_at) }}</template>
       </Column>
-      <Column field="from_contact" header="От кого" style="width: 180px" />
+      <Column field="from_contact" header="От кого" style="width: 200px">
+        <template #body="{ data }">
+          <div class="from-cell">
+            <div :class="{ 'unread-text': data.status === 'unread' }">{{ data.from_name || data.from_contact }}</div>
+            <div class="from-email">{{ data.from_contact }}</div>
+          </div>
+        </template>
+      </Column>
       <Column field="subject" header="Тема">
         <template #body="{ data }">
           <div class="subject-cell">
@@ -29,9 +33,8 @@
           <Tag v-else severity="warn" value="..." />
         </template>
       </Column>
-      <Column header="Действия" style="width: 160px">
-        <template #body="{ data }">
-          <Button icon="pi pi-eye" text size="small" @click="openItem(data)" />
+      <Column header="" style="width: 100px">
+        <template #body="{ data }">          
           <Button icon="pi pi-inbox" text size="small" @click="archiveItem(data)" />
           <Button icon="pi pi-plus" text size="small" @click="createTask(data)" />
         </template>
@@ -101,7 +104,7 @@ function formatDate(dateStr) {
 }
 
 function openItem(item) {
-  router.push(`/inbox/${item.id}`)
+  router.push(`/inbox/${item.data.id}`)
 }
 
 async function archiveItem(item) {

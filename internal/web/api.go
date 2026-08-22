@@ -60,6 +60,53 @@ func (h *TaskHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetInboxItem обрабатывает GET /api/inbox/{id}
+func (h *TaskHandler) GetInboxItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	item, err := h.store.GetInboxItemByID(r.Context(), id)
+	if err != nil || item == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "not found"}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(item); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// GetInboxItemTasks обрабатывает GET /api/inbox/{id}/tasks
+func (h *TaskHandler) GetInboxItemTasks(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+
+	tasks, err := h.store.GetTasksByInboxItem(r.Context(), id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
 // UpdateInboxStatus обрабатывает POST /api/inbox/{id}/read, /unread, /archive
 func (h *TaskHandler) UpdateInboxStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
