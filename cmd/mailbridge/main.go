@@ -272,13 +272,16 @@ func main() {
 	taskHandler := web.NewTaskHandler(st)
 	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
 	mux.HandleFunc("/api/inbox/{id}", taskHandler.GetInboxItem)
-	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)
+	mux.HandleFunc("/api/inbox/{id}/attachments", taskHandler.GetInboxAttachments)
 	mux.HandleFunc("/api/inbox/{id}/tasks", taskHandler.GetInboxItemTasks)
 	mux.HandleFunc("/api/inbox/{id}/read", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
 	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
+	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)
+	mux.HandleFunc("/api/tasks/{id}/attachments/{attId}", taskHandler.UnlinkTaskAttachment)
+	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

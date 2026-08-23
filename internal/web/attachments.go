@@ -1,0 +1,106 @@
+package web
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"strconv"
+
+	"github.com/audetv/mailbridge/internal/store"
+)
+
+// GetInboxAttachments обрабатывает GET /api/inbox/{id}/attachments
+func (h *TaskHandler) GetInboxAttachments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	atts, err := h.store.GetAttachmentsByInbox(r.Context(), id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	if atts == nil {
+		atts = []*store.Attachment{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(atts); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// GetTaskAttachments обрабатывает GET /api/tasks/{id}/attachments
+func (h *TaskHandler) GetTaskAttachments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	atts, err := h.store.GetAttachmentsByTask(r.Context(), id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	if atts == nil {
+		atts = []*store.Attachment{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(atts); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// UnlinkTaskAttachment обрабатывает DELETE /api/tasks/{id}/attachments/{attId}
+func (h *TaskHandler) UnlinkTaskAttachment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+
+	attStr := r.PathValue("attId")
+	attID, _ := strconv.ParseInt(attStr, 10, 64)
+
+	if err := h.store.UnlinkAttachmentFromTask(r.Context(), id, attID); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
