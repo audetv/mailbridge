@@ -54,6 +54,15 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 	}
 	metaJSON, _ := json.Marshal(meta)
 
+	// Извлекаем текст из HTML через goquery (более надёжно)
+	bodyText := email.BodyText
+	if email.BodyHTML != "" {
+		cleaner := extractor.NewCleaner()
+		if htmlText := cleaner.HTMLToText(email.BodyHTML); htmlText != "" {
+			bodyText = htmlText
+		}
+	}
+
 	item := &store.InboxItem{
 		Source:      "email",
 		SourceID:    email.MessageID,
@@ -61,7 +70,7 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 		FromContact: email.From,
 		FromName:    extractNameFromEmail(email.From),
 		Subject:     email.Subject,
-		BodyText:    email.BodyText,
+		BodyText:    bodyText,
 		BodyHTML:    email.BodyHTML,
 		Meta:        string(metaJSON),
 		Status:      "unread",

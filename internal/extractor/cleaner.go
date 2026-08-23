@@ -3,6 +3,8 @@ package extractor
 import (
 	"regexp"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // Cleaner очищает тело письма от истории переписки и подписей.
@@ -17,6 +19,25 @@ func NewCleaner() *Cleaner {
 		quotePatterns: defaultQuotePatterns(),
 		sigSeparator:  "-- ",
 	}
+}
+
+// HTMLToText извлекает чистый текст из HTML-контента.
+func (c *Cleaner) HTMLToText(htmlContent string) string {
+	if htmlContent == "" {
+		return ""
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return ""
+	}
+
+	// Убираем style и script
+	doc.Find("style, script").Remove()
+
+	// Берём текст из body
+	text := strings.TrimSpace(doc.Find("body").Text())
+	return text
 }
 
 // CleanBody очищает текст письма от цитируемой истории и подписей.
