@@ -2,8 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 )
 
 // GetAttachment обрабатывает GET /api/attachments/{path...}
+// path может быть: {hash[0:2]}/{hash[2:4]}/{hash}/{filename}
 func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
 	path := r.PathValue("path")
 	if path == "" {
@@ -20,20 +23,43 @@ func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Защита от path traversal
 	cleanPath := filepath.Clean(path)
 	if cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 
-	// Путь к файлу вложений
-	fullPath := filepath.Join("data", "attachments", cleanPath)
+	// Разбиваем на части: {hash[0:2]}/{hash[2:4]}/{hash}/{filename}
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+
+	var hashPath string
+	var hash string
+	if len(parts) >= 3 {
+		// Первые три части — hash-путь, остальное — filename
+		hashPath = filepath.Join(parts[0], parts[1], parts[2])
+		hash = parts[2]
+	} else {
+		// Без filename
+		hashPath = cleanPath
+		hash = filepath.Base(cleanPath)
+	}
+
+	// Путь к файлу — только hash-путь
+	fullPath := filepath.Join("data", "attachments", hashPath)
 
 	// Проверяем что файл существует
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+
+	// Ищем вложение в БД
+	if hash != "" {
+		if att, err := h.store.GetAttachmentByHash(r.Context(), hash); err == nil && att != nil {
+			disposition := fmt.Sprintf(`inline; filename*=UTF-8''%s`, url.PathEscape(att.Filename))
+			w.Header().Set("Content-Disposition", disposition)
+			w.Header().Set("Content-Type", att.ContentType)
+		}
 	}
 
 	http.ServeFile(w, r, fullPath)

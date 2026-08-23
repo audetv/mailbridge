@@ -21,7 +21,7 @@
                             <h4>Вложения</h4>
                             <div v-for="att in taskAttachments" :key="att.id" class="attachment-item">
                                 <i class="pi pi-paperclip" />
-                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
+                                <a :href="`/api/attachments/${att.storage_path}/${encodeURIComponent(att.filename)}`" target="_blank">{{ att.filename }}</a>
                                 <span class="size">{{ formatSize(att.size) }}</span>
                                 <Button icon="pi pi-times" text size="small" severity="danger"
                                     @click="unlinkAttachment(att.id)" title="Открепить" />
