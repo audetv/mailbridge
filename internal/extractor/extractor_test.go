@@ -440,3 +440,36 @@ UEsDBBQABgAIAAAAIQCq5n2yMQAAADAAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbI2QwWrDMAyG
 		t.Logf("Attachment: %s (type: %s, path: %s)", att.Filename, att.ContentType, att.StoragePath)
 	}
 }
+
+func TestCleaner_HTMLToText(t *testing.T) {
+	c := extractor.NewCleaner()
+
+	html := `<html><head><style>.x{color:red}</style></head>
+<body>
+<p>Первая строка</p>
+<p>Вторая строка с <b>жирным</b> и <a href="http://example.com">ссылкой</a></p>
+<ul><li>Пункт 1</li><li>Пункт 2</li></ul>
+<script>console.log('test')</script>
+</body></html>`
+
+	text := c.HTMLToText(html)
+
+	if !strings.Contains(text, "Первая строка") {
+		t.Error("missing first line")
+	}
+	if !strings.Contains(text, "жирным") {
+		t.Error("missing bold text")
+	}
+	if !strings.Contains(text, "ссылкой") {
+		t.Error("missing link text")
+	}
+	if !strings.Contains(text, "Пункт 1") {
+		t.Error("missing list item")
+	}
+	if strings.Contains(text, "console.log") {
+		t.Error("script content should be removed")
+	}
+	if strings.Contains(text, ".x{color:red}") {
+		t.Error("style content should be removed")
+	}
+}
