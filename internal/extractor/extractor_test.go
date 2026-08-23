@@ -188,49 +188,22 @@ func TestCleaner_RemoveSignatures(t *testing.T) {
 	}
 }
 
-func TestSanitizeFilename(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, _ := extractor.NewAttachmentStore(tmpDir)
-
-	att := &extractor.Attachment{
-		Filename:    "../../etc/passwd",
-		ContentType: "text/plain",
-		Data:        []byte("test"),
-		Size:        4,
-	}
-
-	path, err := store.Save(att)
-	if err != nil {
-		t.Fatalf("Save error: %v", err)
-	}
-
-	// Путь не должен содержать ".."
-	if strings.Contains(path, "..") {
-		t.Errorf("path contains '..': %s", path)
-	}
-
-	// Имя файла должно быть безопасным — passwd без пути etc
-	if !strings.HasSuffix(path, "passwd") {
-		t.Errorf("unexpected sanitized name in path: %s", path)
-	}
-}
-
-func TestAttachmentStore_DuplicateNames(t *testing.T) {
+func TestAttachmentStore_Deduplication(t *testing.T) {
 	tmpDir := t.TempDir()
 	store, _ := extractor.NewAttachmentStore(tmpDir)
 
 	att := &extractor.Attachment{
 		Filename:    "file.txt",
 		ContentType: "text/plain",
-		Data:        []byte("first"),
-		Size:        5,
+		Data:        []byte("same content"),
+		Size:        12,
 	}
 
 	path1, _ := store.Save(att)
 	path2, _ := store.Save(att)
 
-	if path1 == path2 {
-		t.Errorf("duplicate files should have different paths: %s == %s", path1, path2)
+	if path1 != path2 {
+		t.Errorf("expected same path for same content, got %s and %s", path1, path2)
 	}
 }
 

@@ -2,11 +2,8 @@ package adapters
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -73,13 +70,8 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 	// Сохраняем вложения через hash-дедупликацию
 	var attachments []*store.Attachment
 	for _, att := range email.Attachments {
-		fullPath := filepath.Join(a.attachDir, att.StoragePath)
-
-		// Вычисляем hash
-		hash, err := computeFileHash(fullPath)
-		if err != nil {
-			continue
-		}
+		// Извлекаем hash из пути: {hash[0:2]}/{hash[2:4]}/{hash}
+		hash := filepath.Base(att.StoragePath)
 
 		// Проверяем существует ли уже
 		existing, err := a.store.GetAttachmentByHash(context.Background(), hash)
@@ -106,17 +98,6 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 		InboxItem:   item,
 		Attachments: attachments,
 	}, nil
-}
-
-// computeFileHash вычисляет SHA-256 файла.
-func computeFileHash(filePath string) (string, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", err
-	}
-	hasher := sha256.New()
-	hasher.Write(data)
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // extractNameFromEmail извлекает имя из адреса "Имя <email>".

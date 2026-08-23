@@ -1,13 +1,12 @@
 package extractor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
 )
 
 // Attachment описывает вложение письма.
@@ -16,10 +15,10 @@ type Attachment struct {
 	ContentType string
 	Size        int64
 	Data        []byte
-	StoragePath string // путь после сохранения
+	StoragePath string
 }
 
-// AttachmentStore сохраняет вложения в файловую систему.
+// AttachmentStore сохраняет вложения в content-addressable storage.
 type AttachmentStore struct {
 	baseDir string
 }
@@ -32,31 +31,32 @@ func NewAttachmentStore(baseDir string) (*AttachmentStore, error) {
 	return &AttachmentStore{baseDir: baseDir}, nil
 }
 
-// Save сохраняет вложение в директорию с датой.
-// Возвращает путь относительно baseDir.
+// Save сохраняет вложение и возвращает относительный путь.
+// Путь: {hash[0:2]}/{hash[2:4]}/{hash}
 func (s *AttachmentStore) Save(att *Attachment) (string, error) {
-	dateDir := time.Now().Format("2006-01-02")
-	dir := filepath.Join(s.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create date dir: %w", err)
+	// Вычисляем hash
+	hash := computeHash(att.Data)
+
+	// Строим путь
+	relPath := filepath.Join(hash[0:2], hash[2:4], hash)
+
+	fullPath := filepath.Join(s.baseDir, relPath)
+
+	// Если файл уже существует — не перезаписываем
+	if _, err := os.Stat(fullPath); err == nil {
+		return relPath, nil
 	}
 
-	safeFilename := sanitizeFilename(att.Filename)
-	path := filepath.Join(dir, safeFilename)
-
-	// Если файл существует, добавляем timestamp
-	if _, err := os.Stat(path); err == nil {
-		ext := filepath.Ext(safeFilename)
-		name := safeFilename[:len(safeFilename)-len(ext)]
-		safeFilename = fmt.Sprintf("%s_%d%s", name, time.Now().UnixNano(), ext)
-		path = filepath.Join(dir, safeFilename)
+	// Создаём директории
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return "", fmt.Errorf("failed to create dir: %w", err)
 	}
 
-	if err := os.WriteFile(path, att.Data, 0o644); err != nil {
-		return "", fmt.Errorf("failed to write attachment: %w", err)
+	// Сохраняем
+	if err := os.WriteFile(fullPath, att.Data, 0o644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	relPath, _ := filepath.Rel(s.baseDir, path)
 	return relPath, nil
 }
 
@@ -65,31 +65,11 @@ func (s *AttachmentStore) BaseDir() string {
 	return s.baseDir
 }
 
-// sanitizeFilename удаляет опасные символы из имени файла.
-func sanitizeFilename(name string) string {
-	// Удаляем путь
-	name = filepath.Base(name)
-
-	// Заменяем небезопасные символы на подчёркивание
-	reg := regexp.MustCompile(`[^a-zA-Z0-9а-яА-ЯёЁ_.-]`)
-	name = reg.ReplaceAllString(name, "_")
-
-	// Убираем множественные подчёркивания
-	for strings.Contains(name, "__") {
-		name = strings.ReplaceAll(name, "__", "_")
-	}
-
-	// Обрезаем до 255 символов
-	if len(name) > 255 {
-		ext := filepath.Ext(name)
-		name = name[:255-len(ext)] + ext
-	}
-
-	if name == "" || name == "." || name == ".." {
-		name = fmt.Sprintf("attachment_%d", time.Now().UnixNano())
-	}
-
-	return name
+// computeHash вычисляет SHA-256 данных.
+func computeHash(data []byte) string {
+	hasher := sha256.New()
+	hasher.Write(data)
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 // CopyData копирует данные из reader в слайс байт.
