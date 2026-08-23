@@ -68,6 +68,13 @@ func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (
 	case ".pdf":
 		return p.processPDF(path)
 
+	case ".ics":
+		text, err := extractICalText(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract ics: %w", err)
+		}
+		return &ProcessedAttachment{Type: "text", Content: text}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
