@@ -59,7 +59,7 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 		w.logger.Error("[AIWorker] failed to update attempts", "error", err)
 	}
 
-	email := w.convertToEmail(item)
+	email := w.convertToEmail(ctx, item)
 
 	response, err := w.orchestrator.ProcessEmail(ctx, email)
 	if err != nil {
@@ -106,15 +106,30 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 	w.logger.Info("[AIWorker] inbox item processed successfully", "inbox_item_id", inboxItemID)
 }
 
-// convertToEmail преобразует InboxItem в ExtractedEmail.
-func (w *Worker) convertToEmail(item *store.InboxItem) *extractor.ExtractedEmail {
-	return &extractor.ExtractedEmail{
+// convertToEmail преобразует InboxItem в ExtractedEmail с вложениями.
+func (w *Worker) convertToEmail(ctx context.Context, item *store.InboxItem) *extractor.ExtractedEmail {
+	email := &extractor.ExtractedEmail{
 		MessageID: item.SourceID,
 		From:      item.FromContact,
 		Subject:   item.Subject,
 		BodyText:  item.BodyText,
 		BodyHTML:  item.BodyHTML,
 	}
+
+	// Загружаем вложения
+	atts, err := w.store.GetAttachmentsByInbox(ctx, item.ID)
+	if err == nil {
+		for _, att := range atts {
+			email.Attachments = append(email.Attachments, extractor.Attachment{
+				Filename:    att.Filename,
+				ContentType: att.ContentType,
+				Size:        att.Size,
+				StoragePath: att.StoragePath,
+			})
+		}
+	}
+
+	return email
 }
 
 // backoff возвращает задержку для retry.
