@@ -306,9 +306,10 @@ function escapeHtml(text) {
 }
 */
 .item-body :deep(img),
-.task-body :deep(img) {
+.task-body :deep(img),
+.item-body-preview :deep(img) {
     max-width: 100%;
-    max-height: 400px;
+    /* max-height: 400px; */
     height: auto;
     object-fit: contain;
     cursor: pointer;

@@ -2,11 +2,11 @@
   <div class="inbox-view">
     <div class="inbox-header">
       <h2>Лента входящих</h2>
-      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value" placeholder="Все"
-        @change="onFilterChange" showClear class="status-filter" />
+      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value"
+        placeholder="Все" @change="onFilterChange" showClear class="status-filter" />
     </div>
-    <DataTable :value="items" :loading="loading" paginator :rows="20" :totalRecords="total" @page="onPage" lazy
-      stripedRows @row-click="openItem" class="inbox-table">
+    <DataTable :value="store.items" :loading="store.loading" paginator :rows="20" :totalRecords="store.total"
+      @page="onPage" lazy stripedRows @row-click="openItem" class="inbox-table">
       <Column field="received_at" header="Дата" style="width: 140px">
         <template #body="{ data }">{{ formatDate(data.received_at) }}</template>
       </Column>
@@ -26,7 +26,7 @@
           </div>
         </template>
       </Column>
-      <Column field="ai_processed" header="AI" style="width: 60px">
+      <Column field="ai_processed" header="AI" style="width: 80px">
         <template #body="{ data }">
           <Tag v-if="data.ai_processed === 1" severity="success" value="OK" />
           <Tag v-else-if="data.ai_processed === -1" severity="danger" value="ERR" />
@@ -35,8 +35,8 @@
       </Column>
       <Column header="" style="width: 100px">
         <template #body="{ data }">
-          <Button icon="pi pi-inbox" text size="small" @click="archiveItem(data)" />
-          <Button icon="pi pi-plus" text size="small" @click="createTask(data)" />
+          <Button icon="pi pi-inbox" text size="small" @click.stop="archiveItem(data)" title="В архив" />
+          <Button icon="pi pi-plus" text size="small" @click.stop="createTask(data)" title="Создать задачу" />
         </template>
       </Column>
     </DataTable>
@@ -47,6 +47,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
+import { useInboxStore } from '@/stores/inbox'
 import apiClient from '@/api/client'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -57,46 +58,27 @@ import Select from 'primevue/select'
 
 const router = useRouter()
 const toast = useToast()
+const store = useInboxStore()
 
-const items = ref([])
-const total = ref(0)
-const loading = ref(false)
 const statusFilter = ref(null)
-const page = ref(1)
 
 const statusOptions = [
-  { label: 'Новая', value: 'new' },
-  { label: 'Бэклог', value: 'backlog' },
-  { label: 'В работе', value: 'in_progress' },
-  { label: 'Выполнена', value: 'completed' },
-  { label: 'Закрыта', value: 'closed' }
+  { label: 'Непрочитанные', value: 'unread' },
+  { label: 'Прочитанные', value: 'read' },
+  { label: 'Архив', value: 'archived' }
 ]
 
 onMounted(() => {
-  fetchItems()
+  store.fetchItems()
 })
 
-async function fetchItems() {
-  loading.value = true
-  try {
-    const params = { page: page.value, per_page: 20 }
-    if (statusFilter.value) params.status = statusFilter.value
-    const { data } = await apiClient.get('/inbox', { params })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
 function onFilterChange() {
-  page.value = 1
-  fetchItems()
+  store.setFilter('status', statusFilter.value || '')
 }
 
 function onPage(event) {
-  page.value = event.page + 1
-  fetchItems()
+  store.filters.page = event.page + 1
+  store.fetchItems()
 }
 
 function formatDate(dateStr) {
@@ -105,15 +87,16 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
-function openItem(item) {
-  router.push(`/inbox/${item.data.id}`)
+function openItem(event) {
+  router.push(`/inbox/${event.data.id}`)
 }
 
 async function archiveItem(item) {
   try {
     await apiClient.post(`/inbox/${item.id}/archive`)
     toast.add({ severity: 'success', summary: 'В архив', life: 2000 })
-    fetchItems()
+    store.fetchItems()
+    store.fetchUnreadCount()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Ошибка', life: 3000 })
   }
@@ -123,7 +106,7 @@ async function createTask(item) {
   try {
     await apiClient.post(`/inbox/${item.id}/task`)
     toast.add({ severity: 'success', summary: 'Задача создана', life: 2000 })
-    fetchItems()
+    store.fetchItems()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Ошибка', life: 3000 })
   }
@@ -132,7 +115,7 @@ async function createTask(item) {
 
 <style scoped>
 .inbox-view {
-  padding: 1rem;
+  padding: 0;
 }
 
 .inbox-header {
@@ -140,6 +123,14 @@ async function createTask(item) {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+}
+
+.inbox-header h2 {
+  margin: 0;
+}
+
+.status-filter {
+  width: 200px;
 }
 
 .subject-cell {
@@ -150,5 +141,15 @@ async function createTask(item) {
 
 .unread-text {
   font-weight: 600;
+}
+
+.from-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.from-email {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 </style>

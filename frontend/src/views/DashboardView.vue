@@ -8,7 +8,7 @@
           {{ wsStore.connected ? '● Онлайн' : '○ Офлайн' }}
         </span>
         <span class="task-count">Задачи: {{ activeCount }}</span>
-        <span class="inbox-count">Входящие: {{ store.inboxCount }}</span>
+        <span class="inbox-count">Входящие: {{ inboxStore.unreadCount }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
       </div>
     </header>
@@ -32,6 +32,7 @@ import Button from 'primevue/button'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import { useWebSocket } from '@/stores/websocket'
+import { useInboxStore } from '@/stores/inbox'
 import apiClient from '@/api/client'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
@@ -44,6 +45,7 @@ const toast = useToast()
 const authStore = useAuthStore()
 const store = useTasksStore()
 const wsStore = useWebSocket()
+const inboxStore = useInboxStore()
 
 const activeTab = ref('active')
 const activeCount = ref(0)
@@ -82,7 +84,7 @@ onMounted(() => {
   }
 
   fetchActiveCount()
-  store.fetchInboxCount()
+  inboxStore.fetchUnreadCount()
 })
 
 onUnmounted(() => {
@@ -126,7 +128,8 @@ watch(() => wsStore.events.length, () => {
       toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
       break
     case 'inbox_created':
-      store.fetchInboxCount()
+      inboxStore.fetchItems()
+      inboxStore.fetchUnreadCount()
       toast.add({ severity: 'info', summary: latest.message, life: 5000 })
       break
     case 'connected':

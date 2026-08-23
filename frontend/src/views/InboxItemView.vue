@@ -260,7 +260,7 @@ function goBack() {
 
 .item-body :deep(img) {
     max-width: 100%;
-    max-height: 400px;
+    /* max-height: 400px; */
     height: auto;
     object-fit: contain;
     cursor: pointer;
