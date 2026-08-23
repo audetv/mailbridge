@@ -84,16 +84,15 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		return err
 	}
 
-	for _, att := range email.Attachments {
-		taskAtt := &store.TaskAttachment{
-			TaskID:      task.ID,
-			Filename:    att.Filename,
-			ContentType: att.ContentType,
-			Size:        att.Size,
-			StoragePath: att.StoragePath,
-		}
-		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
-			log.Printf("[AI] failed to save attachment: %v", err)
+	// Наследуем вложения из входящего
+	if inboxItemID > 0 {
+		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
+		if err == nil {
+			for _, att := range inboxAtts {
+				if err := o.store.LinkAttachmentToTask(ctx, task.ID, att.ID); err != nil {
+					log.Printf("[AI] failed to link attachment to task: %v", err)
+				}
+			}
 		}
 	}
 
@@ -235,16 +234,15 @@ func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email
 		return err
 	}
 
-	for _, att := range email.Attachments {
-		taskAtt := &store.TaskAttachment{
-			TaskID:      task.ID,
-			Filename:    att.Filename,
-			ContentType: att.ContentType,
-			Size:        att.Size,
-			StoragePath: att.StoragePath,
-		}
-		if err := o.store.AddTaskAttachment(ctx, taskAtt); err != nil {
-			log.Printf("[AI] failed to save attachment: %v", err)
+	// Наследуем вложения из входящего
+	if inboxItemID > 0 {
+		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
+		if err == nil {
+			for _, att := range inboxAtts {
+				if err := o.store.LinkAttachmentToTask(ctx, task.ID, att.ID); err != nil {
+					log.Printf("[AI] failed to link attachment to task: %v", err)
+				}
+			}
 		}
 	}
 
