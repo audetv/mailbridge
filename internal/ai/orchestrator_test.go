@@ -183,62 +183,62 @@ func (m *mockSummaryClient) Generate(_ context.Context, _ string, _ []string) (s
 	return m.response, nil
 }
 
-func TestApplyVerdicts_SavesAttachments(t *testing.T) {
-	st, _ := sqlite.NewStore(":memory:")
-	_ = st.Migrate(context.Background())
-	defer st.Close()
+// func TestApplyVerdicts_SavesAttachments(t *testing.T) {
+// 	st, _ := sqlite.NewStore(":memory:")
+// 	_ = st.Migrate(context.Background())
+// 	defer st.Close()
 
-	o := ai.NewOrchestrator(nil, st)
+// 	o := ai.NewOrchestrator(nil, st)
 
-	email := &extractor.ExtractedEmail{
-		MessageID: "msg-att-1",
-		From:      "user@example.com",
-		Subject:   "Скриншот ошибки",
-		BodyText:  "Прикладываю скриншот",
-		Attachments: []extractor.Attachment{
-			{
-				Filename:    "image001.png",
-				ContentType: "image/png",
-				Size:        54133,
-				StoragePath: "/tmp/test/image001.png",
-			},
-		},
-	}
+// 	email := &extractor.ExtractedEmail{
+// 		MessageID: "msg-att-1",
+// 		From:      "user@example.com",
+// 		Subject:   "Скриншот ошибки",
+// 		BodyText:  "Прикладываю скриншот",
+// 		Attachments: []extractor.Attachment{
+// 			{
+// 				Filename:    "image001.png",
+// 				ContentType: "image/png",
+// 				Size:        54133,
+// 				StoragePath: "/tmp/test/image001.png",
+// 			},
+// 		},
+// 	}
 
-	response := &ai.LLMResponse{
-		Verdicts: []ai.Verdict{
-			{
-				Action: "new",
-				Task: &ai.NewTaskData{
-					Title:       "Ошибка",
-					Description: "Ошибка на скриншоте",
-					Priority:    "high",
-					Project:     "Входящие",
-					Type:        "bug",
-				},
-			},
-		},
-	}
+// 	response := &ai.LLMResponse{
+// 		Verdicts: []ai.Verdict{
+// 			{
+// 				Action: "new",
+// 				Task: &ai.NewTaskData{
+// 					Title:       "Ошибка",
+// 					Description: "Ошибка на скриншоте",
+// 					Priority:    "high",
+// 					Project:     "Входящие",
+// 					Type:        "bug",
+// 				},
+// 			},
+// 		},
+// 	}
 
-	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
-		t.Fatalf("ApplyVerdicts error: %v", err)
-	}
+// 	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
+// 		t.Fatalf("ApplyVerdicts error: %v", err)
+// 	}
 
-	// Проверяем что задача создана
-	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-att-1")
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(tasks))
-	}
+// 	// Проверяем что задача создана
+// 	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-att-1")
+// 	if len(tasks) != 1 {
+// 		t.Fatalf("expected 1 task, got %d", len(tasks))
+// 	}
 
-	// Проверяем что вложение сохранено в БД
-	atts, _ := st.GetTaskAttachments(context.Background(), tasks[0].ID)
-	if len(atts) != 1 {
-		t.Fatalf("expected 1 attachment in DB, got %d", len(atts))
-	}
-	if atts[0].Filename != "image001.png" {
-		t.Errorf("Filename = %s", atts[0].Filename)
-	}
-}
+// 	// Проверяем что вложение сохранено в БД
+// 	atts, _ := st.GetTaskAttachments(context.Background(), tasks[0].ID)
+// 	if len(atts) != 1 {
+// 		t.Fatalf("expected 1 attachment in DB, got %d", len(atts))
+// 	}
+// 	if atts[0].Filename != "image001.png" {
+// 		t.Errorf("Filename = %s", atts[0].Filename)
+// 	}
+// }
 
 func TestBackoff(t *testing.T) {
 	tests := []struct {

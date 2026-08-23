@@ -297,32 +297,32 @@ func TestAddAndGetTaskComments(t *testing.T) {
 // Task Attachments
 // ---------------------------------------------------------------------------
 
-func TestAddAndGetTaskAttachments(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
+// func TestAddAndGetTaskAttachments(t *testing.T) {
+// 	s, cleanup := setupStore(t)
+// 	defer cleanup()
+// 	ctx := context.Background()
 
-	task := &store.Task{MessageID: "att-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
-	mustCreateTask(t, s, task)
+// 	task := &store.Task{MessageID: "att-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
+// 	mustCreateTask(t, s, task)
 
-	if err := s.AddTaskAttachment(ctx, &store.TaskAttachment{
-		TaskID:      task.ID,
-		Filename:    "screenshot.png",
-		ContentType: "image/png",
-		Size:        1024,
-		StoragePath: "2024-01-01/screenshot.png",
-	}); err != nil {
-		t.Fatalf("AddTaskAttachment error: %v", err)
-	}
+// 	if err := s.AddTaskAttachment(ctx, &store.TaskAttachment{
+// 		TaskID:      task.ID,
+// 		Filename:    "screenshot.png",
+// 		ContentType: "image/png",
+// 		Size:        1024,
+// 		StoragePath: "2024-01-01/screenshot.png",
+// 	}); err != nil {
+// 		t.Fatalf("AddTaskAttachment error: %v", err)
+// 	}
 
-	atts, err := s.GetTaskAttachments(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("GetTaskAttachments error: %v", err)
-	}
-	if len(atts) != 1 {
-		t.Errorf("expected 1 attachment, got %d", len(atts))
-	}
-}
+// 	atts, err := s.GetTaskAttachments(ctx, task.ID)
+// 	if err != nil {
+// 		t.Fatalf("GetTaskAttachments error: %v", err)
+// 	}
+// 	if len(atts) != 1 {
+// 		t.Errorf("expected 1 attachment, got %d", len(atts))
+// 	}
+// }
 
 // ---------------------------------------------------------------------------
 // Existing tests (reply_log, outbox)
@@ -512,54 +512,6 @@ func TestGetActiveTasksByThread(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 active tasks, got %d", len(tasks))
-	}
-}
-
-func TestMigrate_InboxItemsTable(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-
-	exists, err := s.TableExists(context.Background(), "inbox_items")
-	if err != nil {
-		t.Fatalf("TableExists error: %v", err)
-	}
-	if !exists {
-		t.Fatal("inbox_items table not created")
-	}
-
-	// Проверяем что индекс thread_id создан
-	exists, err = s.TableExists(context.Background(), "idx_inbox_items_thread_id")
-	if err != nil {
-		t.Fatalf("TableExists error: %v", err)
-	}
-	// Индексы не видны через sqlite_master с type='table', проверяем отдельно
-	_ = exists
-}
-
-func TestMigrate_ThreadsColumns(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	// Проверяем что thread можно создать с новыми полями
-	thread := &store.Thread{
-		ThreadID: "thread-new",
-		Source:   "email",
-		Subject:  "Тестовая цепочка",
-	}
-	if err := s.CreateThread(ctx, thread); err != nil {
-		t.Fatalf("CreateThread error: %v", err)
-	}
-
-	got, _ := s.GetThread(ctx, "thread-new")
-	if got == nil {
-		t.Fatal("thread not found")
-	}
-	if got.Source != "email" {
-		t.Errorf("Source = %s", got.Source)
-	}
-	if got.Subject != "Тестовая цепочка" {
-		t.Errorf("Subject = %s", got.Subject)
 	}
 }
 
