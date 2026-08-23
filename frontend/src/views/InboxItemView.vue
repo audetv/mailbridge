@@ -47,7 +47,17 @@
                             <span><strong>От:</strong> {{ item.from_name }} ({{ item.from_contact }})</span>
                             <span><strong>Дата:</strong> {{ formatDate(item.received_at) }}</span>
                         </div>
-                        <div class="item-body" @click="handleImageClick" v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                        <div class="item-body" @click="handleImageClick"
+                            v-html="item.body_html || escapeHtml(item.body_text)"></div>
+
+                        <div v-if="inboxAttachments.length > 0" class="attachments">
+                            <h4>Вложения</h4>
+                            <div v-for="att in inboxAttachments" :key="att.id" class="attachment-item">
+                                <i class="pi pi-paperclip" />
+                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
+                                <span class="size">{{ formatSize(att.size) }}</span>
+                            </div>
+                        </div>
                     </template>
                 </Card>
             </div>
@@ -58,8 +68,8 @@
                         <div class="actions">
                             <Button label="Отметить непрочитанным" icon="pi pi-envelope" severity="secondary"
                                 @click="markUnread" class="w-full mb-2" />
-                            <Button label="В архив" icon="pi pi-inbox" severity="secondary"
-                                @click="archive" class="w-full mb-2" />
+                            <Button label="В архив" icon="pi pi-inbox" severity="secondary" @click="archive"
+                                class="w-full mb-2" />
                             <Button label="Создать задачу" icon="pi pi-plus" @click="createTask" class="w-full" />
                         </div>
                     </template>
@@ -84,6 +94,7 @@ const toast = useToast()
 
 const item = ref(null)
 const linkedTasks = ref([])
+const inboxAttachments = ref([])
 
 const parsedVerdicts = computed(() => {
     if (!item.value?.ai_verdict || item.value.ai_verdict === '[]') return []
@@ -102,6 +113,11 @@ onMounted(async () => {
     try {
         const tasksData = await apiClient.get(`/inbox/${route.params.id}/tasks`)
         linkedTasks.value = tasksData.data
+    } catch { /* ignore */ }
+
+    try {
+        const attsData = await apiClient.get(`/inbox/${route.params.id}/attachments`)
+        inboxAttachments.value = attsData.data
     } catch { /* ignore */ }
 })
 
@@ -125,6 +141,18 @@ function formatDate(dateStr) {
     return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function handleImageClick(event) {
+    if (event.target.tagName === 'IMG' && event.target.src) {
+        window.open(event.target.src, '_blank')
+    }
+}
+
 async function markUnread() {
     await apiClient.post(`/inbox/${route.params.id}/unread`)
     toast.add({ severity: 'info', summary: 'Отмечено непрочитанным', life: 2000 })
@@ -146,12 +174,6 @@ async function createTask() {
     }
 }
 
-function handleImageClick(event) {
-    if (event.target.tagName === 'IMG' && event.target.src) {
-        window.open(event.target.src, '_blank')
-    }
-}
-
 function goBack() {
     router.push('/?tab=inbox')
 }
@@ -159,48 +181,9 @@ function goBack() {
 
 <style scoped>
 .inbox-item {
+    min-height: 100vh;
+    background: var(--p-surface-100);
     overflow-x: hidden;
-    min-height: 100vh;
-    background: var(--p-surface-100);
-}
-.task-body,
-.item-body,
-.item-body-preview {
-    overflow-wrap: break-word;
-    word-wrap: break-word;
-    word-break: break-word;
-    max-width: 100%;
-}
-
-/*
-.item-body :deep(pre),
-.item-body :deep(code),
-.task-body :deep(pre),
-.task-body :deep(code) {
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.item-body :deep(table),
-.task-body :deep(table) {
-  max-width: 100%;
-  display: block;
-  overflow-x: auto;
-}
-*/
-.item-body :deep(img),
-.task-body :deep(img) {
-    max-width: 100%;
-    max-height: 400px;
-    height: auto;
-    object-fit: contain;
-    cursor: pointer;
-}
-.inbox-item {
-    min-height: 100vh;
-    background: var(--p-surface-100);
 }
 
 .item-header {
@@ -245,6 +228,10 @@ function goBack() {
     border: 1px solid var(--p-surface-200);
     border-radius: 0.5rem;
     background: var(--p-surface-0);
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    max-width: 100%;
 }
 
 .item-body :deep(p) {
@@ -255,6 +242,28 @@ function goBack() {
     display: block;
     content: "";
     margin-top: 0.25rem;
+}
+
+.item-body :deep(pre),
+.item-body :deep(code) {
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.item-body :deep(table) {
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+}
+
+.item-body :deep(img) {
+    max-width: 100%;
+    max-height: 400px;
+    height: auto;
+    object-fit: contain;
+    cursor: pointer;
 }
 
 .verdicts-card {
@@ -301,6 +310,24 @@ function goBack() {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+}
+
+.attachments {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--p-surface-200);
+}
+
+.attachment-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.25rem 0;
+}
+
+.size {
+    color: var(--p-text-muted-color);
+    font-size: 0.85rem;
 }
 
 .w-full {

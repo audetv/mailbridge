@@ -16,6 +16,17 @@
                         </div>
                         <div class="task-body" @click="handleImageClick"
                             v-html="store.currentTask.body_html || escapeHtml(store.currentTask.body_text)"></div>
+
+                        <div v-if="taskAttachments.length > 0" class="attachments">
+                            <h4>Вложения</h4>
+                            <div v-for="att in taskAttachments" :key="att.id" class="attachment-item">
+                                <i class="pi pi-paperclip" />
+                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
+                                <span class="size">{{ formatSize(att.size) }}</span>
+                                <Button icon="pi pi-times" text size="small" severity="danger"
+                                    @click="unlinkAttachment(att.id)" title="Открепить" />
+                            </div>
+                        </div>
                     </template>
                     <template #footer>
                         <WorkflowButtons :currentStatus="status" @transition="onWorkflowTransition" />
@@ -39,7 +50,8 @@
                                     <router-link :to="`/inbox/${item.id}`" class="inbox-link">Открыть в
                                         ленте</router-link>
                                 </div>
-                                <div class="item-body"  @click="handleImageClick" v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                                <div class="item-body" @click="handleImageClick"
+                                    v-html="item.body_html || escapeHtml(item.body_text)"></div>
                             </div>
                         </div>
                         <div v-else>
@@ -105,7 +117,9 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 import { useTasksStore } from '@/stores/tasks'
+import apiClient from '@/api/client'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
@@ -116,6 +130,7 @@ import WorkflowButtons from '@/components/WorkflowButtons.vue'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const store = useTasksStore()
 
 const project = ref(null)
@@ -124,6 +139,7 @@ const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
 const inboxItems = ref([])
+const taskAttachments = ref([])
 const expanded = ref(false)
 
 const projectOptions = [
@@ -167,6 +183,7 @@ onMounted(async () => {
     syncFields()
     store.markAsRead(route.params.id)
     inboxItems.value = await store.fetchTaskInbox(route.params.id)
+    taskAttachments.value = await fetchTaskAttachments(route.params.id)
 })
 
 watch(() => store.currentTask, syncFields)
@@ -189,9 +206,27 @@ async function onWorkflowTransition(newStatus) {
     await updateField('status', newStatus)
 }
 
+async function fetchTaskAttachments(taskId) {
+    try {
+        const { data } = await apiClient.get(`/tasks/${taskId}/attachments`)
+        return data
+    } catch {
+        return []
+    }
+}
+
+async function unlinkAttachment(attId) {
+    try {
+        await apiClient.delete(`/tasks/${route.params.id}/attachments/${attId}`)
+        taskAttachments.value = taskAttachments.value.filter(a => a.id !== attId)
+        toast.add({ severity: 'success', summary: 'Вложение откреплено', life: 2000 })
+    } catch {
+        toast.add({ severity: 'error', summary: 'Ошибка', life: 3000 })
+    }
+}
+
 function previewHtml(item) {
     const html = item.body_html || escapeHtml(item.body_text)
-    // Ограничиваем ~2000 символов
     if (html.length > 5000) {
         return html.slice(0, 5000) + '...'
     }
@@ -234,6 +269,7 @@ function escapeHtml(text) {
     return text?.replace(/\n/g, '<br>') || ''
 }
 </script>
+
 
 <style scoped>
 .task-detail {
