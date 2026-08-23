@@ -22,9 +22,13 @@ func NewPreprocessor() *Preprocessor {
 }
 
 // ProcessAttachment обрабатывает один файл и возвращает текстовое представление
-// или Base64 для изображений.
-func (p *Preprocessor) ProcessAttachment(path string) (*ProcessedAttachment, error) {
-	ext := strings.ToLower(filepath.Ext(path))
+// или Base64 для изображений. originalFilename используется для определения типа.
+func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (*ProcessedAttachment, error) {
+	// Используем оригинальное имя для определения типа
+	ext := strings.ToLower(filepath.Ext(originalFilename))
+	if ext == "" {
+		ext = strings.ToLower(filepath.Ext(path))
+	}
 
 	switch ext {
 	case ".txt", ".csv", ".md", ".log":

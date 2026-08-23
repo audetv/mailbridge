@@ -19,7 +19,7 @@ func TestProcessAttachment_Text(t *testing.T) {
 		t.Fatalf("write error: %v", err)
 	}
 
-	result, err := p.ProcessAttachment(file)
+	result, err := p.ProcessAttachment(file, "test.txt")
 	if err != nil {
 		t.Fatalf("ProcessAttachment error: %v", err)
 	}
@@ -42,7 +42,9 @@ func TestProcessAttachment_Image(t *testing.T) {
 		t.Fatalf("write error: %v", err)
 	}
 
-	result, err := p.ProcessAttachment(file)
+	// TestProcessAttachment_Image
+	result, err := p.ProcessAttachment(file, "test.png")
+
 	if err != nil {
 		t.Fatalf("ProcessAttachment error: %v", err)
 	}
@@ -70,7 +72,8 @@ func TestProcessAttachment_Unsupported(t *testing.T) {
 		t.Fatalf("write error: %v", err)
 	}
 
-	_, err := p.ProcessAttachment(file)
+	// TestProcessAttachment_Unsupported
+	_, err := p.ProcessAttachment(file, "test.exe")
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
 	}
@@ -86,7 +89,7 @@ func TestProcessAttachment_PDF_WithoutPoppler(t *testing.T) {
 	}
 
 	// Ожидаем ошибку если poppler-utils не установлен
-	result, err := p.ProcessAttachment(file)
+	result, err := p.ProcessAttachment(file, "test.txt")
 	if err != nil {
 		return // ожидаемо если pdftotext не установлен
 	}

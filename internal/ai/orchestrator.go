@@ -77,7 +77,7 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 
 		// Текстовые форматы → извлечение текста
-		processed, err := preprocessor.NewPreprocessor().ProcessAttachment(fullPath)
+		processed, err := preprocessor.NewPreprocessor().ProcessAttachment(fullPath, att.Filename)
 		if err != nil {
 			log.Printf("[AI] failed to process attachment %s: %v", att.Filename, err)
 			continue
