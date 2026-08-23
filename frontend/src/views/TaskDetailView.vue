@@ -275,7 +275,7 @@ function escapeHtml(text) {
 .task-detail {
     overflow-x: hidden;
     min-height: 100vh;
-    background: var(--p-surface-100);
+    /* background: var(--p-surface-100); */
 }
 
 .task-body,
@@ -317,7 +317,7 @@ function escapeHtml(text) {
 
 .task-detail {
     min-height: 100vh;
-    background: var(--p-surface-100);
+    /* background: var(--p-surface-100); */
 }
 
 .task-header {
@@ -325,7 +325,7 @@ function escapeHtml(text) {
     align-items: center;
     gap: 1rem;
     padding: 1rem 2rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     border-bottom: 1px solid var(--p-surface-200);
 }
 
@@ -361,7 +361,7 @@ function escapeHtml(text) {
     padding: 0.5rem;
     border: 1px solid var(--p-surface-200);
     border-radius: 0.5rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
 }
 
 .task-body :deep(p) {

@@ -42,7 +42,7 @@ function formatDate(dateStr) {
 }
 
 .comment.in {
-    background: var(--p-surface-100);
+    /* background: var(--p-surface-100); */
 }
 
 .comment.out {

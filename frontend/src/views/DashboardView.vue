@@ -10,6 +10,8 @@
         <span class="task-count">Задачи: {{ activeCount }}</span>
         <span class="inbox-count">Входящие: {{ inboxStore.unreadCount }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
+        <Button :icon="themeStore.isDark ? 'pi pi-sun' : 'pi pi-moon'" text @click="themeStore.toggleTheme()"
+          title="Переключить тему" />
       </div>
     </header>
     <main class="dashboard-content">
@@ -24,6 +26,7 @@
 </template>
 
 <script setup>
+import { useThemeStore } from '@/stores/theme'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
@@ -39,6 +42,7 @@ import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
 import InboxView from '@/views/InboxView.vue'
 
+const themeStore = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -155,7 +159,7 @@ function handleLogout() {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 2rem;
-  background: var(--p-surface-0);
+  background: var(--p-content-background);
   border-bottom: 1px solid var(--p-surface-200);
 }
 

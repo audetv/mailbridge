@@ -182,7 +182,7 @@ function goBack() {
 <style scoped>
 .inbox-item {
     min-height: 100vh;
-    background: var(--p-surface-100);
+    /* background: var(--p-surface-100); */
     overflow-x: hidden;
 }
 
@@ -191,7 +191,7 @@ function goBack() {
     align-items: center;
     gap: 1rem;
     padding: 1rem 2rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     border-bottom: 1px solid var(--p-surface-200);
 }
 
@@ -227,7 +227,7 @@ function goBack() {
     padding: 0.5rem;
     border: 1px solid var(--p-surface-200);
     border-radius: 0.5rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     overflow-wrap: break-word;
     word-wrap: break-word;
     word-break: break-word;
