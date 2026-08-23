@@ -82,6 +82,13 @@ func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (
 		}
 		return &ProcessedAttachment{Type: "text", Content: text}, nil
 
+	case ".pptx":
+		text, err := extractPptxText(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract pptx: %w", err)
+		}
+		return &ProcessedAttachment{Type: "text", Content: text}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
