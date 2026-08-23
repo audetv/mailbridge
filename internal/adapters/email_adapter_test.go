@@ -15,7 +15,7 @@ func setupEmailAdapter(t *testing.T) *adapters.EmailAdapter {
 		t.Fatalf("NewAttachmentStore error: %v", err)
 	}
 	ext := extractor.NewExtractor(attStore)
-	return adapters.NewEmailAdapter(ext)
+	return adapters.NewEmailAdapter(ext, nil, tmpDir)
 }
 
 func TestEmailAdapter_Parse(t *testing.T) {
@@ -29,7 +29,12 @@ Content-Type: text/plain; charset=utf-8
 
 Текст письма`)
 
-	item, err := adapter.Parse(raw)
+	parseResult, err := adapter.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	item := parseResult.InboxItem
+
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
@@ -70,7 +75,11 @@ Content-Type: text/plain
 
 Ответ`)
 
-	item, err := adapter.Parse(raw)
+	parseResult, err := adapter.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	item := parseResult.InboxItem
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}

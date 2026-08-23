@@ -1,8 +1,13 @@
 package adapters
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
@@ -11,11 +16,17 @@ import (
 // EmailAdapter парсит сырые email-данные в InboxItem.
 type EmailAdapter struct {
 	extractor *extractor.Extractor
+	store     store.Store
+	attachDir string
 }
 
 // NewEmailAdapter создаёт новый EmailAdapter.
-func NewEmailAdapter(ext *extractor.Extractor) *EmailAdapter {
-	return &EmailAdapter{extractor: ext}
+func NewEmailAdapter(ext *extractor.Extractor, st store.Store, attachDir string) *EmailAdapter {
+	return &EmailAdapter{
+		extractor: ext,
+		store:     st,
+		attachDir: attachDir,
+	}
 }
 
 // Source возвращает "email".
@@ -23,8 +34,8 @@ func (a *EmailAdapter) Source() string {
 	return "email"
 }
 
-// Parse преобразует сырое письмо в InboxItem.
-func (a *EmailAdapter) Parse(raw []byte) (*store.InboxItem, error) {
+// Parse преобразует сырое письмо в InboxItem и сохраняет вложения.
+func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 	email, err := a.extractor.Extract(raw)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract email: %w", err)
@@ -46,10 +57,7 @@ func (a *EmailAdapter) Parse(raw []byte) (*store.InboxItem, error) {
 	}
 	metaJSON, _ := json.Marshal(meta)
 
-	cleaner := extractor.NewCleaner()
-	bodyHTML := cleaner.SanitizeHTML(email.BodyHTML)
-
-	return &store.InboxItem{
+	item := &store.InboxItem{
 		Source:      "email",
 		SourceID:    email.MessageID,
 		ThreadID:    threadID,
@@ -57,19 +65,65 @@ func (a *EmailAdapter) Parse(raw []byte) (*store.InboxItem, error) {
 		FromName:    extractNameFromEmail(email.From),
 		Subject:     email.Subject,
 		BodyText:    email.BodyText,
-		BodyHTML:    bodyHTML,
+		BodyHTML:    email.BodyHTML,
 		Meta:        string(metaJSON),
 		Status:      "unread",
+	}
+
+	// Сохраняем вложения через hash-дедупликацию
+	var attachments []*store.Attachment
+	for _, att := range email.Attachments {
+		fullPath := filepath.Join(a.attachDir, att.StoragePath)
+
+		// Вычисляем hash
+		hash, err := computeFileHash(fullPath)
+		if err != nil {
+			continue
+		}
+
+		// Проверяем существует ли уже
+		existing, err := a.store.GetAttachmentByHash(context.Background(), hash)
+		if err == nil && existing != nil {
+			attachments = append(attachments, existing)
+			continue
+		}
+
+		// Создаём новую запись
+		newAtt := &store.Attachment{
+			Hash:        hash,
+			Filename:    att.Filename,
+			ContentType: att.ContentType,
+			Size:        att.Size,
+			StoragePath: att.StoragePath,
+		}
+		if err := a.store.CreateAttachment(context.Background(), newAtt); err != nil {
+			continue
+		}
+		attachments = append(attachments, newAtt)
+	}
+
+	return &ParseResult{
+		InboxItem:   item,
+		Attachments: attachments,
 	}, nil
+}
+
+// computeFileHash вычисляет SHA-256 файла.
+func computeFileHash(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	hasher := sha256.New()
+	hasher.Write(data)
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // extractNameFromEmail извлекает имя из адреса "Имя <email>".
 func extractNameFromEmail(from string) string {
 	for i := 0; i < len(from); i++ {
 		if from[i] == '<' {
-			name := from[:i]
-			name = trimQuotes(name)
-			return name
+			return trimQuotes(from[:i])
 		}
 	}
 	return ""

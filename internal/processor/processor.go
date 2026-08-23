@@ -120,9 +120,16 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 	// Парсим через адаптер и сохраняем в ленту (если адаптер задан)
 	var inboxItem *store.InboxItem
 	if p.adapter != nil {
-		inboxItem, err = p.adapter.Parse(rawEmail)
+		parseResult, err := p.adapter.Parse(rawEmail)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse incoming: %w", err)
+		}
+		inboxItem := parseResult.InboxItem
+
+		for _, att := range parseResult.Attachments {
+			if err := p.store.LinkAttachmentToInbox(ctx, inboxItem.ID, att.ID); err != nil {
+				p.logger.Warn("failed to link attachment to inbox", "error", err)
+			}
 		}
 
 		// Проверяем дубликат в ленте

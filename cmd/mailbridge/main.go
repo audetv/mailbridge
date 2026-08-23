@@ -180,7 +180,7 @@ func main() {
 		go aiWorker.Start(ctx)
 	}
 
-	emailAdapter := adapters.NewEmailAdapter(ext)
+	emailAdapter := adapters.NewEmailAdapter(ext, st, cfg.Attachments.Dir)
 	proc := processor.NewMessageProcessor(
 		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter, aiQueue,
 	)
