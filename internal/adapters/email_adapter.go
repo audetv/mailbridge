@@ -70,7 +70,7 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 	// Сохраняем вложения через hash-дедупликацию
 	var attachments []*store.Attachment
 	for _, att := range email.Attachments {
-		// Извлекаем hash из пути: {hash[0:2]}/{hash[2:4]}/{hash}
+		// Hash уже закодирован в пути: {hash[0:2]}/{hash[2:4]}/{hash}
 		hash := filepath.Base(att.StoragePath)
 
 		// Проверяем существует ли уже
