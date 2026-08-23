@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/audetv/mailbridge/internal/extractor"
+	"github.com/audetv/mailbridge/internal/preprocessor"
 	"github.com/audetv/mailbridge/internal/store"
 )
 
@@ -58,20 +59,41 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		return nil, fmt.Errorf("failed to get active tasks: %w", err)
 	}
 
-	prompt := o.buildPrompt(summary, activeTasks, email)
-
+	// Обрабатываем вложения
 	var images []string
+	var textAttachments []string
 	for _, att := range email.Attachments {
-		if isImageAttachment(att.ContentType) && att.StoragePath != "" {
-			fullPath := filepath.Join("data/attachments", att.StoragePath)
+		fullPath := filepath.Join("data/attachments", att.StoragePath)
+
+		// Изображения → Base64
+		if isImageAttachment(att.ContentType) {
 			data, err := os.ReadFile(fullPath)
 			if err != nil {
 				log.Printf("[AI] failed to read image %s: %v", fullPath, err)
 				continue
 			}
 			images = append(images, base64.StdEncoding.EncodeToString(data))
+			continue
+		}
+
+		// Текстовые форматы → извлечение текста
+		processed, err := preprocessor.NewPreprocessor().ProcessAttachment(fullPath)
+		if err != nil {
+			log.Printf("[AI] failed to process attachment %s: %v", att.Filename, err)
+			continue
+		}
+
+		switch processed.Type {
+		case "text":
+			textAttachments = append(textAttachments, fmt.Sprintf(
+				"[ВЛОЖЕНИЕ: %s]\n%s", att.Filename, processed.Content))
+		case "image":
+			// PDF-скан или другие изображения из документов
+			images = append(images, strings.Split(processed.Content, ",")...)
 		}
 	}
+
+	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
 
 	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
 	if len(images) > 0 {
@@ -139,6 +161,11 @@ func (o *Orchestrator) UpdateSummary(ctx context.Context, email *extractor.Extra
 	return o.store.UpdateThreadSummary(ctx, threadID, summary)
 }
 
+// BuildPromptWithAttachmentsForTest — экспортируемая обёртка.
+func (o *Orchestrator) BuildPromptWithAttachmentsForTest(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail, textAttachments []string) string {
+	return o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
+}
+
 // BuildPrompt — экспортируемая обёртка для тестирования.
 func (o *Orchestrator) BuildPrompt(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail) string {
 	return o.buildPrompt(summary, activeTasks, email)
@@ -168,6 +195,31 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 	sb.WriteString("\n```\n")
 
 	_ = os.WriteFile(filename, []byte(sb.String()), 0o644)
+}
+
+// buildPromptWithAttachments формирует промпт с текстовыми вложениями.
+func (o *Orchestrator) buildPromptWithAttachments(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail, textAttachments []string) string {
+	prompt := o.buildPrompt(summary, activeTasks, email)
+
+	if len(textAttachments) > 0 {
+		// Вставляем секцию с вложениями перед инструкцией JSON
+		insertIdx := strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+		if insertIdx == -1 {
+			insertIdx = len(prompt)
+		}
+
+		var sb strings.Builder
+		sb.WriteString(prompt[:insertIdx])
+		sb.WriteString("=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ===\n")
+		for _, ta := range textAttachments {
+			sb.WriteString(ta)
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(prompt[insertIdx:])
+		return sb.String()
+	}
+
+	return prompt
 }
 
 // buildPrompt формирует промпт для LLM.

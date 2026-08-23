@@ -259,3 +259,30 @@ func TestBackoff(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPromptWithAttachments(t *testing.T) {
+	o := ai.NewOrchestrator(nil, nil)
+
+	email := &extractor.ExtractedEmail{
+		From:     "user@example.com",
+		Subject:  "Документы",
+		BodyText: "Прикладываю документы",
+	}
+
+	textAttachments := []string{
+		"[ВЛОЖЕНИЕ: правки.docx]\nСодержимое документа",
+		"[ВЛОЖЕНИЕ: таблица.xlsx]\n=== Лист: Лист1 ===\nколонка1 | колонка2",
+	}
+
+	prompt := o.BuildPromptWithAttachmentsForTest("", []*store.Task{}, email, textAttachments)
+
+	if !strings.Contains(prompt, "=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ===") {
+		t.Error("prompt does not contain attachments section")
+	}
+	if !strings.Contains(prompt, "правки.docx") {
+		t.Error("prompt does not contain docx filename")
+	}
+	if !strings.Contains(prompt, "таблица.xlsx") {
+		t.Error("prompt does not contain xlsx filename")
+	}
+}
