@@ -119,18 +119,13 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 
 	// Парсим через адаптер и сохраняем в ленту (если адаптер задан)
 	var inboxItem *store.InboxItem
+	var parseResult *adapters.ParseResult
 	if p.adapter != nil {
-		parseResult, err := p.adapter.Parse(rawEmail)
+		parseResult, err = p.adapter.Parse(rawEmail)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse incoming: %w", err)
 		}
-		inboxItem := parseResult.InboxItem
-
-		for _, att := range parseResult.Attachments {
-			if err := p.store.LinkAttachmentToInbox(ctx, inboxItem.ID, att.ID); err != nil {
-				p.logger.Warn("failed to link attachment to inbox", "error", err)
-			}
-		}
+		inboxItem = parseResult.InboxItem
 
 		// Проверяем дубликат в ленте
 		existingItem, err := p.store.GetInboxItemBySourceID(ctx, inboxItem.Source, inboxItem.SourceID)
@@ -148,6 +143,13 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 
 		if err := p.store.CreateInboxItem(ctx, inboxItem); err != nil {
 			return nil, fmt.Errorf("failed to save inbox item: %w", err)
+		}
+
+		// Связываем вложения ПОСЛЕ создания inbox_item
+		for _, att := range parseResult.Attachments {
+			if err := p.store.LinkAttachmentToInbox(ctx, inboxItem.ID, att.ID); err != nil {
+				p.logger.Warn("failed to link attachment to inbox", "error", err)
+			}
 		}
 
 		// Публикуем WebSocket-событие о новом входящем
@@ -168,15 +170,17 @@ func (p *MessageProcessor) Process(ctx context.Context, rawEmail []byte) (*Proce
 
 	// Если AI включён — ставим в очередь и не обрабатываем синхронно
 	if p.aiEnabled && p.aiQueue != nil {
-		p.aiQueue.Enqueue(inboxItem.ID)
-		p.logger.Info("inbox item queued for AI processing",
-			"inbox_item_id", inboxItem.ID,
-		)
-		return &ProcessResult{
-			Action:    ActionCreateIssue,
-			InboxItem: inboxItem,
-			Extracted: email,
-		}, nil
+		if inboxItem != nil {
+			p.aiQueue.Enqueue(inboxItem.ID)
+			p.logger.Info("inbox item queued for AI processing",
+				"inbox_item_id", inboxItem.ID,
+			)
+			return &ProcessResult{
+				Action:    ActionCreateIssue,
+				InboxItem: inboxItem,
+				Extracted: email,
+			}, nil
+		}
 	}
 
 	// Ищем существующую задачу по ID в теме
