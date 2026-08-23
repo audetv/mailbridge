@@ -183,62 +183,84 @@ func (m *mockSummaryClient) Generate(_ context.Context, _ string, _ []string) (s
 	return m.response, nil
 }
 
-// func TestApplyVerdicts_SavesAttachments(t *testing.T) {
-// 	st, _ := sqlite.NewStore(":memory:")
-// 	_ = st.Migrate(context.Background())
-// 	defer st.Close()
+func TestApplyVerdicts_SavesAttachments(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
 
-// 	o := ai.NewOrchestrator(nil, st)
+	o := ai.NewOrchestrator(nil, st)
+	ctx := context.Background()
 
-// 	email := &extractor.ExtractedEmail{
-// 		MessageID: "msg-att-1",
-// 		From:      "user@example.com",
-// 		Subject:   "Скриншот ошибки",
-// 		BodyText:  "Прикладываю скриншот",
-// 		Attachments: []extractor.Attachment{
-// 			{
-// 				Filename:    "image001.png",
-// 				ContentType: "image/png",
-// 				Size:        54133,
-// 				StoragePath: "/tmp/test/image001.png",
-// 			},
-// 		},
-// 	}
+	// Создаём входящий
+	inboxItem := &store.InboxItem{
+		Source:   "email",
+		SourceID: "msg-att-1",
+		Subject:  "Скриншот ошибки",
+		BodyText: "Прикладываю скриншот",
+		Status:   "unread",
+	}
+	if err := st.CreateInboxItem(ctx, inboxItem); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
 
-// 	response := &ai.LLMResponse{
-// 		Verdicts: []ai.Verdict{
-// 			{
-// 				Action: "new",
-// 				Task: &ai.NewTaskData{
-// 					Title:       "Ошибка",
-// 					Description: "Ошибка на скриншоте",
-// 					Priority:    "high",
-// 					Project:     "Входящие",
-// 					Type:        "bug",
-// 				},
-// 			},
-// 		},
-// 	}
+	// Создаём вложение
+	att := &store.Attachment{
+		Hash:        "hash-1",
+		Filename:    "image001.png",
+		ContentType: "image/png",
+		Size:        54133,
+		StoragePath: "ha/sh/hash-1",
+	}
+	if err := st.CreateAttachment(ctx, att); err != nil {
+		t.Fatalf("CreateAttachment error: %v", err)
+	}
 
-// 	if err := o.ApplyVerdicts(context.Background(), email, response, 0); err != nil {
-// 		t.Fatalf("ApplyVerdicts error: %v", err)
-// 	}
+	// Связываем с входящим
+	if err := st.LinkAttachmentToInbox(ctx, inboxItem.ID, att.ID); err != nil {
+		t.Fatalf("LinkAttachmentToInbox error: %v", err)
+	}
 
-// 	// Проверяем что задача создана
-// 	tasks, _ := st.GetActiveTasksByThread(context.Background(), "msg-att-1")
-// 	if len(tasks) != 1 {
-// 		t.Fatalf("expected 1 task, got %d", len(tasks))
-// 	}
+	email := &extractor.ExtractedEmail{
+		MessageID: "msg-att-1",
+		From:      "user@example.com",
+		Subject:   "Скриншот ошибки",
+		BodyText:  "Прикладываю скриншот",
+	}
 
-// 	// Проверяем что вложение сохранено в БД
-// 	atts, _ := st.GetTaskAttachments(context.Background(), tasks[0].ID)
-// 	if len(atts) != 1 {
-// 		t.Fatalf("expected 1 attachment in DB, got %d", len(atts))
-// 	}
-// 	if atts[0].Filename != "image001.png" {
-// 		t.Errorf("Filename = %s", atts[0].Filename)
-// 	}
-// }
+	response := &ai.LLMResponse{
+		Verdicts: []ai.Verdict{
+			{
+				Action: "new",
+				Task: &ai.NewTaskData{
+					Title:       "Ошибка",
+					Description: "Ошибка на скриншоте",
+					Priority:    "high",
+					Project:     "Входящие",
+					Type:        "bug",
+				},
+			},
+		},
+	}
+
+	if err := o.ApplyVerdicts(ctx, email, response, inboxItem.ID); err != nil {
+		t.Fatalf("ApplyVerdicts error: %v", err)
+	}
+
+	// Проверяем что задача создана
+	tasks, _ := st.GetActiveTasksByThread(ctx, "msg-att-1")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	// Проверяем что вложение унаследовано задачей
+	atts, _ := st.GetAttachmentsByTask(ctx, tasks[0].ID)
+	if len(atts) != 1 {
+		t.Fatalf("expected 1 attachment in DB, got %d", len(atts))
+	}
+	if atts[0].Filename != "image001.png" {
+		t.Errorf("Filename = %s", atts[0].Filename)
+	}
+}
 
 func TestBackoff(t *testing.T) {
 	tests := []struct {
