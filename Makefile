@@ -12,6 +12,11 @@ LDFLAGS = -ldflags "-X github.com/audetv/mailbridge/internal/version.Version=$(V
                     -X github.com/audetv/mailbridge/internal/version.BuildTime=$(BUILD_TIME)"
 
 build:
+	@echo "Building frontend..."
+	cd frontend && npm run build
+	@echo "Copying static files..."
+	rm -rf cmd/mailbridge/static
+	cp -r frontend/dist cmd/mailbridge/static
 	@echo "Building $(APP_NAME) version $(VERSION)..."
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) ./cmd/$(APP_NAME)
 	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)"
