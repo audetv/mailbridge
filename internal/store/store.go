@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// Attachment представляет файл в системе.
+type Attachment struct {
+	ID          int64     `json:"id"`
+	Hash        string    `json:"hash"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"content_type"`
+	Size        int64     `json:"size"`
+	StoragePath string    `json:"storage_path"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // InboxItem представляет элемент ленты входящих.
 type InboxItem struct {
 	ID          int64     `json:"id"`
@@ -155,6 +166,16 @@ type InboxListResult struct {
 type Store interface {
 	// Migrate выполняет миграции схемы.
 	Migrate(ctx context.Context) error
+
+	// Attachments
+	CreateAttachment(ctx context.Context, att *Attachment) error
+	GetAttachmentByHash(ctx context.Context, hash string) (*Attachment, error)
+	GetAttachmentByID(ctx context.Context, id int64) (*Attachment, error)
+	LinkAttachmentToInbox(ctx context.Context, inboxItemID, attachmentID int64) error
+	LinkAttachmentToTask(ctx context.Context, taskID, attachmentID int64) error
+	UnlinkAttachmentFromTask(ctx context.Context, taskID, attachmentID int64) error
+	GetAttachmentsByInbox(ctx context.Context, inboxItemID int64) ([]*Attachment, error)
+	GetAttachmentsByTask(ctx context.Context, taskID int64) ([]*Attachment, error)
 
 	// Inbox Items
 	CreateInboxItem(ctx context.Context, item *InboxItem) error
