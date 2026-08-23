@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/store"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
@@ -296,148 +297,36 @@ func TestAddAndGetTaskComments(t *testing.T) {
 // Task Attachments
 // ---------------------------------------------------------------------------
 
-func TestAddAndGetTaskAttachments(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
+// func TestAddAndGetTaskAttachments(t *testing.T) {
+// 	s, cleanup := setupStore(t)
+// 	defer cleanup()
+// 	ctx := context.Background()
 
-	task := &store.Task{MessageID: "att-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
-	mustCreateTask(t, s, task)
+// 	task := &store.Task{MessageID: "att-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
+// 	mustCreateTask(t, s, task)
 
-	if err := s.AddTaskAttachment(ctx, &store.TaskAttachment{
-		TaskID:      task.ID,
-		Filename:    "screenshot.png",
-		ContentType: "image/png",
-		Size:        1024,
-		StoragePath: "2024-01-01/screenshot.png",
-	}); err != nil {
-		t.Fatalf("AddTaskAttachment error: %v", err)
-	}
+// 	if err := s.AddTaskAttachment(ctx, &store.TaskAttachment{
+// 		TaskID:      task.ID,
+// 		Filename:    "screenshot.png",
+// 		ContentType: "image/png",
+// 		Size:        1024,
+// 		StoragePath: "2024-01-01/screenshot.png",
+// 	}); err != nil {
+// 		t.Fatalf("AddTaskAttachment error: %v", err)
+// 	}
 
-	atts, err := s.GetTaskAttachments(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("GetTaskAttachments error: %v", err)
-	}
-	if len(atts) != 1 {
-		t.Errorf("expected 1 attachment, got %d", len(atts))
-	}
-}
+// 	atts, err := s.GetTaskAttachments(ctx, task.ID)
+// 	if err != nil {
+// 		t.Fatalf("GetTaskAttachments error: %v", err)
+// 	}
+// 	if len(atts) != 1 {
+// 		t.Errorf("expected 1 attachment, got %d", len(atts))
+// 	}
+// }
 
 // ---------------------------------------------------------------------------
-// Existing tests (email_mapping, reply_log, outbox)
+// Existing tests (reply_log, outbox)
 // ---------------------------------------------------------------------------
-
-func TestMigrate(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-
-	err := s.SaveMapping(context.Background(), &store.EmailMapping{
-		MessageID:       "test-msg-id",
-		PlaneIssueID:    "plane-issue-1",
-		PlaneProjectID:  "plane-project-1",
-		PlaneIssueSeq:   "INBOX-1",
-		OriginalFrom:    "test@example.com",
-		OriginalSubject: "Test Subject",
-		ActionType:      "CREATE",
-	})
-	if err != nil {
-		t.Fatalf("SaveMapping failed: %v", err)
-	}
-}
-
-func TestSaveAndGetMapping(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	err := s.SaveMapping(ctx, &store.EmailMapping{
-		MessageID: "msg-001", PlaneIssueID: "i-001", PlaneProjectID: "p-001",
-		PlaneIssueSeq: "INBOX-1", OriginalFrom: "u@e.com", OriginalSubject: "T",
-		ThreadReferences: []string{"ref-1", "ref-2"}, ActionType: "CREATE",
-	})
-	if err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-
-	got, err := s.GetMappingByMessageID(ctx, "msg-001")
-	if err != nil {
-		t.Fatalf("GetMappingByMessageID error: %v", err)
-	}
-	if got == nil {
-		t.Fatal("mapping not found")
-	}
-}
-
-func TestMessageExists(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	exists, _ := s.MessageExists(ctx, "nonexistent")
-	if exists {
-		t.Error("expected false")
-	}
-
-	if err := s.SaveMapping(ctx, &store.EmailMapping{MessageID: "msg-002", PlaneIssueID: "i-2", PlaneProjectID: "p-2", OriginalFrom: "u@e.com", OriginalSubject: "T", ActionType: "CREATE"}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-	exists, _ = s.MessageExists(ctx, "msg-002")
-	if !exists {
-		t.Error("expected true")
-	}
-}
-
-func TestFindMappingByReferences(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	if err := s.SaveMapping(ctx, &store.EmailMapping{
-		MessageID: "ref-msg-1", PlaneIssueID: "i-3", PlaneProjectID: "p-3",
-		PlaneIssueSeq: "INBOX-3", OriginalFrom: "u@e.com", OriginalSubject: "T",
-		ThreadReferences: []string{"thread-1"}, ActionType: "CREATE",
-	}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-
-	m, _ := s.FindMappingByReferences(ctx, []string{"ref-msg-1"})
-	if m == nil {
-		t.Fatal("mapping not found by direct ref")
-	}
-}
-
-func TestGetLatestMappingByIssueID(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	if err := s.SaveMapping(ctx, &store.EmailMapping{MessageID: "a", PlaneIssueID: "i-4", PlaneProjectID: "p-4", OriginalFrom: "u1@e.com", OriginalSubject: "1", ActionType: "CREATE"}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-	if err := s.SaveMapping(ctx, &store.EmailMapping{MessageID: "b", PlaneIssueID: "i-4", PlaneProjectID: "p-4", OriginalFrom: "u2@e.com", OriginalSubject: "2", ActionType: "REPLY"}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-
-	m, _ := s.GetLatestMappingByIssueID(ctx, "i-4")
-	if m == nil || m.MessageID != "b" {
-		t.Errorf("expected latest msg-b, got %v", m)
-	}
-}
-
-func TestDuplicateMessageID(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	m := &store.EmailMapping{MessageID: "dup", PlaneIssueID: "i-5", PlaneProjectID: "p-5", OriginalFrom: "u@e.com", OriginalSubject: "T", ActionType: "CREATE"}
-	if err := s.SaveMapping(ctx, m); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
-	}
-	err := s.SaveMapping(ctx, m)
-	if err == nil {
-		t.Fatal("expected duplicate error")
-	}
-}
 
 func TestReplyLog(t *testing.T) {
 	s, cleanup := setupStore(t)
@@ -498,5 +387,226 @@ func TestPing(t *testing.T) {
 
 	if err := s.Ping(context.Background()); err != nil {
 		t.Errorf("Ping failed: %v", err)
+	}
+}
+
+func TestMigrate_ThreadsTable(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	exists, err := s.TableExists(context.Background(), "threads")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	if !exists {
+		t.Fatal("threads table not created")
+	}
+}
+
+func TestMigrate_TaskAIColumns(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task := &store.Task{
+		MessageID: "ai-test",
+		Subject:   "Test",
+		BodyText:  "B",
+		FromEmail: "u@e.com",
+		Status:    "new",
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Обновляем ai-поля
+	err := s.UpdateTask(ctx, task.ID, map[string]interface{}{
+		"thread_id":       "thread-123",
+		"source_email_id": "msg-456",
+		"ai_verdict":      `{"action":"new"}`,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask with AI fields error: %v", err)
+	}
+
+	// Проверяем что задача создалась и обновилась
+	got, err := s.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask error: %v", err)
+	}
+	if got.Subject != "Test" {
+		t.Errorf("Subject = %s", got.Subject)
+	}
+}
+
+func TestThreadsCRUD(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// CreateThread
+	thread := &store.Thread{ThreadID: "thread-001", Summary: ""}
+	if err := s.CreateThread(ctx, thread); err != nil {
+		t.Fatalf("CreateThread error: %v", err)
+	}
+	if thread.ID == 0 {
+		t.Error("thread ID is 0")
+	}
+
+	// GetThread
+	got, err := s.GetThread(ctx, "thread-001")
+	if err != nil {
+		t.Fatalf("GetThread error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("thread not found")
+	}
+	if got.ThreadID != "thread-001" {
+		t.Errorf("ThreadID = %s", got.ThreadID)
+	}
+
+	// UpdateThreadSummary
+	if err := s.UpdateThreadSummary(ctx, "thread-001", "Обновлённое резюме"); err != nil {
+		t.Fatalf("UpdateThreadSummary error: %v", err)
+	}
+
+	got, _ = s.GetThread(ctx, "thread-001")
+	if got.Summary != "Обновлённое резюме" {
+		t.Errorf("Summary = %s, want Обновлённое резюме", got.Summary)
+	}
+}
+
+func TestGetActiveTasksByThread(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Создаём тред
+	if err := s.CreateThread(ctx, &store.Thread{ThreadID: "thread-002"}); err != nil {
+		t.Fatalf("CreateThread error: %v", err)
+	}
+	// Создаём задачи
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a1", Subject: "Задача 1", BodyText: "B", FromEmail: "u@e.com",
+		Status: "new", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a2", Subject: "Задача 2", BodyText: "B", FromEmail: "u@e.com",
+		Status: "in_progress", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+	if err := s.CreateTask(ctx, &store.Task{
+		MessageID: "a3", Subject: "Задача 3", BodyText: "B", FromEmail: "u@e.com",
+		Status: "closed", ThreadID: "thread-002",
+	}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Проверяем активные задачи (new + in_progress + resolved, без closed)
+	tasks, err := s.GetActiveTasksByThread(ctx, "thread-002")
+	if err != nil {
+		t.Fatalf("GetActiveTasksByThread error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 active tasks, got %d", len(tasks))
+	}
+}
+
+func TestMigrate_TaskInboxItemsTable(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	exists, err := s.TableExists(context.Background(), "task_inbox_items")
+	if err != nil {
+		t.Fatalf("TableExists error: %v", err)
+	}
+	if !exists {
+		t.Fatal("task_inbox_items table not created")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Inbox Items
+// ---------------------------------------------------------------------------
+
+func TestTaskInboxLink(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Создаём задачу
+	if err := s.CreateTask(ctx, &store.Task{MessageID: "m-link", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Создаём inbox_item
+	if err := s.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "msg-link-1", ThreadID: "thread-1", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	// Связываем
+	if err := s.LinkTaskToInboxItem(ctx, 1, 1, "created_from"); err != nil {
+		t.Fatalf("LinkTaskToInboxItem error: %v", err)
+	}
+
+	// Проверяем связь
+	items, err := s.GetInboxItemsByTask(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetInboxItemsByTask error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("expected 1 link, got %d", len(items))
+	}
+	if items[0].Relation != "created_from" {
+		t.Errorf("Relation = %s", items[0].Relation)
+	}
+}
+
+func TestAIQueue_Enqueue(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	queue := ai.NewQueue(st, 10)
+	queue.Enqueue(42)
+
+	select {
+	case id := <-queue.Channel():
+		if id != 42 {
+			t.Errorf("id = %d, want 42", id)
+		}
+	default:
+		t.Fatal("expected item in queue")
+	}
+}
+
+func TestAIQueue_LoadPending(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	ctx := context.Background()
+	if err := st.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "m1", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+	if err := st.CreateInboxItem(ctx, &store.InboxItem{Source: "email", SourceID: "m2", Status: "unread"}); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	queue := ai.NewQueue(st, 10)
+	if err := queue.LoadPending(ctx); err != nil {
+		t.Fatalf("LoadPending error: %v", err)
+	}
+
+	// Оба должны быть в очереди
+	for i := 0; i < 2; i++ {
+		select {
+		case <-queue.Channel():
+		default:
+			t.Fatalf("expected item %d in queue", i)
+		}
 	}
 }

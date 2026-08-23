@@ -2,15 +2,21 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"log/slog"
 
+	"github.com/audetv/mailbridge/internal/adapters"
+	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/classifier"
 	"github.com/audetv/mailbridge/internal/config"
 	"github.com/audetv/mailbridge/internal/extractor"
@@ -28,6 +34,9 @@ import (
 	"github.com/audetv/mailbridge/internal/webhook"
 	"github.com/audetv/mailbridge/internal/worker"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 func main() {
 	fmt.Println(version.Info())
@@ -58,6 +67,15 @@ func main() {
 		"file", cfg.NLP.RulesFile,
 		"rules_count", len(rulesCfg.Rules),
 	)
+
+	// ---------------------------------------------------------------------------
+	// Контекст с graceful shutdown
+	// ---------------------------------------------------------------------------
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// ---------------------------------------------------------------------------
 	// Хранилище
@@ -128,8 +146,50 @@ func main() {
 		projectNameMap["Входящие"] = "INBOX"
 	}
 
+	// ---------------------------------------------------------------------------
+	// AI Client (если включён в конфиге)
+	// ---------------------------------------------------------------------------
+	var aiClient ai.Client
+	if cfg.AI.Enabled {
+		switch cfg.AI.Provider {
+		case "ollama":
+			aiClient = ai.NewOllamaClient(cfg.AI.BaseURL, cfg.AI.Model)
+		case "openai":
+			aiClient = ai.NewOpenAIClient(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model)
+		}
+	}
+
+	var orchestrator *ai.Orchestrator
+	if aiClient != nil {
+		orchestrator = ai.NewOrchestrator(aiClient, st)
+	}
+
+	if orchestrator != nil {
+		projectNames := make([]string, 0, len(projectNameMap))
+		for name := range projectNameMap {
+			projectNames = append(projectNames, name)
+		}
+		orchestrator.SetProjects(projectNames)
+	}
+
+	var aiQueue *ai.Queue
+	var aiWorker *ai.Worker
+	if aiClient != nil {
+		aiQueue = ai.NewQueue(st, 100)
+		aiWorker = ai.NewWorker(aiQueue, orchestrator, st, logger, broker)
+
+		// Загружаем pending при старте
+		if err := aiQueue.LoadPending(context.Background()); err != nil {
+			logger.Error("failed to load pending AI items", "error", err)
+		}
+
+		// Запускаем воркер
+		go aiWorker.Start(ctx)
+	}
+
+	emailAdapter := adapters.NewEmailAdapter(ext, st, cfg.Attachments.Dir)
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap, broker,
+		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter, aiQueue,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -200,6 +260,33 @@ func main() {
 	// ---------------------------------------------------------------------------
 	mux := http.NewServeMux()
 
+	// Раздача статики SPA
+	distFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		logger.Error("failed to load static files", "error", err)
+		os.Exit(1)
+	}
+	fileServer := http.FileServer(http.FS(distFS))
+
+	// Отдаём index.html для маршрутов Vue Router
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// API-запросы не трогаем
+		if strings.HasPrefix(r.URL.Path, "/api") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Проверяем существует ли файл в embed.FS
+		cleanPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
+		if cleanPath != "" && cleanPath != "." {
+			if _, err := fs.Stat(distFS, cleanPath); os.IsNotExist(err) {
+				r.URL.Path = "/"
+			}
+		}
+
+		fileServer.ServeHTTP(w, r)
+	})
+
 	// Health
 	mux.Handle("/health", healthSrv.Handler())
 	mux.Handle("/ready", healthSrv.Handler())
@@ -217,7 +304,18 @@ func main() {
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
 	taskHandler := web.NewTaskHandler(st)
+	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
+	mux.HandleFunc("/api/inbox/{id}", taskHandler.GetInboxItem)
+	mux.HandleFunc("/api/inbox/{id}/attachments", taskHandler.GetInboxAttachments)
+	mux.HandleFunc("/api/inbox/{id}/tasks", taskHandler.GetInboxItemTasks)
+	mux.HandleFunc("/api/inbox/{id}/read", taskHandler.UpdateInboxStatus)
+	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
+	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
+	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
 	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
+	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)
+	mux.HandleFunc("/api/tasks/{id}/attachments/{attId}", taskHandler.UnlinkTaskAttachment)
+	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -247,15 +345,6 @@ func main() {
 	// ---------------------------------------------------------------------------
 	inboundWorker := worker.NewInboundWorker(mailReader, proc, cfg.IMAP.ScanInterval, logger)
 	outboundWorker := worker.NewOutboundWorker(st, emailSender, 15*time.Second, logger)
-
-	// ---------------------------------------------------------------------------
-	// Контекст с graceful shutdown
-	// ---------------------------------------------------------------------------
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// ---------------------------------------------------------------------------
 	// Запуск HTTP

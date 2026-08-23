@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/audetv/mailbridge/internal/store"
 )
@@ -19,6 +18,242 @@ type TaskHandler struct {
 // NewTaskHandler создаёт новый TaskHandler.
 func NewTaskHandler(st store.Store) *TaskHandler {
 	return &TaskHandler{store: st}
+}
+
+// ListInbox обрабатывает GET /api/inbox
+func (h *TaskHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+
+	filter := &store.InboxFilter{
+		Status:  q.Get("status"),
+		Source:  q.Get("source"),
+		Page:    page,
+		PerPage: perPage,
+	}
+
+	result, err := h.store.ListInboxItems(r.Context(), filter)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	if result.Items == nil {
+		result.Items = []*store.InboxItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// GetInboxItem обрабатывает GET /api/inbox/{id}
+func (h *TaskHandler) GetInboxItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	item, err := h.store.GetInboxItemByID(r.Context(), id)
+	if err != nil || item == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "not found"}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(item); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// GetTaskInboxItems обрабатывает GET /api/tasks/{id}/inbox
+func (h *TaskHandler) GetTaskInboxItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	links, err := h.store.GetInboxItemsByTask(r.Context(), id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Загружаем полные InboxItem для каждой связи
+	var items []*store.InboxItem
+	for _, link := range links {
+		item, err := h.store.GetInboxItemByID(r.Context(), link.InboxItemID)
+		if err == nil && item != nil {
+			items = append(items, item)
+		}
+	}
+
+	if items == nil {
+		items = []*store.InboxItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(items); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// GetInboxItemTasks обрабатывает GET /api/inbox/{id}/tasks
+func (h *TaskHandler) GetInboxItemTasks(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+
+	tasks, err := h.store.GetTasksByInboxItem(r.Context(), id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Гарантируем что не null
+	if tasks == nil {
+		tasks = []*store.TaskInboxItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// UpdateInboxStatus обрабатывает POST /api/inbox/{id}/read, /unread, /archive
+func (h *TaskHandler) UpdateInboxStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Определяем новый статус по URL
+	var newStatus string
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/read"):
+		newStatus = "read"
+	case strings.HasSuffix(r.URL.Path, "/unread"):
+		newStatus = "unread"
+	case strings.HasSuffix(r.URL.Path, "/archive"):
+		newStatus = "archived"
+	default:
+		http.Error(w, `{"error":"unknown action"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.UpdateInboxItemStatus(r.Context(), id, newStatus); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": newStatus}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// CreateTaskFromInbox обрабатывает POST /api/inbox/{id}/task
+func (h *TaskHandler) CreateTaskFromInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	item, err := h.store.GetInboxItemByID(r.Context(), id)
+	if err != nil || item == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "inbox item not found"}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Создаём задачу из ленты
+	task := &store.Task{
+		MessageID:     item.SourceID,
+		Subject:       item.Subject,
+		BodyText:      item.BodyText,
+		BodyHTML:      item.BodyHTML,
+		FromEmail:     item.FromContact,
+		FromName:      item.FromName,
+		Project:       "Входящие",
+		Status:        string(store.StatusNew),
+		ThreadID:      item.ThreadID,
+		SourceEmailID: item.SourceID,
+	}
+
+	if err := h.store.CreateTask(r.Context(), task); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	// Связываем с лентой
+	if err := h.store.LinkTaskToInboxItem(r.Context(), task.ID, item.ID, "created_manually"); err != nil {
+		log.Printf("failed to link task to inbox: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"task": task}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
 }
 
 // ListTasks обрабатывает GET /api/tasks
@@ -213,26 +448,6 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"comment": comment}); err != nil {
 		log.Printf("encode error: %v", err)
 	}
-}
-
-// GetAttachment обрабатывает GET /api/attachments/{path...}
-func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
-	path := r.PathValue("path")
-	if path == "" {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-
-	// Путь к файлу вложений
-	fullPath := filepath.Join("data", "attachments", filepath.Clean(path))
-
-	// Проверяем что файл существует
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	http.ServeFile(w, r, fullPath)
 }
 
 // MarkRead обрабатывает POST /api/tasks/{id}/mark-read

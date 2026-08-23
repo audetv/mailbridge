@@ -64,7 +64,7 @@ func setupProcessor(t *testing.T) (*processor.MessageProcessor, *sqlite.Store, f
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, projectMap, nil)
+	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, projectMap, nil, nil, false, nil, nil)
 
 	cleanup := func() {
 		st.Close()
@@ -169,18 +169,6 @@ func TestProcess_ReplyToTask(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateTask error: %v", err)
-	}
-
-	// Маппинг для threading
-	if err := st.SaveMapping(ctx, &store.EmailMapping{
-		MessageID:        "original@example.com",
-		PlaneIssueID:     "task-1",
-		OriginalFrom:     "user@example.com",
-		OriginalSubject:  "Original",
-		ThreadReferences: []string{"original@example.com"},
-		ActionType:       "CREATE",
-	}); err != nil {
-		t.Fatalf("SaveMapping error: %v", err)
 	}
 
 	raw := []byte(`From: user@example.com

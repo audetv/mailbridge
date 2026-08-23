@@ -14,15 +14,56 @@
                             <span><strong>От:</strong> {{ store.currentTask.from_email }}</span>
                             <span><strong>Дата:</strong> {{ formatDate(store.currentTask.created_at) }}</span>
                         </div>
-                        <div class="task-body"
+                        <div class="task-body" @click="handleImageClick"
                             v-html="store.currentTask.body_html || escapeHtml(store.currentTask.body_text)"></div>
 
-                        <div v-if="store.currentAttachments.length > 0" class="attachments">
+                        <div v-if="taskAttachments.length > 0" class="attachments">
                             <h4>Вложения</h4>
-                            <div v-for="att in store.currentAttachments" :key="att.id" class="attachment-item">
+                            <div v-for="att in taskAttachments" :key="att.id" class="attachment-item">
                                 <i class="pi pi-paperclip" />
-                                <a :href="`/api/attachments/${att.storage_path}`" target="_blank">{{ att.filename }}</a>
+                                <a :href="`/api/attachments/${att.storage_path}/${encodeURIComponent(att.filename)}`" target="_blank">{{ att.filename }}</a>
                                 <span class="size">{{ formatSize(att.size) }}</span>
+                                <Button icon="pi pi-times" text size="small" severity="danger"
+                                    @click="unlinkAttachment(att.id)" title="Открепить" />
+                            </div>
+                        </div>
+                    </template>
+                    <template #footer>
+                        <WorkflowButtons :currentStatus="status" @transition="onWorkflowTransition" />
+                    </template>
+                </Card>
+
+                <!-- Оригинальное письмо — аккордеон -->
+                <Card v-if="inboxItems.length > 0" class="inbox-context">
+                    <template #title>
+                        <div class="inbox-context-header">
+                            <span>📧 Оригинальное письмо</span>
+                            <i :class="expanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                                @click="expanded = !expanded" />
+                        </div>
+                    </template>
+                    <template #content>
+                        <div v-if="expanded">
+                            <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
+                                <div class="inbox-context-meta">
+                                    <span class="inbox-context-subject">{{ item.subject }}</span>
+                                    <router-link :to="`/inbox/${item.id}`" class="inbox-link">Открыть в
+                                        ленте</router-link>
+                                </div>
+                                <div class="item-body" @click="handleImageClick"
+                                    v-html="item.body_html || escapeHtml(item.body_text)"></div>
+                            </div>
+                        </div>
+                        <div v-else>
+                            <div v-for="item in inboxItems" :key="item.id" class="inbox-context-item">
+                                <div class="inbox-context-meta">
+                                    <span class="inbox-context-subject">{{ item.subject }}</span>
+                                    <router-link :to="`/inbox/${item.id}`" class="inbox-link">Открыть в
+                                        ленте</router-link>
+                                </div>
+                                <div class="item-body-preview" v-html="previewHtml(item)"></div>
+                                <Button v-if="needExpand(item)" label="Показать полностью" text size="small"
+                                    @click="expanded = true" class="expand-btn" />
                             </div>
                         </div>
                     </template>
@@ -74,18 +115,22 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 import { useTasksStore } from '@/stores/tasks'
+import apiClient from '@/api/client'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import CommentList from '@/components/CommentList.vue'
 import ReplyForm from '@/components/ReplyForm.vue'
+import WorkflowButtons from '@/components/WorkflowButtons.vue'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const store = useTasksStore()
 
 const project = ref(null)
@@ -93,6 +138,9 @@ const status = ref(null)
 const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
+const inboxItems = ref([])
+const taskAttachments = ref([])
+const expanded = ref(false)
 
 const projectOptions = [
     { label: 'Входящие', value: 'Входящие' },
@@ -108,8 +156,9 @@ const projectOptions = [
 
 const statusOptions = [
     { label: 'Новая', value: 'new' },
+    { label: 'Бэклог', value: 'backlog' },
     { label: 'В работе', value: 'in_progress' },
-    { label: 'Решена', value: 'resolved' },
+    { label: 'Выполнена', value: 'completed' },
     { label: 'Закрыта', value: 'closed' }
 ]
 
@@ -133,6 +182,8 @@ onMounted(async () => {
     await store.fetchTask(route.params.id)
     syncFields()
     store.markAsRead(route.params.id)
+    inboxItems.value = await store.fetchTaskInbox(route.params.id)
+    taskAttachments.value = await fetchTaskAttachments(route.params.id)
 })
 
 watch(() => store.currentTask, syncFields)
@@ -150,13 +201,56 @@ async function updateField(field, value) {
     await store.updateTask(route.params.id, { [field]: value })
 }
 
+async function onWorkflowTransition(newStatus) {
+    status.value = newStatus
+    await updateField('status', newStatus)
+}
+
+async function fetchTaskAttachments(taskId) {
+    try {
+        const { data } = await apiClient.get(`/tasks/${taskId}/attachments`)
+        return data
+    } catch {
+        return []
+    }
+}
+
+async function unlinkAttachment(attId) {
+    try {
+        await apiClient.delete(`/tasks/${route.params.id}/attachments/${attId}`)
+        taskAttachments.value = taskAttachments.value.filter(a => a.id !== attId)
+        toast.add({ severity: 'success', summary: 'Вложение откреплено', life: 2000 })
+    } catch {
+        toast.add({ severity: 'error', summary: 'Ошибка', life: 3000 })
+    }
+}
+
+function previewHtml(item) {
+    const html = item.body_html || escapeHtml(item.body_text)
+    if (html.length > 5000) {
+        return html.slice(0, 5000) + '...'
+    }
+    return html
+}
+
+function needExpand(item) {
+    const html = item.body_html || escapeHtml(item.body_text)
+    return html.length > 2000
+}
+
+function handleImageClick(event) {
+    if (event.target.tagName === 'IMG' && event.target.src) {
+        window.open(event.target.src, '_blank')
+    }
+}
+
 function onReplySent() {
     // Комментарий уже добавлен в store.currentComments через replyTask
 }
 
 function goBack() {
-  const tab = route.query.tab
-  router.push({ path: '/', query: tab ? { tab } : {} })
+    const tab = route.query.tab
+    router.push({ path: '/', query: tab ? { tab } : {} })
 }
 
 function formatDate(dateStr) {
@@ -176,10 +270,54 @@ function escapeHtml(text) {
 }
 </script>
 
+
 <style scoped>
 .task-detail {
+    overflow-x: hidden;
     min-height: 100vh;
-    background: var(--p-surface-100);
+    /* background: var(--p-surface-100); */
+}
+
+.task-body,
+.item-body,
+.item-body-preview {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    max-width: 100%;
+}
+
+/*
+.item-body :deep(pre),
+.item-body :deep(code),
+.task-body :deep(pre),
+.task-body :deep(code) {
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.item-body :deep(table),
+.task-body :deep(table) {
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+*/
+.item-body :deep(img),
+.task-body :deep(img),
+.item-body-preview :deep(img) {
+    max-width: 100%;
+    /* max-height: 400px; */
+    height: auto;
+    object-fit: contain;
+    cursor: pointer;
+}
+
+.task-detail {
+    min-height: 100vh;
+    /* background: var(--p-surface-100); */
 }
 
 .task-header {
@@ -187,7 +325,7 @@ function escapeHtml(text) {
     align-items: center;
     gap: 1rem;
     padding: 1rem 2rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
     border-bottom: 1px solid var(--p-surface-200);
 }
 
@@ -213,7 +351,7 @@ function escapeHtml(text) {
     gap: 2rem;
     margin-bottom: 1rem;
     color: var(--p-text-muted-color);
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .task-body {
@@ -223,7 +361,7 @@ function escapeHtml(text) {
     padding: 0.5rem;
     border: 1px solid var(--p-surface-200);
     border-radius: 0.5rem;
-    background: var(--p-surface-0);
+    background: var(--p-content-background);
 }
 
 .task-body :deep(p) {
@@ -268,6 +406,73 @@ function escapeHtml(text) {
     display: block;
     margin-bottom: 0.25rem;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1rem;
+}
+
+.inbox-context {
+    border-left: 3px solid var(--p-primary-300);
+}
+
+.inbox-context-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.inbox-context-subject {
+    font-weight: 600;
+}
+
+.inbox-context-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.inbox-context-item {
+    margin-bottom: 1rem;
+}
+
+.inbox-context-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.inbox-collapsed {
+    color: var(--p-text-muted-color);
+    font-size: 0.85rem;
+}
+
+.item-body-preview {
+    max-height: 400px;
+    overflow: hidden;
+    position: relative;
+    line-height: 1.5;
+}
+
+.item-body-preview::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: linear-gradient(transparent, var(--p-surface-0));
+}
+
+.expand-btn {
+    margin-top: 0.5rem;
+}
+
+.workflow-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 </style>

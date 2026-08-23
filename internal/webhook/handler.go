@@ -11,9 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/audetv/mailbridge/internal/sender"
 	"github.com/audetv/mailbridge/internal/store"
-	"github.com/audetv/mailbridge/internal/worker"
 )
 
 // PlaneWebhookEvent представляет событие от Plane.
@@ -90,7 +88,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNewComment обрабатывает новый комментарий.
-func (h *Handler) handleNewComment(ctx context.Context, event *PlaneWebhookEvent) {
+func (h *Handler) handleNewComment(_ context.Context, event *PlaneWebhookEvent) {
 	if event.Payload.Comment == nil {
 		return
 	}
@@ -110,41 +108,10 @@ func (h *Handler) handleNewComment(ctx context.Context, event *PlaneWebhookEvent
 		"issue_id", issueID,
 		"author", author,
 	)
-
-	// Ищем маппинг по issue_id
-	mapping, err := h.store.GetLatestMappingByIssueID(ctx, issueID)
-	if err != nil || mapping == nil {
-		h.logger.Info("no email mapping found for issue",
-			"issue_id", issueID,
-		)
-		return
-	}
-
-	// Ставим уведомление в очередь
-	data := &sender.CommentReplyData{
-		To:                 mapping.OriginalFrom,
-		Subject:            mapping.OriginalSubject,
-		InReplyToMessageID: mapping.MessageID,
-		References:         mapping.ThreadReferences,
-		IssueSequence:      mapping.PlaneIssueSeq,
-		CommentText:        stripHTML(body),
-		CommentAuthor:      author,
-	}
-
-	if err := worker.EnqueueCommentReply(ctx, h.store, data); err != nil {
-		h.logger.Error("failed to enqueue comment reply", "error", err)
-		return
-	}
-
-	h.logger.Info("comment reply enqueued",
-		"to", mapping.OriginalFrom,
-		"issue", mapping.PlaneIssueSeq,
-	)
 }
 
 // handleStatusChange обрабатывает изменение статуса.
-func (h *Handler) handleStatusChange(ctx context.Context, event *PlaneWebhookEvent) {
-	issueID := event.Payload.Issue.ID
+func (h *Handler) handleStatusChange(_ context.Context, event *PlaneWebhookEvent) {
 	newState := event.Payload.Issue.State
 
 	// Уведомляем только о значимых переходах
@@ -157,30 +124,6 @@ func (h *Handler) handleStatusChange(ctx context.Context, event *PlaneWebhookEve
 	if !notifyStates[newState] {
 		return
 	}
-
-	mapping, err := h.store.GetLatestMappingByIssueID(ctx, issueID)
-	if err != nil || mapping == nil {
-		return
-	}
-
-	data := &sender.StatusChangeData{
-		To:                 mapping.OriginalFrom,
-		Subject:            mapping.OriginalSubject,
-		InReplyToMessageID: mapping.MessageID,
-		IssueSequence:      mapping.PlaneIssueSeq,
-		NewStatus:          newState,
-	}
-
-	if err := worker.EnqueueStatusChange(ctx, h.store, data); err != nil {
-		h.logger.Error("failed to enqueue status change", "error", err)
-		return
-	}
-
-	h.logger.Info("status change enqueued",
-		"to", mapping.OriginalFrom,
-		"issue", mapping.PlaneIssueSeq,
-		"status", newState,
-	)
 }
 
 // validateSignature проверяет HMAC-подпись webhook'а.
@@ -202,31 +145,4 @@ func (h *Handler) validateSignature(r *http.Request) error {
 	_ = signature
 
 	return nil
-}
-
-// stripHTML удаляет HTML-теги из строки.
-func stripHTML(html string) string {
-	text := strings.ReplaceAll(html, "<br>", "\n")
-	text = strings.ReplaceAll(text, "<br/>", "\n")
-	text = strings.ReplaceAll(text, "<br />", "\n")
-	text = strings.ReplaceAll(text, "</p>", "\n")
-	text = strings.ReplaceAll(text, "<p>", "")
-
-	// Удаляем все остальные теги
-	var result strings.Builder
-	inTag := false
-	for _, r := range text {
-		switch r {
-		case '<':
-			inTag = true
-		case '>':
-			inTag = false
-		default:
-			if !inTag {
-				result.WriteRune(r)
-			}
-		}
-	}
-
-	return strings.TrimSpace(result.String())
 }

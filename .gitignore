@@ -29,6 +29,10 @@ build/
 dist/
 vendor/
 
+# Frontend build
+cmd/mailbridge/static/
+frontend/dist/
+
 # Coverage
 coverage.out
 coverage.html

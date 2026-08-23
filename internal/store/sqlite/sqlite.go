@@ -4,7 +4,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -43,156 +42,194 @@ func NewStore(dsn string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Migrate выполняет миграции схемы.
-func (s *Store) Migrate(ctx context.Context) error {
-	migrations := []string{
-		// Таблица задач
-		`CREATE TABLE IF NOT EXISTS tasks (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			subject TEXT NOT NULL,
-			body_text TEXT NOT NULL DEFAULT '',
-			body_html TEXT NOT NULL DEFAULT '',
-			from_email TEXT NOT NULL,
-			from_name TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT 'Входящие',
-			type TEXT NOT NULL DEFAULT '',
-			priority TEXT NOT NULL DEFAULT 'medium',
-			status TEXT NOT NULL DEFAULT 'new',
-			assignee TEXT NOT NULL DEFAULT '',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_message_id ON tasks(message_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee)`,
+// CreateInboxItem создаёт новый элемент ленты.
+func (s *Store) CreateInboxItem(ctx context.Context, item *store.InboxItem) error {
+	query := `INSERT INTO inbox_items 
+		(source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-		// Таблица комментариев
-		`CREATE TABLE IF NOT EXISTS task_comments (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-			author TEXT NOT NULL,
-			body TEXT NOT NULL,
-			direction TEXT NOT NULL DEFAULT 'in',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
-
-		// Таблица вложений
-		`CREATE TABLE IF NOT EXISTS task_attachments (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-			filename TEXT NOT NULL,
-			content_type TEXT NOT NULL,
-			size INTEGER NOT NULL DEFAULT 0,
-			storage_path TEXT NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id)`,
-
-		// Email mapping (совместимость)
-		`CREATE TABLE IF NOT EXISTS email_mapping (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			plane_issue_id TEXT NOT NULL DEFAULT '',
-			plane_project_id TEXT NOT NULL DEFAULT '',
-			plane_issue_seq TEXT NOT NULL DEFAULT '',
-			original_from TEXT NOT NULL,
-			original_subject TEXT NOT NULL,
-			thread_references TEXT NOT NULL DEFAULT '[]',
-			action_type TEXT NOT NULL DEFAULT 'CREATE',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_email_mapping_message_id ON email_mapping(message_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_email_mapping_plane_issue ON email_mapping(plane_issue_id)`,
-
-		`CREATE TABLE IF NOT EXISTS reply_log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			in_reply_to TEXT NOT NULL,
-			plane_issue_id TEXT NOT NULL,
-			sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_reply_log_message_id ON reply_log(message_id)`,
-
-		`CREATE TABLE IF NOT EXISTS outbox (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			payload TEXT NOT NULL,
-			status TEXT NOT NULL DEFAULT 'pending',
-			attempts INTEGER NOT NULL DEFAULT 0,
-			last_attempt_at TIMESTAMP,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)`,
-
-		`CREATE TABLE IF NOT EXISTS task_reads (
-			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-			username TEXT NOT NULL,
-			read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (task_id, username)
-		)`,
+	result, err := s.db.ExecContext(ctx, query,
+		item.Source, item.SourceID, item.ThreadID,
+		item.FromContact, item.FromName, item.Subject,
+		item.BodyText, item.BodyHTML, item.Meta, item.Status)
+	if err != nil {
+		return fmt.Errorf("failed to create inbox item: %w", err)
 	}
 
-	for _, m := range migrations {
-		if _, err := s.db.ExecContext(ctx, m); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-	}
-
-	if err := s.migrateSchema(ctx); err != nil {
-		return fmt.Errorf("schema migration failed: %w", err)
-	}
-
+	id, _ := result.LastInsertId()
+	item.ID = id
+	item.ReceivedAt = time.Now()
 	return nil
 }
 
-// migrateSchema выполняет миграции для обновления существующих таблиц.
-func (s *Store) migrateSchema(ctx context.Context) error {
-	hasColumn, err := s.columnExists(ctx, "email_mapping", "plane_project_id")
-	if err != nil {
-		return fmt.Errorf("failed to check column plane_project_id: %w", err)
-	}
-	if !hasColumn {
-		if _, err := s.db.ExecContext(ctx, "ALTER TABLE email_mapping ADD COLUMN plane_project_id TEXT NOT NULL DEFAULT ''"); err != nil {
-			return fmt.Errorf("failed to add column plane_project_id: %w", err)
-		}
-	}
-	return nil
+// GetInboxItemByID возвращает элемент ленты по ID.
+func (s *Store) GetInboxItemByID(ctx context.Context, id int64) (*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, id)
+	return scanInboxItem(row)
 }
 
-// columnExists проверяет существование колонки в таблице.
-func (s *Store) columnExists(ctx context.Context, table, column string) (bool, error) {
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+// GetInboxItemBySourceID возвращает элемент ленты по source и source_id.
+func (s *Store) GetInboxItemBySourceID(ctx context.Context, source, sourceID string) (*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE source = ? AND source_id = ?`
+
+	row := s.db.QueryRowContext(ctx, query, source, sourceID)
+	return scanInboxItem(row)
+}
+
+// ListInboxItems возвращает список элементов ленты.
+func (s *Store) ListInboxItems(ctx context.Context, filter *store.InboxFilter) (*store.InboxListResult, error) {
+	if filter == nil {
+		filter = &store.InboxFilter{Page: 1, PerPage: 50}
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PerPage < 1 || filter.PerPage > 200 {
+		filter.PerPage = 50
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	if filter.Status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.Source != "" {
+		conditions = append(conditions, "source = ?")
+		args = append(args, filter.Source)
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var total int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM inbox_items %s", where)
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count inbox items: %w", err)
+	}
+
+	offset := (filter.Page - 1) * filter.PerPage
+	dataQuery := fmt.Sprintf(`SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items %s ORDER BY received_at DESC LIMIT ? OFFSET ?`, where)
+
+	dataArgs := append(args, filter.PerPage, offset)
+	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("failed to list inbox items: %w", err)
 	}
 	defer rows.Close()
 
+	var items []*store.InboxItem
 	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			return false, err
+		item, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, err
 		}
-		if name == column {
-			return true, nil
-		}
+		items = append(items, item)
 	}
-	return false, rows.Err()
+
+	return &store.InboxListResult{
+		Items:   items,
+		Total:   total,
+		Page:    filter.Page,
+		PerPage: filter.PerPage,
+	}, rows.Err()
+}
+
+// UpdateInboxItemStatus обновляет статус элемента ленты.
+func (s *Store) UpdateInboxItemStatus(ctx context.Context, id int64, status string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE inbox_items SET status = ? WHERE id = ?", status, id)
+	return err
+}
+
+// UpdateInboxItemAI обновляет AI-поля элемента ленты.
+func (s *Store) UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE inbox_items SET ai_processed = ?, ai_verdict = ?, ai_summary = ? WHERE id = ?",
+		processed, verdict, summary, id)
+	return err
+}
+
+// scanInboxItem сканирует строку в InboxItem.
+func scanInboxItem(row interface{ Scan(...interface{}) error }) (*store.InboxItem, error) {
+	item := &store.InboxItem{}
+	err := row.Scan(&item.ID, &item.Source, &item.SourceID, &item.ThreadID,
+		&item.FromContact, &item.FromName, &item.Subject,
+		&item.BodyText, &item.BodyHTML, &item.Meta, &item.ReceivedAt,
+		&item.AIProcessed, &item.AIAttempts, &item.AIVerdict, &item.AISummary, &item.Status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan inbox item: %w", err)
+	}
+	return item, nil
+}
+
+// LinkTaskToInboxItem создаёт связь между задачей и элементом ленты.
+func (s *Store) LinkTaskToInboxItem(ctx context.Context, taskID, inboxItemID int64, relation string) error {
+	query := `INSERT OR IGNORE INTO task_inbox_items (task_id, inbox_item_id, relation) VALUES (?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, taskID, inboxItemID, relation)
+	return err
+}
+
+// GetInboxItemsByTask возвращает элементы ленты, связанные с задачей.
+func (s *Store) GetInboxItemsByTask(ctx context.Context, taskID int64) ([]*store.TaskInboxItem, error) {
+	query := `SELECT task_id, inbox_item_id, relation, created_at FROM task_inbox_items WHERE task_id = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*store.TaskInboxItem
+	for rows.Next() {
+		link := &store.TaskInboxItem{}
+		if err := rows.Scan(&link.TaskID, &link.InboxItemID, &link.Relation, &link.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
+}
+
+// GetTasksByInboxItem возвращает задачи, связанные с элементом ленты.
+func (s *Store) GetTasksByInboxItem(ctx context.Context, inboxItemID int64) ([]*store.TaskInboxItem, error) {
+	query := `SELECT task_id, inbox_item_id, relation, created_at FROM task_inbox_items WHERE inbox_item_id = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, inboxItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*store.TaskInboxItem
+	for rows.Next() {
+		link := &store.TaskInboxItem{}
+		if err := rows.Scan(&link.TaskID, &link.InboxItemID, &link.Relation, &link.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
 }
 
 // CreateTask создаёт новую задачу.
 func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
-	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	result, err := s.db.ExecContext(ctx, query,
 		task.MessageID, task.Subject, task.BodyText, task.BodyHTML,
 		task.FromEmail, task.FromName, task.Project, task.Type,
-		task.Priority, task.Status, task.Assignee)
+		task.Priority, task.Status, task.Assignee,
+		task.ThreadID, task.SourceEmailID, task.AIVerdict)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -207,7 +244,7 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 // GetTask возвращает задачу по ID.
 func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
 		FROM tasks WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -217,7 +254,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 // GetTaskByMessageID возвращает задачу по Message-ID.
 func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
 		FROM tasks WHERE message_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, messageID)
@@ -287,7 +324,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -314,7 +351,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		unread := 0
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
@@ -427,75 +464,6 @@ func (s *Store) GetTaskAttachments(ctx context.Context, taskID int64) ([]*store.
 	return attachments, rows.Err()
 }
 
-// SaveMapping сохраняет маппинг email-сообщения.
-func (s *Store) SaveMapping(ctx context.Context, m *store.EmailMapping) error {
-	refsJSON, err := json.Marshal(m.ThreadReferences)
-	if err != nil {
-		return fmt.Errorf("failed to marshal thread references: %w", err)
-	}
-
-	query := `INSERT INTO email_mapping 
-		(message_id, plane_issue_id, plane_project_id, plane_issue_seq, original_from, original_subject, thread_references, action_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-
-	_, err = s.db.ExecContext(ctx, query,
-		m.MessageID, m.PlaneIssueID, m.PlaneProjectID, m.PlaneIssueSeq,
-		m.OriginalFrom, m.OriginalSubject, string(refsJSON), m.ActionType)
-	if err != nil {
-		return fmt.Errorf("failed to save mapping: %w", err)
-	}
-	return nil
-}
-
-// GetMappingByMessageID возвращает маппинг по Message-ID.
-func (s *Store) GetMappingByMessageID(ctx context.Context, msgID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-		original_from, original_subject, thread_references, action_type, created_at
-		FROM email_mapping WHERE message_id = ?`
-	row := s.db.QueryRowContext(ctx, query, msgID)
-	return scanMapping(row)
-}
-
-// GetLatestMappingByIssueID возвращает последний маппинг по ID задачи.
-func (s *Store) GetLatestMappingByIssueID(ctx context.Context, issueID string) (*store.EmailMapping, error) {
-	query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-		original_from, original_subject, thread_references, action_type, created_at
-		FROM email_mapping WHERE plane_issue_id = ? ORDER BY id DESC LIMIT 1`
-	row := s.db.QueryRowContext(ctx, query, issueID)
-	return scanMapping(row)
-}
-
-// MessageExists проверяет существование маппинга по Message-ID.
-func (s *Store) MessageExists(ctx context.Context, msgID string) (bool, error) {
-	query := `SELECT COUNT(*) FROM email_mapping WHERE message_id = ?`
-	var count int
-	if err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count); err != nil {
-		return false, fmt.Errorf("failed to check message existence: %w", err)
-	}
-	return count > 0, nil
-}
-
-// FindMappingByReferences ищет маппинг по ссылкам.
-func (s *Store) FindMappingByReferences(ctx context.Context, refs []string) (*store.EmailMapping, error) {
-	for _, ref := range refs {
-		m, err := s.GetMappingByMessageID(ctx, ref)
-		if err == nil && m != nil {
-			return m, nil
-		}
-	}
-	for _, ref := range refs {
-		query := `SELECT id, message_id, plane_issue_id, plane_project_id, plane_issue_seq, 
-			original_from, original_subject, thread_references, action_type, created_at
-			FROM email_mapping WHERE thread_references LIKE ?`
-		row := s.db.QueryRowContext(ctx, query, "%\""+ref+"\"%")
-		m, err := scanMapping(row)
-		if err == nil && m != nil {
-			return m, nil
-		}
-	}
-	return nil, fmt.Errorf("mapping not found by references")
-}
-
 // SaveReplyLog сохраняет запись об отправленном ответе.
 func (s *Store) SaveReplyLog(ctx context.Context, log *store.ReplyLog) error {
 	query := `INSERT INTO reply_log (message_id, in_reply_to, plane_issue_id) VALUES (?, ?, ?)`
@@ -578,12 +546,20 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// TableExists проверяет существование таблицы.
+func (s *Store) TableExists(ctx context.Context, table string) (bool, error) {
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`
+	var count int
+	err := s.db.QueryRowContext(ctx, query, table).Scan(&count)
+	return count > 0, err
+}
+
 // scanTask сканирует строку в Task.
 func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) {
 	t := &store.Task{}
 	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
 		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -593,26 +569,95 @@ func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) 
 	return t, nil
 }
 
-// scanMapping сканирует строку в EmailMapping.
-func scanMapping(row interface{ Scan(...interface{}) error }) (*store.EmailMapping, error) {
-	m := &store.EmailMapping{}
-	var refsJSON string
-	var createdAt time.Time
+// CreateThread создаёт новую цепочку писем.
+func (s *Store) CreateThread(ctx context.Context, thread *store.Thread) error {
+	query := `INSERT INTO threads (thread_id, source, subject, participants, summary, last_item_at) VALUES (?, ?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query,
+		thread.ThreadID, thread.Source, thread.Subject, thread.Participants, thread.Summary, thread.LastItemAt)
+	if err != nil {
+		return fmt.Errorf("failed to create thread: %w", err)
+	}
+	id, _ := result.LastInsertId()
+	thread.ID = id
+	thread.CreatedAt = time.Now()
+	thread.UpdatedAt = time.Now()
+	return nil
+}
 
-	err := row.Scan(&m.ID, &m.MessageID, &m.PlaneIssueID, &m.PlaneProjectID, &m.PlaneIssueSeq,
-		&m.OriginalFrom, &m.OriginalSubject, &refsJSON, &m.ActionType, &createdAt)
+// GetThread возвращает цепочку по thread_id.
+func (s *Store) GetThread(ctx context.Context, threadID string) (*store.Thread, error) {
+	query := `SELECT id, thread_id, source, subject, participants, summary, last_item_at, created_at, updated_at FROM threads WHERE thread_id = ?`
+	row := s.db.QueryRowContext(ctx, query, threadID)
+
+	t := &store.Thread{}
+	var lastItemAt sql.NullTime
+	err := row.Scan(&t.ID, &t.ThreadID, &t.Source, &t.Subject, &t.Participants, &t.Summary, &lastItemAt, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to scan mapping: %w", err)
+		return nil, fmt.Errorf("failed to scan thread: %w", err)
 	}
+	if lastItemAt.Valid {
+		t.LastItemAt = &lastItemAt.Time
+	}
+	return t, nil
+}
 
-	if refsJSON != "" {
-		if err := json.Unmarshal([]byte(refsJSON), &m.ThreadReferences); err != nil {
-			m.ThreadReferences = []string{}
-		}
+// UpdateThreadSummary обновляет summary цепочки.
+func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE threads SET summary = ?, updated_at = ? WHERE thread_id = ?",
+		summary, time.Now(), threadID)
+	return err
+}
+
+// GetActiveTasksByThread возвращает активные задачи цепочки.
+func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
+	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved', 'info_only') ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active tasks: %w", err)
 	}
-	m.CreatedAt = createdAt
-	return m, nil
+	defer rows.Close()
+
+	var tasks []*store.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+// QueryRowForTest — экспортируемый метод для тестов.
+func (s *Store) QueryRowForTest(ctx context.Context, query string) *sql.Row {
+	return s.db.QueryRowContext(ctx, query)
+}
+
+// GetPendingAIItems возвращает входящие с ai_processed = 0.
+func (s *Store) GetPendingAIItems(ctx context.Context) ([]*store.InboxItem, error) {
+	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status
+		FROM inbox_items WHERE ai_processed = 0 ORDER BY received_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending AI items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*store.InboxItem
+	for rows.Next() {
+		item, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

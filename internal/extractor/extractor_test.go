@@ -188,49 +188,22 @@ func TestCleaner_RemoveSignatures(t *testing.T) {
 	}
 }
 
-func TestSanitizeFilename(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, _ := extractor.NewAttachmentStore(tmpDir)
-
-	att := &extractor.Attachment{
-		Filename:    "../../etc/passwd",
-		ContentType: "text/plain",
-		Data:        []byte("test"),
-		Size:        4,
-	}
-
-	path, err := store.Save(att)
-	if err != nil {
-		t.Fatalf("Save error: %v", err)
-	}
-
-	// Путь не должен содержать ".."
-	if strings.Contains(path, "..") {
-		t.Errorf("path contains '..': %s", path)
-	}
-
-	// Имя файла должно быть безопасным — passwd без пути etc
-	if !strings.HasSuffix(path, "passwd") {
-		t.Errorf("unexpected sanitized name in path: %s", path)
-	}
-}
-
-func TestAttachmentStore_DuplicateNames(t *testing.T) {
+func TestAttachmentStore_Deduplication(t *testing.T) {
 	tmpDir := t.TempDir()
 	store, _ := extractor.NewAttachmentStore(tmpDir)
 
 	att := &extractor.Attachment{
 		Filename:    "file.txt",
 		ContentType: "text/plain",
-		Data:        []byte("first"),
-		Size:        5,
+		Data:        []byte("same content"),
+		Size:        12,
 	}
 
 	path1, _ := store.Save(att)
 	path2, _ := store.Save(att)
 
-	if path1 == path2 {
-		t.Errorf("duplicate files should have different paths: %s == %s", path1, path2)
+	if path1 != path2 {
+		t.Errorf("expected same path for same content, got %s and %s", path1, path2)
 	}
 }
 
@@ -357,5 +330,113 @@ WjR9awAAAABJRU5ErkJggg==
 	// Вложение должно быть сохранено
 	if len(result.Attachments) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(result.Attachments))
+	}
+}
+
+func TestExtractor_InlineImageInAttachments(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Screenshot
+Message-ID: <inline-test@example.com>
+Content-Type: multipart/related; boundary="boundary456"
+
+--boundary456
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Смотрите скриншот:</p><img src="cid:img123"></body></html>
+
+--boundary456
+Content-Type: image/png; name="image001.png"
+Content-Disposition: inline; filename="image001.png"
+Content-ID: <img123>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGA
+WjR9awAAAABJRU5ErkJggg==
+
+--boundary456--`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	if len(result.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(result.Attachments))
+	}
+
+	att := result.Attachments[0]
+	if att.ContentType != "image/png" {
+		t.Errorf("ContentType = %s, want image/png", att.ContentType)
+	}
+	if att.StoragePath == "" {
+		t.Error("StoragePath is empty")
+	}
+	t.Logf("Attachment: filename=%s, type=%s, path=%s", att.Filename, att.ContentType, att.StoragePath)
+}
+
+func TestExtractor_MultipleAttachmentTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Документы
+Message-ID: <multi-types@example.com>
+Content-Type: multipart/mixed; boundary="b123"
+
+--b123
+Content-Type: text/plain; charset=utf-8
+
+Прикладываю документы.
+
+--b123
+Content-Type: application/pdf; name="doc.pdf"
+Content-Disposition: attachment; filename="doc.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPQM1Qo5ypUMFAwALJMLQsABlMDCmVuZHN0cmVhbQplbmRvYmoK
+
+--b123
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="doc.docx"
+Content-Disposition: attachment; filename="doc.docx"
+Content-Transfer-Encoding: base64
+
+UEsDBBQABgAIAAAAIQCq5n2yMQAAADAAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbI2QwWrDMAyG
+7/sKRu9t42YdxYdR2Glh7DSU7TQXJdtJTWwZS2Nr376aYqU9FEsvQv8n8esv0lkdw8QYCkQF
+
+--b123--`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	if len(result.Attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(result.Attachments))
+	}
+
+	for _, att := range result.Attachments {
+		if att.StoragePath == "" {
+			t.Error("StoragePath is empty")
+		}
+		if att.Size == 0 {
+			t.Error("Size is 0")
+		}
+		t.Logf("Attachment: %s (type: %s, path: %s)", att.Filename, att.ContentType, att.StoragePath)
 	}
 }

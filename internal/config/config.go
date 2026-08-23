@@ -12,6 +12,7 @@ import (
 type Config struct {
 	IMAP        IMAPConfig
 	SMTP        SMTPConfig
+	AI          AIConfig
 	Plane       PlaneConfig
 	Webhook     WebhookConfig
 	Storage     StorageConfig
@@ -45,6 +46,15 @@ type SMTPConfig struct {
 	Password string
 	From     string
 	TLS      bool
+}
+
+// AIConfig настройки LLM-классификатора.
+type AIConfig struct {
+	Enabled  bool
+	Provider string // "ollama" или "openai"
+	BaseURL  string
+	Model    string
+	APIKey   string
 }
 
 // PlaneConfig настройки подключения к Plane API.
@@ -102,6 +112,13 @@ func Load() (*Config, error) {
 			Password: getEnv("MAILBRIDGE_SMTP_PASS", ""),
 			From:     getEnv("MAILBRIDGE_SMTP_FROM", ""),
 			TLS:      getEnvAsBool("MAILBRIDGE_SMTP_TLS", true),
+		},
+		AI: AIConfig{
+			Enabled:  getEnvAsBool("MAILBRIDGE_AI_ENABLED", false),
+			Provider: getEnv("MAILBRIDGE_AI_PROVIDER", "ollama"),
+			BaseURL:  getEnv("MAILBRIDGE_AI_BASE_URL", "http://localhost:11434"),
+			Model:    getEnv("MAILBRIDGE_AI_MODEL", "qwen3.8"),
+			APIKey:   getEnv("MAILBRIDGE_AI_API_KEY", ""),
 		},
 		Plane: PlaneConfig{
 			BaseURL:        getEnv("MAILBRIDGE_PLANE_BASE_URL", ""),
