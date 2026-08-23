@@ -142,6 +142,11 @@ func (h *TaskHandler) GetInboxItemTasks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Гарантируем что не null
+	if tasks == nil {
+		tasks = []*store.TaskInboxItem{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(tasks); err != nil {
 		log.Printf("encode error: %v", err)

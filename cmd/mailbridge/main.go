@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +34,9 @@ import (
 	"github.com/audetv/mailbridge/internal/webhook"
 	"github.com/audetv/mailbridge/internal/worker"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 func main() {
 	fmt.Println(version.Info())
@@ -252,6 +259,33 @@ func main() {
 	// HTTP-сервер (health + webhook + metrics)
 	// ---------------------------------------------------------------------------
 	mux := http.NewServeMux()
+
+	// Раздача статики SPA
+	distFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		logger.Error("failed to load static files", "error", err)
+		os.Exit(1)
+	}
+	fileServer := http.FileServer(http.FS(distFS))
+
+	// Отдаём index.html для маршрутов Vue Router
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// API-запросы не трогаем
+		if strings.HasPrefix(r.URL.Path, "/api") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Проверяем существует ли файл в embed.FS
+		cleanPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
+		if cleanPath != "" && cleanPath != "." {
+			if _, err := fs.Stat(distFS, cleanPath); os.IsNotExist(err) {
+				r.URL.Path = "/"
+			}
+		}
+
+		fileServer.ServeHTTP(w, r)
+	})
 
 	// Health
 	mux.Handle("/health", healthSrv.Handler())
