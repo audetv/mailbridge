@@ -108,11 +108,20 @@ func (w *Worker) process(ctx context.Context, inboxItemID int64) {
 
 // convertToEmail преобразует InboxItem в ExtractedEmail с вложениями.
 func (w *Worker) convertToEmail(ctx context.Context, item *store.InboxItem) *extractor.ExtractedEmail {
+	// Извлекаем текст из HTML если plain-текст пустой
+	bodyText := item.BodyText
+	if bodyText == "" && item.BodyHTML != "" {
+		cleaner := extractor.NewCleaner()
+		if htmlText := cleaner.HTMLToText(item.BodyHTML); htmlText != "" {
+			bodyText = htmlText
+		}
+	}
+
 	email := &extractor.ExtractedEmail{
 		MessageID: item.SourceID,
 		From:      item.FromContact,
 		Subject:   item.Subject,
-		BodyText:  item.BodyText,
+		BodyText:  bodyText,
 		BodyHTML:  item.BodyHTML,
 	}
 
