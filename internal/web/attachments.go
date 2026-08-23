@@ -4,10 +4,40 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/audetv/mailbridge/internal/store"
 )
+
+// GetAttachment обрабатывает GET /api/attachments/{path...}
+func (h *TaskHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
+	path := r.PathValue("path")
+	if path == "" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Защита от path traversal
+	cleanPath := filepath.Clean(path)
+	if cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Путь к файлу вложений
+	fullPath := filepath.Join("data", "attachments", cleanPath)
+
+	// Проверяем что файл существует
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	http.ServeFile(w, r, fullPath)
+}
 
 // GetInboxAttachments обрабатывает GET /api/inbox/{id}/attachments
 func (h *TaskHandler) GetInboxAttachments(w http.ResponseWriter, r *http.Request) {
