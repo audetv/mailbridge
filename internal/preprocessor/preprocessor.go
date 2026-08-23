@@ -75,6 +75,13 @@ func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (
 		}
 		return &ProcessedAttachment{Type: "text", Content: text}, nil
 
+	case ".rtf":
+		text, err := extractRtfText(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract rtf: %w", err)
+		}
+		return &ProcessedAttachment{Type: "text", Content: text}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -86,7 +93,6 @@ type ProcessedAttachment struct {
 	Content string // текст или Base64
 }
 
-// extractDocxText извлекает текст из DOCX-файла.
 // extractDocxText извлекает текст из DOCX-файла.
 func extractDocxText(path string) (string, error) {
 	doc, err := docx.ReadDocxFile(path)
