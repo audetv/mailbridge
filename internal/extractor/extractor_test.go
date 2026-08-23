@@ -382,3 +382,61 @@ WjR9awAAAABJRU5ErkJggg==
 	}
 	t.Logf("Attachment: filename=%s, type=%s, path=%s", att.Filename, att.ContentType, att.StoragePath)
 }
+
+func TestExtractor_MultipleAttachmentTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Документы
+Message-ID: <multi-types@example.com>
+Content-Type: multipart/mixed; boundary="b123"
+
+--b123
+Content-Type: text/plain; charset=utf-8
+
+Прикладываю документы.
+
+--b123
+Content-Type: application/pdf; name="doc.pdf"
+Content-Disposition: attachment; filename="doc.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPQM1Qo5ypUMFAwALJMLQsABlMDCmVuZHN0cmVhbQplbmRvYmoK
+
+--b123
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="doc.docx"
+Content-Disposition: attachment; filename="doc.docx"
+Content-Transfer-Encoding: base64
+
+UEsDBBQABgAIAAAAIQCq5n2yMQAAADAAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbI2QwWrDMAyG
+7/sKRu9t42YdxYdR2Glh7DSU7TQXJdtJTWwZS2Nr376aYqU9FEsvQv8n8esv0lkdw8QYCkQF
+
+--b123--`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	if len(result.Attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(result.Attachments))
+	}
+
+	for _, att := range result.Attachments {
+		if att.StoragePath == "" {
+			t.Error("StoragePath is empty")
+		}
+		if att.Size == 0 {
+			t.Error("Size is 0")
+		}
+		t.Logf("Attachment: %s (type: %s, path: %s)", att.Filename, att.ContentType, att.StoragePath)
+	}
+}
