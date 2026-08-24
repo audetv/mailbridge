@@ -122,9 +122,12 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 		}
 	}
 
+	var userComment *store.TaskComment
+	var aiComment *store.TaskComment
+
 	// Пользовательский комментарий
 	if verdict.Updates.AddComment != "" {
-		comment := &store.TaskComment{
+		userComment = &store.TaskComment{
 			TaskID:      int64(taskID),
 			Author:      "user",
 			Body:        verdict.Updates.AddComment,
@@ -132,14 +135,14 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 			Kind:        "user_comment",
 			InboxItemID: int64Ptr(inboxItemID),
 		}
-		if err := o.store.AddTaskComment(ctx, comment); err != nil {
+		if err := o.store.AddTaskComment(ctx, userComment); err != nil {
 			return err
 		}
 	}
 
 	// AI-вердикт как комментарий
 	verdictJSON := verdictToJSON(verdict)
-	aiComment := &store.TaskComment{
+	aiComment = &store.TaskComment{
 		TaskID:      int64(taskID),
 		Author:      "ai",
 		Body:        fmt.Sprintf("Задача обновлена: %s", verdict.Updates.AddComment),
@@ -150,6 +153,23 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 	}
 	if err := o.store.AddTaskComment(ctx, aiComment); err != nil {
 		return err
+	}
+
+	// Привязываем вложения входящего к комментариям
+	if inboxItemID > 0 {
+		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
+		if err == nil {
+			for _, att := range inboxAtts {
+				if userComment != nil {
+					if err := o.store.LinkAttachmentToComment(ctx, userComment.ID, att.ID); err != nil {
+						log.Printf("[AI] failed to link attachment to user comment: %v", err)
+					}
+				}
+				if err := o.store.LinkAttachmentToComment(ctx, aiComment.ID, att.ID); err != nil {
+					log.Printf("[AI] failed to link attachment to ai comment: %v", err)
+				}
+			}
+		}
 	}
 
 	// Связь с входящим
@@ -178,9 +198,12 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 		return err
 	}
 
+	var userComment *store.TaskComment
+	var aiComment *store.TaskComment
+
 	// Пользовательский комментарий
 	if verdict.Comment != "" {
-		comment := &store.TaskComment{
+		userComment = &store.TaskComment{
 			TaskID:      int64(taskID),
 			Author:      "user",
 			Body:        verdict.Comment,
@@ -188,14 +211,14 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 			Kind:        "user_comment",
 			InboxItemID: int64Ptr(inboxItemID),
 		}
-		if err := o.store.AddTaskComment(ctx, comment); err != nil {
+		if err := o.store.AddTaskComment(ctx, userComment); err != nil {
 			return err
 		}
 	}
 
 	// AI-вердикт
 	verdictJSON := verdictToJSON(verdict)
-	aiComment := &store.TaskComment{
+	aiComment = &store.TaskComment{
 		TaskID:      int64(taskID),
 		Author:      "ai",
 		Body:        "Задача завершена",
@@ -206,6 +229,23 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 	}
 	if err := o.store.AddTaskComment(ctx, aiComment); err != nil {
 		return err
+	}
+
+	// Привязываем вложения входящего к комментариям
+	if inboxItemID > 0 {
+		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
+		if err == nil {
+			for _, att := range inboxAtts {
+				if userComment != nil {
+					if err := o.store.LinkAttachmentToComment(ctx, userComment.ID, att.ID); err != nil {
+						log.Printf("[AI] failed to link attachment to user comment: %v", err)
+					}
+				}
+				if err := o.store.LinkAttachmentToComment(ctx, aiComment.ID, att.ID); err != nil {
+					log.Printf("[AI] failed to link attachment to ai comment: %v", err)
+				}
+			}
+		}
 	}
 
 	// Связь с входящим

@@ -217,6 +217,9 @@ type Store interface {
 	AddTaskAttachment(ctx context.Context, att *TaskAttachment) error
 	GetTaskAttachments(ctx context.Context, taskID int64) ([]*TaskAttachment, error)
 
+	// LinkAttachmentToComment связывает вложение с комментарием.
+	LinkAttachmentToComment(ctx context.Context, commentID, attachmentID int64) error
+
 	// Reply Log
 	SaveReplyLog(ctx context.Context, log *ReplyLog) error
 	ReplyExists(ctx context.Context, msgID string) (bool, error)

@@ -114,3 +114,10 @@ func scanAttachments(rows *sql.Rows) ([]*store.Attachment, error) {
 	}
 	return atts, rows.Err()
 }
+
+// LinkAttachmentToComment связывает вложение с комментарием.
+func (s *Store) LinkAttachmentToComment(ctx context.Context, commentID, attachmentID int64) error {
+	query := `INSERT OR IGNORE INTO comment_attachments (comment_id, attachment_id) VALUES (?, ?)`
+	_, err := s.db.ExecContext(ctx, query, commentID, attachmentID)
+	return err
+}
