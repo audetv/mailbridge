@@ -10,6 +10,9 @@ import (
 
 // determineThreadID определяет ID цепочки по References или Message-ID.
 func determineThreadID(email *extractor.ExtractedEmail) string {
+	if email.ThreadID != "" {
+		return email.ThreadID
+	}
 	if len(email.References) > 0 {
 		return email.References[0]
 	}

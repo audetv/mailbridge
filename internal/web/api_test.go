@@ -324,7 +324,7 @@ func TestMarkRead(t *testing.T) {
 	}
 
 	// Добавляем входящий комментарий
-	if err := st.AddTaskComment(ctx, &store.TaskComment{TaskID: 1, Author: "client@e.com", Body: "Проблема", Direction: "in"}); err != nil {
+	if err := st.AddTaskComment(ctx, &store.TaskComment{TaskID: 1, Author: "client@e.com", Body: "Проблема", Direction: "in", Kind: "user_comment"}); err != nil {
 		t.Fatalf("AddTaskComment error: %v", err)
 	}
 

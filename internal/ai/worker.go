@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -119,10 +120,23 @@ func (w *Worker) convertToEmail(ctx context.Context, item *store.InboxItem) *ext
 
 	email := &extractor.ExtractedEmail{
 		MessageID: item.SourceID,
+		ThreadID:  item.ThreadID,
 		From:      item.FromContact,
 		Subject:   item.Subject,
 		BodyText:  bodyText,
 		BodyHTML:  item.BodyHTML,
+	}
+
+	// Извлекаем References из meta JSON
+	if item.Meta != "" {
+		var meta struct {
+			References []string `json:"references"`
+			InReplyTo  string   `json:"in_reply_to"`
+		}
+		if err := json.Unmarshal([]byte(item.Meta), &meta); err == nil {
+			email.References = meta.References
+			email.InReplyTo = meta.InReplyTo
+		}
 	}
 
 	// Загружаем вложения

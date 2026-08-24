@@ -87,12 +87,15 @@ type TaskWithUnread struct {
 
 // TaskComment представляет комментарий к задаче.
 type TaskComment struct {
-	ID        int64     `json:"id"`
-	TaskID    int64     `json:"task_id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
-	Direction string    `json:"direction"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	TaskID      int64     `json:"task_id"`
+	Author      string    `json:"author"`
+	Body        string    `json:"body"`
+	Direction   string    `json:"direction"`
+	Kind        string    `json:"kind"`
+	InboxItemID *int64    `json:"inbox_item_id,omitempty"`
+	VerdictJSON string    `json:"verdict_json,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // TaskAttachment представляет вложение задачи.
@@ -177,13 +180,22 @@ type Store interface {
 	GetAttachmentsByInbox(ctx context.Context, inboxItemID int64) ([]*Attachment, error)
 	GetAttachmentsByTask(ctx context.Context, taskID int64) ([]*Attachment, error)
 
+	// GetAttachmentsByComment возвращает вложения комментария.
+	GetAttachmentsByComment(ctx context.Context, commentID int64) ([]*Attachment, error)
+
 	// Inbox Items
 	CreateInboxItem(ctx context.Context, item *InboxItem) error
 	GetInboxItemByID(ctx context.Context, id int64) (*InboxItem, error)
 	GetInboxItemBySourceID(ctx context.Context, source, sourceID string) (*InboxItem, error)
+
 	ListInboxItems(ctx context.Context, filter *InboxFilter) (*InboxListResult, error)
 	UpdateInboxItemStatus(ctx context.Context, id int64, status string) error
 	UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error
+
+	// GetInboxItemsByThread возвращает все входящие цепочки.
+	GetInboxItemsByThread(ctx context.Context, threadID string) ([]*InboxItem, error)
+	// GetTasksByThread возвращает все задачи цепочки.
+	GetTasksByThread(ctx context.Context, threadID string) ([]*Task, error)
 
 	// Task-Inbox связь
 	LinkTaskToInboxItem(ctx context.Context, taskID, inboxItemID int64, relation string) error
@@ -207,6 +219,9 @@ type Store interface {
 	// Task Attachments
 	AddTaskAttachment(ctx context.Context, att *TaskAttachment) error
 	GetTaskAttachments(ctx context.Context, taskID int64) ([]*TaskAttachment, error)
+
+	// LinkAttachmentToComment связывает вложение с комментарием.
+	LinkAttachmentToComment(ctx context.Context, commentID, attachmentID int64) error
 
 	// Reply Log
 	SaveReplyLog(ctx context.Context, log *ReplyLog) error

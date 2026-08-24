@@ -54,9 +54,15 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
-	activeTasks, err := o.store.GetActiveTasksByThread(ctx, threadID)
+	activeTasks, err := o.store.GetTasksByThread(ctx, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active tasks: %w", err)
+	}
+
+	// Загружаем все входящие цепочки для контекста
+	threadInboxItems, err := o.store.GetInboxItemsByThread(ctx, threadID)
+	if err != nil {
+		threadInboxItems = []*store.InboxItem{}
 	}
 
 	// Обрабатываем вложения
@@ -93,7 +99,7 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
-	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
+	prompt := o.buildPromptWithThreadContext(summary, activeTasks, threadInboxItems, email, textAttachments)
 
 	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
 	if len(images) > 0 {
@@ -197,6 +203,37 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 	_ = os.WriteFile(filename, []byte(sb.String()), 0o644)
 }
 
+// buildPromptWithThreadContext формирует промпт с полным контекстом цепочки.
+func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks []*store.Task, threadItems []*store.InboxItem, email *extractor.ExtractedEmail, textAttachments []string) string {
+	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
+
+	// Добавляем историю входящих цепочки
+	if len(threadItems) > 0 {
+		var sb strings.Builder
+		sb.WriteString("=== ИСТОРИЯ ЦЕПОЧКИ ===\n")
+		for _, item := range threadItems {
+			// Краткое описание каждого входящего (не весь текст)
+			preview := item.BodyText
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			fmt.Fprintf(&sb, "- [%s] %s: %s\n", item.ReceivedAt.Format("02.01 15:04"), item.FromContact, preview)
+		}
+		sb.WriteString("\n")
+
+		// Вставляем перед JSON-инструкцией
+		insertIdx := strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+		if insertIdx == -1 {
+			insertIdx = len(prompt)
+		}
+
+		result := prompt[:insertIdx] + sb.String() + prompt[insertIdx:]
+		return result
+	}
+
+	return prompt
+}
+
 // buildPromptWithAttachments формирует промпт с текстовыми вложениями.
 func (o *Orchestrator) buildPromptWithAttachments(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail, textAttachments []string) string {
 	prompt := o.buildPrompt(summary, activeTasks, email)
@@ -242,10 +279,21 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	}
 
 	if len(activeTasks) > 0 {
-		sb.WriteString("=== АКТИВНЫЕ ЗАДАЧИ ===\n")
+		sb.WriteString("=== ЗАДАЧИ ЦЕПОЧКИ ===\n")
 		for _, task := range activeTasks {
 			fmt.Fprintf(&sb, "- Task #%d: %s (статус: %s, приоритет: %s)\n",
 				task.ID, task.Subject, task.Status, task.Priority)
+
+			// Краткое описание последнего AI-вердикта
+			if task.AIVerdict != "" {
+				var verdict Verdict
+				if err := json.Unmarshal([]byte(task.AIVerdict), &verdict); err == nil {
+					if verdict.Task != nil && verdict.Task.Description != "" {
+						desc := verdict.Task.Description
+						fmt.Fprintf(&sb, "  Описание: %s\n", desc)
+					}
+				}
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -330,6 +378,12 @@ func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
 	response = strings.TrimPrefix(response, "```")
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
+
+	// Удаляем BOM и невидимые символы
+	response = strings.TrimPrefix(response, "\ufeff")
+	response = strings.ReplaceAll(response, "\u00c2\u00a0", " ")
+	response = strings.ReplaceAll(response, "\u00a0", " ")
+	response = strings.ReplaceAll(response, "\u200b", "") // zero-width space
 
 	var result LLMResponse
 	if err := json.Unmarshal([]byte(response), &result); err != nil {

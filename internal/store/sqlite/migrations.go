@@ -42,6 +42,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 			author TEXT NOT NULL,
 			body TEXT NOT NULL,
 			direction TEXT NOT NULL DEFAULT 'in',
+			kind TEXT NOT NULL DEFAULT 'user_comment',
+			inbox_item_id INTEGER REFERENCES inbox_items(id),
+			verdict_json TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
@@ -234,6 +237,11 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		}
 	}
 
+	// Миграция task_comments: удалить старую, создать новую
+	if err := s.migrateTaskComments(ctx); err != nil {
+		return fmt.Errorf("failed to migrate task_comments: %w", err)
+	}
+
 	return nil
 }
 
@@ -333,4 +341,49 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 		}
 	}
 	return false, rows.Err()
+}
+
+// ColumnExistsForTest — экспортируемая обёртка для тестов.
+func (s *Store) ColumnExistsForTest(ctx context.Context, table, column string) (bool, error) {
+	return s.columnExists(ctx, table, column)
+}
+
+// migrateTaskComments удаляет старую таблицу и создаёт новую.
+func (s *Store) migrateTaskComments(ctx context.Context) error {
+	// Проверяем есть ли старая таблица
+	hasKind, err := s.columnExists(ctx, "task_comments", "kind")
+	if err == nil && hasKind {
+		return nil // уже новая схема
+	}
+
+	// Удаляем старую
+	if _, err := s.db.ExecContext(ctx, "DROP TABLE IF EXISTS task_comments"); err != nil {
+		return err
+	}
+
+	// Создаём новую
+	createNew := `CREATE TABLE IF NOT EXISTS task_comments (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		author TEXT NOT NULL,
+		body TEXT NOT NULL,
+		direction TEXT NOT NULL DEFAULT 'in',
+		kind TEXT NOT NULL DEFAULT 'user_comment',
+		inbox_item_id INTEGER REFERENCES inbox_items(id),
+		verdict_json TEXT,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`
+	if _, err := s.db.ExecContext(ctx, createNew); err != nil {
+		return err
+	}
+
+	// Индексы
+	if _, err := s.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_task_comments_inbox_item ON task_comments(inbox_item_id)"); err != nil {
+		return err
+	}
+
+	return nil
 }

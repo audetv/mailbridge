@@ -316,6 +316,7 @@ func main() {
 	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)
 	mux.HandleFunc("/api/tasks/{id}/attachments/{attId}", taskHandler.UnlinkTaskAttachment)
 	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)
+	mux.HandleFunc("/api/tasks/{id}/comments/{commentId}/attachments", taskHandler.GetCommentAttachments)
 	mux.HandleFunc("/api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

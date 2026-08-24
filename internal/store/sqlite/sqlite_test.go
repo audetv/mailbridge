@@ -277,10 +277,10 @@ func TestAddAndGetTaskComments(t *testing.T) {
 	task := &store.Task{MessageID: "cmt-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
 	mustCreateTask(t, s, task)
 
-	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: task.ID, Author: "user@example.com", Body: "Comment 1", Direction: "in"}); err != nil {
+	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: task.ID, Author: "user@example.com", Body: "Comment 1", Direction: "in", Kind: "user_comment"}); err != nil {
 		t.Fatalf("AddTaskComment error: %v", err)
 	}
-	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: task.ID, Author: "support", Body: "Reply", Direction: "out"}); err != nil {
+	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: task.ID, Author: "support", Body: "Reply", Direction: "out", Kind: "user_comment"}); err != nil {
 		t.Fatalf("AddTaskComment error: %v", err)
 	}
 
@@ -290,6 +290,9 @@ func TestAddAndGetTaskComments(t *testing.T) {
 	}
 	if len(comments) != 2 {
 		t.Errorf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].Kind != "user_comment" {
+		t.Errorf("Kind = %s, want user_comment", comments[0].Kind)
 	}
 }
 

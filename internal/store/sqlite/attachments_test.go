@@ -93,3 +93,44 @@ func TestAttachmentLinks(t *testing.T) {
 		t.Errorf("expected 0 attachments after unlink, got %d", len(atts))
 	}
 }
+
+func TestGetAttachmentsByComment(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Задача
+	task := &store.Task{MessageID: "m-c", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Комментарий
+	comment := &store.TaskComment{TaskID: task.ID, Author: "user", Body: "Comment", Direction: "in", Kind: "user_comment"}
+	if err := s.AddTaskComment(ctx, comment); err != nil {
+		t.Fatalf("AddTaskComment error: %v", err)
+	}
+
+	// Вложение
+	att := &store.Attachment{Hash: "h-c", Filename: "f.png", ContentType: "image/png", Size: 10, StoragePath: "f.png"}
+	if err := s.CreateAttachment(ctx, att); err != nil {
+		t.Fatalf("CreateAttachment error: %v", err)
+	}
+
+	// Связь
+	if err := s.LinkAttachmentToComment(ctx, comment.ID, att.ID); err != nil {
+		t.Fatalf("LinkAttachmentToComment error: %v", err)
+	}
+
+	// Проверка
+	atts, err := s.GetAttachmentsByComment(ctx, comment.ID)
+	if err != nil {
+		t.Fatalf("GetAttachmentsByComment error: %v", err)
+	}
+	if len(atts) != 1 {
+		t.Errorf("expected 1 attachment, got %d", len(atts))
+	}
+	if atts[0].Filename != "f.png" {
+		t.Errorf("Filename = %s", atts[0].Filename)
+	}
+}

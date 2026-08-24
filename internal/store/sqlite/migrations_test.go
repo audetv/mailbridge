@@ -69,3 +69,17 @@ func TestMigrate_ThreadsColumns(t *testing.T) {
 		t.Errorf("Subject = %s", got.Subject)
 	}
 }
+
+func TestMigrate_TaskCommentsNewSchema(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+
+	// Проверяем что колонка kind существует
+	exists, err := s.ColumnExistsForTest(context.Background(), "task_comments", "kind")
+	if err != nil {
+		t.Fatalf("ColumnExists error: %v", err)
+	}
+	if !exists {
+		t.Error("column kind not found")
+	}
+}
