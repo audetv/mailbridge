@@ -54,7 +54,7 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
-	activeTasks, err := o.store.GetActiveTasksByThread(ctx, threadID)
+	activeTasks, err := o.store.GetTasksByThread(ctx, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active tasks: %w", err)
 	}

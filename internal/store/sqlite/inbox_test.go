@@ -34,3 +34,31 @@ func TestGetInboxItemsByThread(t *testing.T) {
 		t.Errorf("expected 3 items, got %d", len(items))
 	}
 }
+
+func TestGetTasksByThread(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		task := &store.Task{
+			MessageID: fmt.Sprintf("t-%d", i),
+			Subject:   fmt.Sprintf("Task %d", i),
+			BodyText:  "B",
+			FromEmail: "u@e.com",
+			Status:    "new",
+			ThreadID:  "thread-1",
+		}
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask error: %v", err)
+		}
+	}
+
+	tasks, err := s.GetTasksByThread(ctx, "thread-1")
+	if err != nil {
+		t.Fatalf("GetTasksByThread error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks, got %d", len(tasks))
+	}
+}

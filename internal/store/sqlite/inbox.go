@@ -28,3 +28,26 @@ func (s *Store) GetInboxItemsByThread(ctx context.Context, threadID string) ([]*
 	}
 	return items, rows.Err()
 }
+
+// GetTasksByThread возвращает все задачи цепочки.
+func (s *Store) GetTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
+	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		FROM tasks WHERE thread_id = ? ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tasks by thread: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*store.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}

@@ -184,11 +184,15 @@ type Store interface {
 	CreateInboxItem(ctx context.Context, item *InboxItem) error
 	GetInboxItemByID(ctx context.Context, id int64) (*InboxItem, error)
 	GetInboxItemBySourceID(ctx context.Context, source, sourceID string) (*InboxItem, error)
-	// GetInboxItemsByThread возвращает все входящие цепочки.
-	GetInboxItemsByThread(ctx context.Context, threadID string) ([]*InboxItem, error)
+
 	ListInboxItems(ctx context.Context, filter *InboxFilter) (*InboxListResult, error)
 	UpdateInboxItemStatus(ctx context.Context, id int64, status string) error
 	UpdateInboxItemAI(ctx context.Context, id int64, processed int, verdict, summary string) error
+
+	// GetInboxItemsByThread возвращает все входящие цепочки.
+	GetInboxItemsByThread(ctx context.Context, threadID string) ([]*InboxItem, error)
+	// GetTasksByThread возвращает все задачи цепочки.
+	GetTasksByThread(ctx context.Context, threadID string) ([]*Task, error)
 
 	// Task-Inbox связь
 	LinkTaskToInboxItem(ctx context.Context, taskID, inboxItemID int64, relation string) error
