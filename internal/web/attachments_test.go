@@ -124,3 +124,50 @@ func TestUnlinkTaskAttachment(t *testing.T) {
 		t.Errorf("expected 0 attachments after unlink, got %d", len(atts))
 	}
 }
+
+func TestGetCommentAttachments(t *testing.T) {
+	handler, st, cleanup := setupAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Задача
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "m-ca", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Комментарий
+	comment := &store.TaskComment{TaskID: 1, Author: "user", Body: "C", Direction: "in", Kind: "user_comment"}
+	if err := st.AddTaskComment(ctx, comment); err != nil {
+		t.Fatalf("AddTaskComment error: %v", err)
+	}
+
+	// Вложение
+	att := &store.Attachment{Hash: "h-ca", Filename: "c.png", ContentType: "image/png", Size: 10, StoragePath: "c.png"}
+	if err := st.CreateAttachment(ctx, att); err != nil {
+		t.Fatalf("CreateAttachment error: %v", err)
+	}
+
+	// Связь
+	if err := st.LinkAttachmentToComment(ctx, comment.ID, att.ID); err != nil {
+		t.Fatalf("LinkAttachmentToComment error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/1/comments/1/attachments", nil)
+	req.SetPathValue("id", "1")
+	req.SetPathValue("commentId", "1")
+	w := httptest.NewRecorder()
+
+	handler.GetCommentAttachments(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var atts []store.Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &atts); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(atts) != 1 {
+		t.Errorf("expected 1 attachment, got %d", len(atts))
+	}
+}

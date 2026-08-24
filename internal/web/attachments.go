@@ -160,3 +160,37 @@ func (h *TaskHandler) UnlinkTaskAttachment(w http.ResponseWriter, r *http.Reques
 		log.Printf("encode error: %v", err)
 	}
 }
+
+// GetCommentAttachments обрабатывает GET /api/tasks/{id}/comments/{commentId}/attachments
+func (h *TaskHandler) GetCommentAttachments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	commentIDStr := r.PathValue("commentId")
+	commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid comment id"}`, http.StatusBadRequest)
+		return
+	}
+
+	atts, err := h.store.GetAttachmentsByComment(r.Context(), commentID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("encode error: %v", err)
+		}
+		return
+	}
+
+	if atts == nil {
+		atts = []*store.Attachment{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(atts); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
