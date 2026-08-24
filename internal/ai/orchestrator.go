@@ -379,6 +379,12 @@ func (o *Orchestrator) parseResponse(response string) (*LLMResponse, error) {
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
+	// Удаляем BOM и невидимые символы
+	response = strings.TrimPrefix(response, "\ufeff")
+	response = strings.ReplaceAll(response, "\u00c2\u00a0", " ")
+	response = strings.ReplaceAll(response, "\u00a0", " ")
+	response = strings.ReplaceAll(response, "\u200b", "") // zero-width space
+
 	var result LLMResponse
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
