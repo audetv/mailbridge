@@ -87,12 +87,15 @@ type TaskWithUnread struct {
 
 // TaskComment представляет комментарий к задаче.
 type TaskComment struct {
-	ID        int64     `json:"id"`
-	TaskID    int64     `json:"task_id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
-	Direction string    `json:"direction"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	TaskID      int64     `json:"task_id"`
+	Author      string    `json:"author"`
+	Body        string    `json:"body"`
+	Direction   string    `json:"direction"`
+	Kind        string    `json:"kind"`
+	InboxItemID *int64    `json:"inbox_item_id,omitempty"`
+	VerdictJSON string    `json:"verdict_json,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // TaskAttachment представляет вложение задачи.

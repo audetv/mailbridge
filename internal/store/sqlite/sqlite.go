@@ -394,8 +394,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, updates map[string]int
 
 // AddTaskComment добавляет комментарий к задаче.
 func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) error {
-	query := `INSERT INTO task_comments (task_id, author, body, direction) VALUES (?, ?, ?, ?)`
-	result, err := s.db.ExecContext(ctx, query, comment.TaskID, comment.Author, comment.Body, comment.Direction)
+	query := `INSERT INTO task_comments (task_id, author, body, direction, kind, inbox_item_id, verdict_json) 
+		VALUES (?, ?, ?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, query,
+		comment.TaskID, comment.Author, comment.Body, comment.Direction,
+		comment.Kind, comment.InboxItemID, comment.VerdictJSON)
 	if err != nil {
 		return fmt.Errorf("failed to add comment: %w", err)
 	}
@@ -408,7 +411,7 @@ func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) 
 
 // GetTaskComments возвращает комментарии к задаче.
 func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
-	query := `SELECT id, task_id, author, body, direction, created_at
+	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, taskID)
@@ -420,8 +423,18 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 	var comments []*store.TaskComment
 	for rows.Next() {
 		c := &store.TaskComment{}
-		if err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction, &c.CreatedAt); err != nil {
+		var inboxItemID sql.NullInt64
+		var verdictJSON sql.NullString
+		err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction,
+			&c.Kind, &inboxItemID, &verdictJSON, &c.CreatedAt)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		if inboxItemID.Valid {
+			c.InboxItemID = &inboxItemID.Int64
+		}
+		if verdictJSON.Valid {
+			c.VerdictJSON = verdictJSON.String
 		}
 		comments = append(comments, c)
 	}
