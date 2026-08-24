@@ -122,22 +122,37 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 		}
 	}
 
+	// Пользовательский комментарий
 	if verdict.Updates.AddComment != "" {
 		comment := &store.TaskComment{
-			TaskID:    int64(taskID),
-			Author:    "ai",
-			Body:      verdict.Updates.AddComment,
-			Direction: "in",
+			TaskID:      int64(taskID),
+			Author:      "user",
+			Body:        verdict.Updates.AddComment,
+			Direction:   "in",
+			Kind:        "user_comment",
+			InboxItemID: int64Ptr(inboxItemID),
 		}
 		if err := o.store.AddTaskComment(ctx, comment); err != nil {
 			return err
 		}
-		if err := o.store.ResetTaskReads(ctx, int64(taskID)); err != nil {
-			log.Printf("[AI] failed to reset task reads: %v", err)
-		}
 	}
 
-	// Связываем задачу с элементом ленты
+	// AI-вердикт как комментарий
+	verdictJSON := verdictToJSON(verdict)
+	aiComment := &store.TaskComment{
+		TaskID:      int64(taskID),
+		Author:      "ai",
+		Body:        fmt.Sprintf("Задача обновлена: %s", verdict.Updates.AddComment),
+		Direction:   "in",
+		Kind:        "ai_verdict",
+		InboxItemID: int64Ptr(inboxItemID),
+		VerdictJSON: verdictJSON,
+	}
+	if err := o.store.AddTaskComment(ctx, aiComment); err != nil {
+		return err
+	}
+
+	// Связь с входящим
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "updated_by"); err != nil {
 			log.Printf("[AI] failed to link task to inbox: %v", err)
@@ -147,30 +162,53 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 	return nil
 }
 
+func int64Ptr(v int64) *int64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
+}
+
 // completeTaskFromVerdict завершает задачу.
 func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
 	updates := map[string]interface{}{
-		"status": string(store.StatusCompleted),
+		"status": "completed",
 	}
 	if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
 		return err
 	}
 
+	// Пользовательский комментарий
 	if verdict.Comment != "" {
 		comment := &store.TaskComment{
-			TaskID:    int64(taskID),
-			Author:    "ai",
-			Body:      verdict.Comment,
-			Direction: "in",
+			TaskID:      int64(taskID),
+			Author:      "user",
+			Body:        verdict.Comment,
+			Direction:   "in",
+			Kind:        "user_comment",
+			InboxItemID: int64Ptr(inboxItemID),
 		}
 		if err := o.store.AddTaskComment(ctx, comment); err != nil {
 			return err
 		}
-		if err := o.store.ResetTaskReads(ctx, int64(taskID)); err != nil {
-			log.Printf("[AI] failed to reset task reads: %v", err)
-		}
 	}
 
+	// AI-вердикт
+	verdictJSON := verdictToJSON(verdict)
+	aiComment := &store.TaskComment{
+		TaskID:      int64(taskID),
+		Author:      "ai",
+		Body:        "Задача завершена",
+		Direction:   "in",
+		Kind:        "ai_verdict",
+		InboxItemID: int64Ptr(inboxItemID),
+		VerdictJSON: verdictJSON,
+	}
+	if err := o.store.AddTaskComment(ctx, aiComment); err != nil {
+		return err
+	}
+
+	// Связь с входящим
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "completed_by"); err != nil {
 			log.Printf("[AI] failed to link task to inbox: %v", err)
