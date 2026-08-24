@@ -279,10 +279,21 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	}
 
 	if len(activeTasks) > 0 {
-		sb.WriteString("=== АКТИВНЫЕ ЗАДАЧИ ===\n")
+		sb.WriteString("=== ЗАДАЧИ ЦЕПОЧКИ ===\n")
 		for _, task := range activeTasks {
 			fmt.Fprintf(&sb, "- Task #%d: %s (статус: %s, приоритет: %s)\n",
 				task.ID, task.Subject, task.Status, task.Priority)
+
+			// Краткое описание последнего AI-вердикта
+			if task.AIVerdict != "" {
+				var verdict Verdict
+				if err := json.Unmarshal([]byte(task.AIVerdict), &verdict); err == nil {
+					if verdict.Task != nil && verdict.Task.Description != "" {
+						desc := verdict.Task.Description
+						fmt.Fprintf(&sb, "  Описание: %s\n", desc)
+					}
+				}
+			}
 		}
 		sb.WriteString("\n")
 	}

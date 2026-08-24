@@ -28,8 +28,8 @@ func TestBuildPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "=== РЕЗЮМЕ ЦЕПОЧКИ ===") {
 		t.Error("prompt does not contain summary section")
 	}
-	if !strings.Contains(prompt, "=== АКТИВНЫЕ ЗАДАЧИ ===") {
-		t.Error("prompt does not contain active tasks section")
+	if !strings.Contains(prompt, "=== ЗАДАЧИ ЦЕПОЧКИ ===") {
+		t.Error("prompt does not contain tasks section")
 	}
 	if !strings.Contains(prompt, "=== НОВОЕ ПИСЬМО ===") {
 		t.Error("prompt does not contain new email section")
