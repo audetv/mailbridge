@@ -48,7 +48,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_comments_inbox_item ON task_comments(inbox_item_id)`,
 
 		// Таблица вложений
 		`CREATE TABLE IF NOT EXISTS task_attachments (
