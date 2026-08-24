@@ -13,6 +13,7 @@ import (
 // ExtractedEmail содержит результат извлечения данных из письма.
 type ExtractedEmail struct {
 	MessageID   string
+	ThreadID    string
 	From        string
 	To          string
 	Cc          string
