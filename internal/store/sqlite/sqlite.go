@@ -328,6 +328,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
+		 AND tc.kind = 'user_comment'
 		 AND tc.created_at > COALESCE(
 		   (SELECT read_at FROM task_reads WHERE task_id = t.id AND username = ?1), 
 		   '1970-01-01')
