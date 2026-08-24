@@ -180,6 +180,9 @@ type Store interface {
 	GetAttachmentsByInbox(ctx context.Context, inboxItemID int64) ([]*Attachment, error)
 	GetAttachmentsByTask(ctx context.Context, taskID int64) ([]*Attachment, error)
 
+	// GetAttachmentsByComment возвращает вложения комментария.
+	GetAttachmentsByComment(ctx context.Context, commentID int64) ([]*Attachment, error)
+
 	// Inbox Items
 	CreateInboxItem(ctx context.Context, item *InboxItem) error
 	GetInboxItemByID(ctx context.Context, id int64) (*InboxItem, error)

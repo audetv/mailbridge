@@ -121,3 +121,28 @@ func (s *Store) LinkAttachmentToComment(ctx context.Context, commentID, attachme
 	_, err := s.db.ExecContext(ctx, query, commentID, attachmentID)
 	return err
 }
+
+// GetAttachmentsByComment возвращает вложения комментария.
+func (s *Store) GetAttachmentsByComment(ctx context.Context, commentID int64) ([]*store.Attachment, error) {
+	query := `SELECT a.id, a.hash, a.filename, a.content_type, a.size, a.storage_path, a.created_at
+		FROM attachments a
+		JOIN comment_attachments ca ON ca.attachment_id = a.id
+		WHERE ca.comment_id = ?
+		ORDER BY a.created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, commentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get comment attachments: %w", err)
+	}
+	defer rows.Close()
+
+	var atts []*store.Attachment
+	for rows.Next() {
+		att := &store.Attachment{}
+		if err := rows.Scan(&att.ID, &att.Hash, &att.Filename, &att.ContentType, &att.Size, &att.StoragePath, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		atts = append(atts, att)
+	}
+	return atts, rows.Err()
+}
