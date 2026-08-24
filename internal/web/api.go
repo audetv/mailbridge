@@ -29,7 +29,12 @@ func (h *TaskHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
-	perPage, _ := strconv.Atoi(q.Get("per_page"))
+
+	perPageStr := q.Get("perPage")
+	if perPageStr == "" {
+		perPageStr = q.Get("per_page")
+	}
+	perPage, _ := strconv.Atoi(perPageStr)
 
 	filter := &store.InboxFilter{
 		Status:  q.Get("status"),
