@@ -59,6 +59,12 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		return nil, fmt.Errorf("failed to get active tasks: %w", err)
 	}
 
+	// Загружаем все входящие цепочки для контекста
+	threadInboxItems, err := o.store.GetInboxItemsByThread(ctx, threadID)
+	if err != nil {
+		threadInboxItems = []*store.InboxItem{}
+	}
+
 	// Обрабатываем вложения
 	var images []string
 	var textAttachments []string
@@ -93,7 +99,7 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
-	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
+	prompt := o.buildPromptWithThreadContext(summary, activeTasks, threadInboxItems, email, textAttachments)
 
 	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
 	if len(images) > 0 {
@@ -195,6 +201,37 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 	sb.WriteString("\n```\n")
 
 	_ = os.WriteFile(filename, []byte(sb.String()), 0o644)
+}
+
+// buildPromptWithThreadContext формирует промпт с полным контекстом цепочки.
+func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks []*store.Task, threadItems []*store.InboxItem, email *extractor.ExtractedEmail, textAttachments []string) string {
+	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
+
+	// Добавляем историю входящих цепочки
+	if len(threadItems) > 0 {
+		var sb strings.Builder
+		sb.WriteString("=== ИСТОРИЯ ЦЕПОЧКИ ===\n")
+		for _, item := range threadItems {
+			// Краткое описание каждого входящего (не весь текст)
+			preview := item.BodyText
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			fmt.Fprintf(&sb, "- [%s] %s: %s\n", item.ReceivedAt.Format("02.01 15:04"), item.FromContact, preview)
+		}
+		sb.WriteString("\n")
+
+		// Вставляем перед JSON-инструкцией
+		insertIdx := strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+		if insertIdx == -1 {
+			insertIdx = len(prompt)
+		}
+
+		result := prompt[:insertIdx] + sb.String() + prompt[insertIdx:]
+		return result
+	}
+
+	return prompt
 }
 
 // buildPromptWithAttachments формирует промпт с текстовыми вложениями.
