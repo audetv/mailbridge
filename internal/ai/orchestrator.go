@@ -205,9 +205,10 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 
 // buildPromptWithThreadContext формирует промпт с полным контекстом цепочки.
 func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks []*store.Task, threadItems []*store.InboxItem, email *extractor.ExtractedEmail, textAttachments []string) string {
+	// Строим промпт с вложениями, но историю вставим раньше
 	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
 
-	// Добавляем историю входящих цепочки
+	// Добавляем историю входящих цепочки ПЕРЕД секцией вложений
 	if len(threadItems) > 0 {
 		var sb strings.Builder
 		sb.WriteString("=== ИСТОРИЯ ЦЕПОЧКИ ===\n")
@@ -221,10 +222,14 @@ func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks 
 		}
 		sb.WriteString("\n")
 
-		// Вставляем перед JSON-инструкцией
-		insertIdx := strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+		// Вставляем историю перед "=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ==="
+		insertIdx := strings.Index(prompt, "=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ===")
 		if insertIdx == -1 {
-			insertIdx = len(prompt)
+			// Если вложений нет — вставляем перед JSON-инструкцией
+			insertIdx = strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+			if insertIdx == -1 {
+				insertIdx = len(prompt)
+			}
 		}
 
 		result := prompt[:insertIdx] + sb.String() + prompt[insertIdx:]

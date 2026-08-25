@@ -14,10 +14,13 @@ func (p *Preprocessor) processPDF(path string) (*ProcessedAttachment, error) {
 	// Пробуем pdftotext
 	text, err := exec.Command("pdftotext", path, "-").Output()
 	if err == nil && len(text) > 50 {
-		return &ProcessedAttachment{Type: "text", Content: string(text)}, nil
+		return &ProcessedAttachment{
+			Type:    "text",
+			Content: truncateText(string(text)),
+		}, nil
 	}
 
-	// Если текста мало — конвертируем в PNG через pdftoppm
+	// Если текста мало (скан) — конвертируем в PNG через pdftoppm
 	tmpDir, err := os.MkdirTemp("", "pdf-pages-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
@@ -36,7 +39,13 @@ func (p *Preprocessor) processPDF(path string) (*ProcessedAttachment, error) {
 		return nil, fmt.Errorf("no pages generated")
 	}
 
-	// Кодируем все страницы в Base64 (объединяем через разделитель)
+	// Ограничиваем количество страниц (первые 5)
+	const maxPages = 5
+	if len(pages) > maxPages {
+		pages = pages[:maxPages]
+	}
+
+	// Кодируем страницы в Base64
 	var base64Pages []string
 	for _, page := range pages {
 		data, err := os.ReadFile(page)
@@ -48,6 +57,6 @@ func (p *Preprocessor) processPDF(path string) (*ProcessedAttachment, error) {
 
 	return &ProcessedAttachment{
 		Type:    "image",
-		Content: strings.Join(base64Pages, ","), // разделитель для нескольких страниц
+		Content: strings.Join(base64Pages, ","),
 	}, nil
 }
