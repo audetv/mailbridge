@@ -189,6 +189,11 @@ func (o *Orchestrator) BuildPromptWithAttachmentsForTest(summary string, activeT
 	return o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
 }
 
+// BuildPromptForTest — экспортируемая обёртка для тестов.
+func (o *Orchestrator) BuildPromptForTest(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail) string {
+	return o.buildPromptWithAttachments(summary, activeTasks, email, nil)
+}
+
 // BuildPrompt — экспортируемая обёртка для тестирования.
 func (o *Orchestrator) BuildPrompt(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail) string {
 	return o.buildPrompt(summary, activeTasks, email)
