@@ -10,8 +10,12 @@
         <span class="task-count">Задачи: {{ activeCount }}</span>
         <span class="inbox-count">Входящие: {{ inboxStore.unreadCount }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
-        <Button :icon="themeStore.isDark ? 'pi pi-sun' : 'pi pi-moon'" text @click="themeStore.toggleTheme()"
-          title="Переключить тему" />
+        <Button
+          :icon="themeStore.isDark ? 'pi pi-sun' : 'pi pi-moon'"
+          text
+          @click="themeStore.toggleTheme()"
+          title="Переключить тему"
+        />
       </div>
     </header>
     <main class="dashboard-content">
@@ -115,32 +119,35 @@ function onTabSelect(key) {
   }
 }
 
-watch(() => wsStore.events.length, () => {
-  const events = wsStore.events
-  const latest = events[events.length - 1]
-  if (!latest) return
+watch(
+  () => wsStore.events.length,
+  () => {
+    const events = wsStore.events
+    const latest = events[events.length - 1]
+    if (!latest) return
 
-  switch (latest.type) {
-    case 'task_created':
-      store.fetchTasks()
-      fetchActiveCount()
-      toast.add({ severity: 'info', summary: latest.message, life: 5000 })
-      break
-    case 'task_updated':
-      store.fetchTasks()
-      fetchActiveCount()
-      toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
-      break
-    case 'inbox_created':
-      inboxStore.fetchItems()
-      inboxStore.fetchUnreadCount()
-      toast.add({ severity: 'info', summary: latest.message, life: 5000 })
-      break
-    case 'connected':
-      toast.add({ severity: 'success', summary: latest.message, life: 2000 })
-      break
+    switch (latest.type) {
+      case 'task_created':
+        store.fetchTasks()
+        fetchActiveCount()
+        toast.add({ severity: 'info', summary: latest.message, life: 5000 })
+        break
+      case 'task_updated':
+        store.fetchTasks()
+        fetchActiveCount()
+        toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
+        break
+      case 'inbox_created':
+        inboxStore.fetchItems()
+        inboxStore.fetchUnreadCount()
+        toast.add({ severity: 'info', summary: latest.message, life: 5000 })
+        break
+      case 'connected':
+        toast.add({ severity: 'success', summary: latest.message, life: 2000 })
+        break
+    }
   }
-})
+)
 
 function handleLogout() {
   wsStore.disconnect()
@@ -159,8 +166,8 @@ function handleLogout() {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 2rem;
-  background: var(--p-content-background);
-  border-bottom: 1px solid var(--p-surface-200);
+  background: var(--mb-surface);
+  border-bottom: 1px solid var(--mb-border);
 }
 
 .dashboard-header h1 {
@@ -175,16 +182,16 @@ function handleLogout() {
 
 .connection-status {
   font-size: 0.85rem;
-  color: var(--p-text-muted-color);
+  color: var(--mb-text-muted);
 }
 
 .connection-status.connected {
-  color: var(--p-green-500);
+  color: var(--mb-primary);
 }
 
 .task-count,
 .inbox-count {
-  color: var(--p-text-muted-color);
+  color: var(--mb-text-muted);
   font-size: 1rem;
 }
 
