@@ -99,6 +99,23 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
+	// Ограничиваем суммарный размер текстовых вложений
+	const maxTotalAttachmentChars = 50000
+	totalChars := 0
+	var limitedAttachments []string
+	for _, ta := range textAttachments {
+		if totalChars+len(ta) > maxTotalAttachmentChars {
+			remaining := maxTotalAttachmentChars - totalChars
+			if remaining > 200 {
+				limitedAttachments = append(limitedAttachments, ta[:remaining]+"\n... [обрезано]")
+			}
+			break
+		}
+		limitedAttachments = append(limitedAttachments, ta)
+		totalChars += len(ta)
+	}
+	textAttachments = limitedAttachments
+
 	prompt := o.buildPromptWithThreadContext(summary, activeTasks, threadInboxItems, email, textAttachments)
 
 	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
