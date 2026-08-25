@@ -10,5 +10,6 @@ func extractDocxText(path string) (string, error) {
 	}
 	defer doc.Close()
 
-	return doc.Editable().GetContent(), nil
+	text := doc.Editable().GetContent()
+	return truncateText(text), nil
 }

@@ -1,6 +1,7 @@
 package preprocessor
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -15,16 +16,28 @@ func extractXlsxText(path string) (string, error) {
 	defer f.Close()
 
 	var text strings.Builder
-	for _, sheet := range f.GetSheetList() {
+	sheets := f.GetSheetList()
+	if len(sheets) > MaxXLSXSheets {
+		sheets = sheets[:MaxXLSXSheets]
+	}
+
+	for _, sheet := range sheets {
 		text.WriteString("=== Лист: " + sheet + " ===\n")
 		rows, err := f.GetRows(sheet)
 		if err != nil {
 			continue
 		}
+
+		if len(rows) > MaxXLSXRows {
+			fmt.Fprintf(&text, "[Показаны первые %d из %d строк]\n", MaxXLSXRows, len(rows))
+			rows = rows[:MaxXLSXRows]
+		}
+
 		for _, row := range rows {
 			text.WriteString(strings.Join(row, " | "))
 			text.WriteString("\n")
 		}
 	}
-	return text.String(), nil
+
+	return truncateText(text.String()), nil
 }

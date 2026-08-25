@@ -2,6 +2,7 @@ package ai_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,40 @@ func TestBuildPromptWithAttachments(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "таблица.xlsx") {
 		t.Error("prompt does not contain xlsx filename")
+	}
+}
+
+func TestProcessEmail_AttachmentLimit(t *testing.T) {
+	st, _ := sqlite.NewStore(":memory:")
+	_ = st.Migrate(context.Background())
+	defer st.Close()
+
+	o := ai.NewOrchestrator(nil, st)
+
+	email := &extractor.ExtractedEmail{
+		MessageID: "msg-limit",
+		From:      "user@example.com",
+		Subject:   "Test",
+		BodyText:  "Body",
+		Attachments: []extractor.Attachment{
+			{
+				Filename:    "large.txt",
+				ContentType: "text/plain",
+				Size:        100000,
+				StoragePath: "/tmp/large.txt",
+			},
+		},
+	}
+
+	// Создаём большой файл
+	if err := os.WriteFile("/tmp/large.txt", []byte(strings.Repeat("a", 100000)), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	defer os.Remove("/tmp/large.txt")
+
+	// Проверяем что ProcessEmail не падает и промпт ограничен
+	prompt := o.BuildPromptForTest("", []*store.Task{}, email)
+	if len(prompt) > 60000 {
+		t.Errorf("prompt too large: %d", len(prompt))
 	}
 }

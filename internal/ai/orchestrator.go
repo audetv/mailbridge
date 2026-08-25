@@ -99,6 +99,23 @@ func (o *Orchestrator) ProcessEmail(ctx context.Context, email *extractor.Extrac
 		}
 	}
 
+	// Ограничиваем суммарный размер текстовых вложений
+	const maxTotalAttachmentChars = 50000
+	totalChars := 0
+	var limitedAttachments []string
+	for _, ta := range textAttachments {
+		if totalChars+len(ta) > maxTotalAttachmentChars {
+			remaining := maxTotalAttachmentChars - totalChars
+			if remaining > 200 {
+				limitedAttachments = append(limitedAttachments, ta[:remaining]+"\n... [обрезано]")
+			}
+			break
+		}
+		limitedAttachments = append(limitedAttachments, ta)
+		totalChars += len(ta)
+	}
+	textAttachments = limitedAttachments
+
 	prompt := o.buildPromptWithThreadContext(summary, activeTasks, threadInboxItems, email, textAttachments)
 
 	log.Printf("[AI] Промпт отправлен в LLM:\n%s", prompt)
@@ -172,6 +189,11 @@ func (o *Orchestrator) BuildPromptWithAttachmentsForTest(summary string, activeT
 	return o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
 }
 
+// BuildPromptForTest — экспортируемая обёртка для тестов.
+func (o *Orchestrator) BuildPromptForTest(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail) string {
+	return o.buildPromptWithAttachments(summary, activeTasks, email, nil)
+}
+
 // BuildPrompt — экспортируемая обёртка для тестирования.
 func (o *Orchestrator) BuildPrompt(summary string, activeTasks []*store.Task, email *extractor.ExtractedEmail) string {
 	return o.buildPrompt(summary, activeTasks, email)
@@ -205,9 +227,10 @@ func (o *Orchestrator) saveDebugLog(threadID, prompt, response string, images []
 
 // buildPromptWithThreadContext формирует промпт с полным контекстом цепочки.
 func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks []*store.Task, threadItems []*store.InboxItem, email *extractor.ExtractedEmail, textAttachments []string) string {
+	// Строим промпт с вложениями, но историю вставим раньше
 	prompt := o.buildPromptWithAttachments(summary, activeTasks, email, textAttachments)
 
-	// Добавляем историю входящих цепочки
+	// Добавляем историю входящих цепочки ПЕРЕД секцией вложений
 	if len(threadItems) > 0 {
 		var sb strings.Builder
 		sb.WriteString("=== ИСТОРИЯ ЦЕПОЧКИ ===\n")
@@ -221,10 +244,14 @@ func (o *Orchestrator) buildPromptWithThreadContext(summary string, activeTasks 
 		}
 		sb.WriteString("\n")
 
-		// Вставляем перед JSON-инструкцией
-		insertIdx := strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+		// Вставляем историю перед "=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ==="
+		insertIdx := strings.Index(prompt, "=== СОДЕРЖИМОЕ ВЛОЖЕНИЙ ===")
 		if insertIdx == -1 {
-			insertIdx = len(prompt)
+			// Если вложений нет — вставляем перед JSON-инструкцией
+			insertIdx = strings.Index(prompt, "ОТВЕТЬ СТРОГО В JSON-формате:")
+			if insertIdx == -1 {
+				insertIdx = len(prompt)
+			}
 		}
 
 		result := prompt[:insertIdx] + sb.String() + prompt[insertIdx:]

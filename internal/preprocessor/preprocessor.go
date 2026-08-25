@@ -17,6 +17,26 @@ func NewPreprocessor() *Preprocessor {
 	return &Preprocessor{}
 }
 
+const (
+	// MaxTextAttachmentChars — максимальный размер текстового вложения.
+	MaxTextAttachmentChars = 10000
+
+	// MaxXLSXRows — максимальное количество строк на лист.
+	MaxXLSXRows = 500
+
+	// MaxXLSXSheets — максимальное количество листов.
+	MaxXLSXSheets = 20
+)
+
+// truncateText обрезает текст до лимита MaxTextAttachmentChars с пометкой.
+func truncateText(text string) string {
+	limit := MaxTextAttachmentChars
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + fmt.Sprintf("\n... [обрезано, всего %d символов]", len(text))
+}
+
 // ProcessAttachment обрабатывает один файл и возвращает текстовое представление
 // или Base64 для изображений. originalFilename используется для определения типа.
 func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (*ProcessedAttachment, error) {
@@ -34,7 +54,7 @@ func (p *Preprocessor) ProcessAttachment(path string, originalFilename string) (
 		}
 		return &ProcessedAttachment{
 			Type:    "text",
-			Content: string(data),
+			Content: truncateText(string(data)),
 		}, nil
 
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
