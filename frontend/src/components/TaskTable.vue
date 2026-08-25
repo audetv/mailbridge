@@ -1,6 +1,16 @@
 <template>
-  <DataTable :value="store.tasks" :loading="store.loading" paginator :rows="50" :totalRecords="store.total"
-    @page="onPage" lazy stripedRows :rowClass="rowClass" @row-click="onRowClick">
+  <DataTable
+    :value="store.tasks"
+    :loading="store.loading"
+    paginator
+    :rows="50"
+    :totalRecords="store.total"
+    @page="onPage"
+    lazy
+    stripedRows
+    :rowClass="rowClass"
+    @row-click="onRowClick"
+  >
     <Column field="id" header="ID" style="width: 80px" />
     <Column field="created_at" header="Дата" style="width: 150px">
       <template #body="{ data }">
@@ -11,8 +21,13 @@
     <Column field="subject" header="Тема">
       <template #body="{ data }">
         <div class="subject-cell">
-          <Badge v-if="data.unread_comments > 0" :value="data.unread_comments" severity="info" size="small"
-            class="unread-badge" />
+          <Badge
+            v-if="data.unread_comments > 0"
+            :value="data.unread_comments"
+            severity="info"
+            size="small"
+            class="unread-badge"
+          />
           <span>{{ data.subject }}</span>
         </div>
       </template>
@@ -38,7 +53,6 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import DataTable from 'primevue/datatable'
@@ -50,14 +64,14 @@ const store = useTasksStore()
 const router = useRouter()
 const route = useRoute()
 
-// onMounted(() => {
-//   store.fetchTasks()
-// })
-
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
-  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return (
+    d.toLocaleDateString('ru-RU') +
+    ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  )
 }
 
 function statusLabel(status) {
@@ -102,10 +116,10 @@ function onPage(event) {
 
 :deep(.task-unread) {
   font-weight: 600;
-  background: var(--p-primary-50) !important;
+  background: var(--mb-primary-soft) !important;
 }
 
 :deep(.task-unread td:first-child) {
-  border-left: 3px solid var(--p-primary-500);
+  border-left: 3px solid var(--mb-primary);
 }
 </style>

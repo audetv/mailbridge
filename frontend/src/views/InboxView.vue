@@ -2,18 +2,38 @@
   <div class="inbox-view">
     <div class="inbox-header">
       <h2>Лента входящих</h2>
-      <Select v-model="statusFilter" :options="statusOptions" optionLabel="label" optionValue="value"
-        placeholder="Все" @change="onFilterChange" showClear class="status-filter" />
+      <Select
+        v-model="statusFilter"
+        :options="statusOptions"
+        optionLabel="label"
+        optionValue="value"
+        placeholder="Все"
+        @change="onFilterChange"
+        showClear
+        class="status-filter"
+      />
     </div>
-    <DataTable :value="store.items" :loading="store.loading" paginator :rows="20" :totalRecords="store.total"
-      @page="onPage" lazy stripedRows @row-click="openItem" class="inbox-table">
+    <DataTable
+      :value="store.items"
+      :loading="store.loading"
+      paginator
+      :rows="20"
+      :totalRecords="store.total"
+      @page="onPage"
+      lazy
+      stripedRows
+      @row-click="openItem"
+      class="inbox-table"
+    >
       <Column field="received_at" header="Дата" style="width: 140px">
         <template #body="{ data }">{{ formatDate(data.received_at) }}</template>
       </Column>
       <Column field="from_contact" header="От кого" style="width: 200px">
         <template #body="{ data }">
           <div class="from-cell">
-            <div :class="{ 'unread-text': data.status === 'unread' }">{{ data.from_name || data.from_contact }}</div>
+            <div :class="{ 'unread-text': data.status === 'unread' }">
+              {{ data.from_name || data.from_contact }}
+            </div>
             <div class="from-email">{{ data.from_contact }}</div>
           </div>
         </template>
@@ -84,7 +104,11 @@ function onPage(event) {
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
-  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return (
+    d.toLocaleDateString('ru-RU') +
+    ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  )
 }
 
 function openItem(event) {
@@ -150,6 +174,6 @@ async function createTask(item) {
 
 .from-email {
   font-size: 0.8rem;
-  color: var(--p-text-muted-color);
+  color: var(--mb-text-muted);
 }
 </style>

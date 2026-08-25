@@ -1,7 +1,12 @@
 <template>
   <div class="comment-list">
     <div v-if="comments.length === 0" class="empty">Нет комментариев</div>
-    <div v-for="comment in comments" :key="comment.id" class="comment" :class="[comment.direction, comment.kind]">
+    <div
+      v-for="comment in comments"
+      :key="comment.id"
+      class="comment"
+      :class="[comment.direction, comment.kind]"
+    >
       <div class="comment-header">
         <span class="author">{{ comment.author }}</span>
         <span class="date">{{ formatDate(comment.created_at) }}</span>
@@ -12,7 +17,10 @@
       <div v-if="commentAttachments[comment.id]?.length > 0" class="comment-attachments">
         <div v-for="att in commentAttachments[comment.id]" :key="att.id" class="comment-attachment-item">
           <i class="pi pi-paperclip" />
-          <a :href="`/api/attachments/${att.storage_path}/${encodeURIComponent(att.filename)}`" target="_blank">
+          <a
+            :href="`/api/attachments/${att.storage_path}/${encodeURIComponent(att.filename)}`"
+            target="_blank"
+          >
             {{ att.filename }}
           </a>
         </div>
@@ -22,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import apiClient from '@/api/client'
 
@@ -42,18 +50,26 @@ async function loadAttachments(commentId) {
   }
 }
 
-watch(() => props.comments, (newComments) => {
-  for (const comment of newComments) {
-    if (!commentAttachments.value[comment.id]) {
-      loadAttachments(comment.id)
+watch(
+  () => props.comments,
+  (newComments) => {
+    for (const comment of newComments) {
+      if (!commentAttachments.value[comment.id]) {
+        loadAttachments(comment.id)
+      }
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
-  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return (
+    d.toLocaleDateString('ru-RU') +
+    ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  )
 }
 </script>
 
@@ -65,7 +81,7 @@ function formatDate(dateStr) {
 }
 
 .empty {
-  color: var(--p-text-muted-color);
+  color: var(--mb-text-muted);
   text-align: center;
   padding: 2rem;
 }
@@ -76,17 +92,17 @@ function formatDate(dateStr) {
 }
 
 .comment.in {
-  /* background: var(--p-surface-100); */
+  /* background: var(--mb-surface-hover); */
 }
 
 .comment.out {
-  background: var(--p-primary-50);
+  background: var(--mb-primary-soft);
   margin-left: 1rem;
 }
 
 .comment.ai_verdict {
-  /* background: var(--p-primary-100); */
-  border-left: 3px solid var(--p-primary-500);
+  /* background: var(--mb-primary-softer); */
+  border-left: 3px solid var(--mb-primary);
 }
 
 .comment-header {
@@ -102,7 +118,7 @@ function formatDate(dateStr) {
 
 .date {
   font-size: 0.9rem;
-  color: var(--p-text-muted-color);
+  color: var(--mb-text-muted);
 }
 
 .comment-body {
@@ -126,6 +142,6 @@ function formatDate(dateStr) {
 
 .comment-attachment-item a {
   text-decoration: none;
-  color: var(--p-primary-color);
+  color: var(--mb-primary);
 }
 </style>

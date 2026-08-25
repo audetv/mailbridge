@@ -1,0 +1,66 @@
+/*
+  Mailbridge — base styles + theme tokens.
+
+  PrimeVue/Aura (mode: 'class', .dark) resolves its own semantic tokens
+  correctly in both schemes (verified in browser):
+    light: page white, cards white, palettes from Tailwind "slate"
+    dark:  cards = zinc.900 (#18181b), hover = zinc.800, text = zinc.50
+  i.e. Aura pairs light->slate / dark->zinc (neutral, no blue tint).
+
+  Components in src/ use our own small token layer (--mb-*) so the
+  hand-written <style scoped> blocks stay theme-aware without depending on
+  PrimeVue internal variable names. IMPORTANT: the values below must match
+  the palette Aura actually resolves to (light: slate-*; dark: zinc-*),
+  otherwise the page background visibly clashes with themed components
+  (this was the "dark theme looks blue" bug: we used slate #0f172a/#1e293b
+  in dark while Aura's cards resolve to neutral zinc).
+*/
+
+:root {
+  color-scheme: light;
+  --mb-bg: #f8fafc; /* slate-50  */
+  --mb-surface: #ffffff; /* white     */
+  --mb-surface-hover: #f1f5f9; /* slate-100 */
+  --mb-border: #e2e8f0; /* slate-200 */
+  --mb-text: #334155; /* slate-700 */
+  --mb-text-muted: #64748b; /* slate-500 */
+  --mb-primary: #10b981; /* emerald-500 (Aura primary) */
+  --mb-primary-soft: #ecfdf5; /* emerald-50 */
+  --mb-primary-softer: #d1fae5; /* emerald-100 */
+}
+
+.dark {
+  color-scheme: dark;
+  --mb-bg: #09090b; /* zinc-950 — page background, matches Aura dark */
+  --mb-surface: #18181b; /* zinc-900 — cards content background */
+  --mb-surface-hover: #27272a; /* zinc-800 */
+  --mb-border: #3f3f46; /* zinc-700 */
+  --mb-text: #fafafa; /* zinc-50  */
+  --mb-text-muted: #a1a1aa; /* zinc-400 */
+  --mb-primary: #34d399; /* emerald-400 (Aura dark primary) */
+  --mb-primary-soft: color-mix(in srgb, #34d399 16%, transparent);
+  --mb-primary-softer: color-mix(in srgb, #34d399 24%, transparent);
+}
+
+html,
+body {
+  min-height: 100vh;
+  margin: 0;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background: var(--mb-bg);
+  color: var(--mb-text);
+  font-size: 16px;
+  line-height: 1.6;
+}

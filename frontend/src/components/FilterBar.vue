@@ -1,7 +1,15 @@
 <template>
   <div class="filter-bar">
     <InputText v-model="search" placeholder="Поиск..." @input="onSearch" class="search-input" />
-    <Select v-model="project" :options="projectOptions" optionLabel="label" optionValue="value" placeholder="Проект" @change="onChange('project', $event.value)" showClear />
+    <Select
+      v-model="project"
+      :options="projectOptions"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Проект"
+      @change="onChange('project', $event.value)"
+      showClear
+    />
   </div>
 </template>
 
@@ -15,56 +23,46 @@ const store = useTasksStore()
 
 const search = ref('')
 const project = ref(null)
-const status = ref(null)
 
 const projectOptions = [
-    { label: 'Входящие', value: 'Входящие' },
-    { label: 'ТРК', value: 'ТРК' },
-    { label: 'Отель', value: 'Отель' },
-    { label: 'Лидер Спорт', value: 'Лидер Спорт' },
-    { label: 'Театр', value: 'Театр' },
-    { label: 'Мебельный центр', value: 'Мебельный центр' },
-    { label: 'Кафе', value: 'Кафе' },
-    { label: 'Ледовая арена', value: 'Ледовая арена' },
-    { label: 'Корпоративные сайты', value: 'Корпоративные сайты' }
-]
-
-const statusOptions = [
-  { label: 'Новая', value: 'new' },
-  { label: 'Бэклог', value: 'backlog' },
-  { label: 'В работе', value: 'in_progress' },
-  { label: 'Выполнена', value: 'completed' },
-  { label: 'Закрыта', value: 'closed' }
+  { label: 'Входящие', value: 'Входящие' },
+  { label: 'ТРК', value: 'ТРК' },
+  { label: 'Отель', value: 'Отель' },
+  { label: 'Лидер Спорт', value: 'Лидер Спорт' },
+  { label: 'Театр', value: 'Театр' },
+  { label: 'Мебельный центр', value: 'Мебельный центр' },
+  { label: 'Кафе', value: 'Кафе' },
+  { label: 'Ледовая арена', value: 'Ледовая арена' },
+  { label: 'Корпоративные сайты', value: 'Корпоративные сайты' }
 ]
 
 onMounted(() => {
-    // Восстанавливаем фильтры из store при возврате со страницы задачи
-    search.value = store.filters.search || ''
-    project.value = store.filters.project || null
-    status.value = store.filters.status || null
+  // Восстанавливаем фильтры из store при возврате со страницы задачи
+  search.value = store.filters.search || ''
+  project.value = store.filters.project || null
 })
 
 let searchTimeout
 function onSearch() {
-    clearTimeout(searchTimeout)
-    searchTimeout = setTimeout(() => {
-        store.setFilter('search', search.value)
-    }, 300)
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    store.setFilter('search', search.value)
+  }, 300)
 }
 
 function onChange(key, value) {
-    store.setFilter(key, value || '')
+  store.setFilter(key, value || '')
 }
 </script>
 
 <style scoped>
 .filter-bar {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1rem;
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .search-input {
-    flex: 1;
+  flex: 1;
 }
 </style>

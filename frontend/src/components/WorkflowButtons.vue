@@ -1,9 +1,14 @@
 <template>
   <div class="workflow-buttons">
-    <Button v-for="action in availableActions" :key="action.status"
-      :label="action.label" :severity="action.severity"
-      :icon="action.icon" size="small"
-      @click="$emit('transition', action.status)" />
+    <Button
+      v-for="action in availableActions"
+      :key="action.status"
+      :label="action.label"
+      :severity="action.severity"
+      :icon="action.icon"
+      size="small"
+      @click="$emit('transition', action.status)"
+    />
   </div>
 </template>
 
@@ -35,9 +40,7 @@ const transitions = {
     { status: 'closed', label: 'Закрыть', severity: 'danger', icon: 'pi pi-times' },
     { status: 'in_progress', label: 'Вернуть в работу', severity: 'warn', icon: 'pi pi-replay' }
   ],
-  closed: [
-    { status: 'in_progress', label: 'Вернуть в работу', severity: 'warn', icon: 'pi pi-replay' }
-  ]
+  closed: [{ status: 'in_progress', label: 'Вернуть в работу', severity: 'warn', icon: 'pi pi-replay' }]
 }
 
 const availableActions = computed(() => transitions[props.currentStatus] || [])
