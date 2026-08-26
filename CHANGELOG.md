@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.20.2] - 2026-08-26
+
+### Added
+- Токены темы (`--mb-*` CSS custom properties) в `global.css`: светлая палитра slate, тёмная — neutral zinc (без сизового оттенка)
+- Персистентность темы: `.dark` применяется до роутинга и сохраняется после F5
+- Линтер фронтенда: ESLint 9 (flat config, vue3 + prettier) + Prettier; `npm run lint` в CI
+
+### Fixed
+- Тёмная тема: устранён «синеватый» фон (slate в dark-режиме вместо нейтрального zinc)
+- Мелкие линт-правки в FilterBar/StatusBadge/TaskTable/TaskDetailView
+
 ## [0.20.1] - 2026-08-25
 
 ### Fixed
