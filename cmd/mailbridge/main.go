@@ -39,6 +39,12 @@ import (
 var staticFiles embed.FS
 
 func main() {
+	// Подкоманда version: печатает вшитую версию и выходит без загрузки конфига
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println(version.Info())
+		return
+	}
+
 	fmt.Println(version.Info())
 
 	// ---------------------------------------------------------------------------
