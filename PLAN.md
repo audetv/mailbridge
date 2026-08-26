@@ -1,351 +1,142 @@
-# Mailbridge — План разработки v2
+# Mailbridge — План разработки (текущий)
 
 ## Статус
 
-**Версия:** v0.20.2 (в разработке, следующий релиз — v1.0.0)
-**Выполненные этапы (v1):** 0–16 (зафиксированы в `PLAN.v1.md`)
-**Выполненные этапы (v2):** 17–20, 19.1–19.5 — смержены в `main` (см. CHANGELOG 0.19.0–0.20.2)
-  - 17: таблицы tasks/comments/attachments + REST API + JWT
-  - 18: процессор пишет в новую БД
-  - 19: Vue 3 (таблица, фильтры, карточка, ответ, вкладки по статусам, SSE, embed-сборка)
-  - 20: AI-вердикты (`internal/ai/`: очередь с retry, вердикты проекта/типа/исполнителя, вердикт «решена», Ollama + OpenAI-совместимый endpoint)
-**Незавершённый:** этап 21 — приёмка v1.0.0 (см. ниже)
+**Версия:** v0.20.2 — активная разработка (v1.0.0 ещё впереди)
+**История:** этапы v0–16 (Plane-based) — `archive/PLAN.v0-plane-era.md`, v17–21 (helpdesk + AI) — `archive/PLAN.v17-21.md`, реархитектура ленты/очереди — `archive/PLAN.rearchitecture-ai-inbox.md`. Архивные планы реализованы и заморожены.
 
-### Что работает
-- Приём писем через IMAP
-- Классификация через rules.yml (NLP + стемминг)
-- Создание задач в Plane (work-items, labels)
-- Обработка ответов (добавление комментариев)
-- Webhook'и от Plane
-- Отказоустойчивость (реконнекты, health-проверки, метрики)
-- Конфигурация через YAML
+### Что уже работает (проверено по коду)
 
-### Проблемы, выявленные в боевой эксплуатации
-1. Plane не позволяет сменить проект задачи — ошибка классификации фатальна
-2. Plane не даёт единого потока для руководителя
-3. Plane free не имеет интеграции с GitHub
-4. Классификация на rules.yml недостаточно точна (~60%)
-
-### Решение
-Отказ от Plane как базы задач. Разработка собственного helpdesk-модуля с веб-интерфейсом на Vue.js 3 и хранением задач в SQLite.
+| Подсистема | Реализация |
+|---|---|
+| Входящий поток | IMAP (`internal/mailbox`, реконнекты), парсинг MIME (`internal/parser`), адаптер email → `inbox_items` (`internal/adapters`) |
+| Лента и цепочки | `inbox_items` + `threads` + `task_inbox_items`, статусы unread/read/archived |
+| Задачи | 5 статусов (new…closed), CRUD API, JWT, WS-события (`internal/web`) |
+| Классификация | rules.yml (NLP + стемминг) как base; AI-вердикты проекта/типа/приоритета/«решена» |
+| AI-обработка | асинхронная очередь с retry (1м → 5м → 15м → 1ч, ≤5 попыток, `ai_processed` 0/1/-1), промпт с контекстом цепочки и вложений, лимит 50K символов |
+| Вложения | content-addressable storage (SHA-256 дедуп), извлечение текста (PDF, XLSX, DOCX, PPTX, RTF, ICS, txt/csv) |
+| Исходящие | SMTP-очередь + outbound-worker, ответ клиенту из UI |
+| Фронтенд | Vue 3 + PrimeVue, тёмная/светлая тема (perсистент), дашборд с вкладками (лента/задачи), карточка задачи, комментарии, вложения, пагинация |
+| Наблюдаемость | `/health`, `/ready`, Prometheus-метрики, structured logging (slog), `data/ai-debug` |
+| Инфраструктура | Go 1.26, SQLite WAL, CI (lint + test, npm lint + build), сборка одного бинарника (embed SPA) |
 
 ---
 
-## Этап 17: Таблица задач в БД + REST API
+## Этап A: Зачистка Plane-legacy и устойчивость (v0.21.x)
 
-### Цель
-Спроектировать и реализовать таблицы для хранения задач, комментариев, вложений. Создать REST API для CRUD-операций.
+### A.1. Оценка зависимостей от Plane
+Аудит `internal/plane/` и всех ссылок: что ещё реально используется (список проектов? webhook'и?), что — мёртвый код.
+- Результат: список «используется / удаляем / оставляем на N релизов»
 
-### Файлы
-```
-internal/store/store.go            — новые модели: Task, TaskComment, TaskAttachment
-internal/store/sqlite/sqlite.go    — миграции, CRUD-методы
-internal/store/sqlite/sqlite_test.go
-internal/web/api.go                — REST API handlers
-internal/web/api_test.go
-internal/web/auth.go               — базовая аутентификация (JWT)
-internal/web/auth_test.go
-cmd/mailbridge/main.go             — регистрация API-роутов
-```
+### A.2. Удаление или явный quarantine
+- Мёртвый код — удалить; используемое — вынести за конфиг `MAILBRIDGE_PLANE_*` с логированием deprecation
+- `make test` + `make lint` зелёные
 
-### Модели данных
+### A.3. Миграции и бэкап
+- Скрипт бэкапа `data/` (`.db` + WAL, `attachments/`) с проверкой целостности (`PRAGMA integrity_check`)
+- `Makefile`: цель `backup` в `make`-help
+- **Приёмка:** восстановление БД из бэкапа в тесте/ручной приемке; WAL-файлы не ломают restore
 
-```sql
-CREATE TABLE tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id TEXT NOT NULL UNIQUE,
-    subject TEXT NOT NULL,
-    body_text TEXT NOT NULL,
-    body_html TEXT DEFAULT '',
-    from_email TEXT NOT NULL,
-    from_name TEXT DEFAULT '',
-    project TEXT NOT NULL DEFAULT 'Входящие',
-    type TEXT NOT NULL DEFAULT '',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    status TEXT NOT NULL DEFAULT 'new',
-    assignee TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE task_comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    author TEXT NOT NULL,
-    body TEXT NOT NULL,
-    direction TEXT NOT NULL DEFAULT 'in',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE task_attachments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL,
-    content_type TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    storage_path TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### API Endpoints
-
-```
-GET    /api/tasks                    — список задач (paginated, filterable)
-GET    /api/tasks/:id                — задача с комментариями и вложениями
-POST   /api/tasks/:id/reply          — ответ клиенту
-PATCH  /api/tasks/:id                — обновить статус/проект/исполнителя/тип/приоритет
-POST   /api/auth/login               — вход (логин/пароль → JWT)
-GET    /api/auth/me                  — текущий пользователь
-```
-
-### Критерии приёмки
-- [ ] Таблицы создаются миграцией
-- [ ] API создаёт задачу из письма (процессор адаптирован)
-- [ ] API возвращает список задач с фильтрацией
-- [ ] API позволяет обновить статус/проект/исполнителя
-- [ ] Аутентификация работает (JWT)
-- [ ] `make test` проходит
+### A.4. Метрики Plane-доступа
+При сохранении интеграции — метрика `mailbridge_plane_available` ( Gauge ) в `internal/metrics`.
+- **Приёмка:** метрика видна на `/metrics`
 
 ---
 
-## Этап 18: Интеграция процессора с новой БД
+## Этап B: Новые источники обращений (v0.22.x)
 
-### Цель
-Перенаправить создание задач из Plane API в собственную БД. Убрать зависимость от Plane для хранения задач.
+Цель: лента — универсальный вход, `source` поле уже проектируется под это (`email, telegram, web_form`).
 
-### Файлы
-```
-internal/processor/processor.go     — переписать createNewIssue, addCommentToIssue
-internal/processor/processor_test.go
-cmd/mailbridge/main.go              — убрать инициализацию PlaneClient для процессора
-```
+### B.1. Фреймворк адаптеров
+`internal/adapters/adapter.go` — интерфейс уже есть; добавить контракт событий → `InboxItem` и регистрацию адаптеров в `internal/app`.
+- **Приёмка:** два адаптера (email + тестовый fake) заходят через единый registry
 
-### Логика
-- `createNewIssue` — пишет задачу в таблицу `tasks` вместо Plane API
-- `addCommentToIssue` — пишет комментарий в `task_comments` вместо Plane API
-- `resolveProject` — определяет проект (строка-категория) из классификации
-- `resolveLabels` — заменяется на прямое присвоение type/priority
-- Plane API остаётся только для загрузки списка проектов (опционально)
+### B.2. Telegram-источник
+- Адаптер: входящие сообщения/фоты/файлы → `inbox_items` (source=`telegram`, `source_id`=chat/message id)
+- Дедупликация по `(source, source_id)` — уже есть уникальный индекс, проверить кросс-сourcem
+- **Приёмка:** сообщение в Telegram → элемент в ленте → AI-вердикт → (опционально) задача
 
-### Критерии приёмки
-- [ ] Письмо → задача в таблице tasks
-- [ ] Ответ на письмо → комментарий в task_comments
-- [ ] Вложения сохраняются в task_attachments
-- [ ] `make test` проходит
+### B.3. Web-form / public endpoint
+- Публичный endpoint приёма обращений (anti-spam: rate-limit + secret/token)
+- **Приёмка:** POST формы → лента; бот/спам отклоняется
+
+### B.4. Исходящие: каналы
+- Ответ из UI на `email`, `telegram`, `web_form` — роутинг исходящих по `source` цепочки (`internal/worker/outbound.go` сейчас только SMTP)
+- **Приёмка:** ответ на задачу из телеграма уходит в Telegram
 
 ---
 
-## Этап 19: Веб-интерфейс на Vue.js 3
+## Этап C: Управление и UX (v0.23.x)
 
-### Этап 19.1: Инициализация проекта и роутинг
+### C.1. Дашборд-аналитика
+- Счётчики по статусам, по проектам, по источникам; график обращений за N дней (`GET /api/stats/...`)
+- **Приёмка:** дашборд показывает live-цифры (WS update)
 
-**Цель:** Создать структуру Vue-проекта, настроить Vite, Vue Router, подключить PrimeVue. Базовая страница входа и пустой дашборд с проверкой аутентификации.
+### C.2. Правила автоматических действий
+- Условия (source, project, ai_verdict) → действие (assignee, priority, status, auto-close)
+- Храним в БД (таблица `automation_rules`), редактор в UI, порядок выполнения, аудит
+- **Приёмка:** правило создаётся в UI и срабатывает при создании/обновлении задачи; лог срабатываний
 
-**Файлы:**
-- `frontend/package.json`
-- `frontend/vite.config.js`
-- `frontend/index.html`
-- `frontend/src/main.js`
-- `frontend/src/App.vue`
-- `frontend/src/router/index.js`
-- `frontend/src/views/LoginView.vue`
-- `frontend/src/views/DashboardView.vue`
-- `frontend/src/stores/auth.js`
-- `frontend/src/api/client.js`
+### C.3. Уведомления
+- О новых задачах/комментариях: WS → пуш в браузер; (опционально) email-дайджест
+- **Приёмка:** пуш приходит без перезагрузки страницы; отписка/тишина работают
 
-**Критерии приёмки:**
-- [ ] `npm run dev` запускает dev-сервер
-- [ ] `/login` показывает форму входа
-- [ ] Успешный вход → редирект на `/`
-- [ ] `/` показывает пустой дашборд (заглушку)
-- [ ] Без токена редиректит на `/login`
-- [ ] `npm run build` собирает production-бандл
+### C.4. Поиск и фильтры
+- Полнотекстовый поиск по теме/тексту/комментариям (FTS5 или LIKE-пока)
+- Сохранённые фильтры/виды на пользователя
+- **Приёмка:** поиск «баннер» находит задачи и комментарии за <200ms на 10k записей
 
 ---
 
-### Этап 19.2: Таблица задач с фильтрами
+## Этап D: Production-readiness (v0.24.x)
 
-**Цель:** Компонент таблицы задач с сортировкой, фильтрацией и пагинацией. Данные загружаются из API.
+### D.1. Docker и деплой
+- `Dockerfile` (multi-stage: frontend → go build → slim runtime), `docker-compose.yml` (app + volume для `data/`)
+- **Приёмка:** `docker compose up` поднимает работоспособный инстанс
 
-**Файлы:**
-- `frontend/src/components/TaskTable.vue`
-- `frontend/src/components/FilterBar.vue`
-- `frontend/src/components/StatusBadge.vue`
-- `frontend/src/stores/tasks.js`
-- `frontend/src/views/DashboardView.vue` (обновление)
-- `internal/web/api.go` (дополнить эндпоинт `GET /api/tasks` — pagination, filters)
+### D.2. Нагрузочное/надежное тестирование
+- Сценарии: обрыв IMAP/SMTP/LLM, потеря БД (реконнект), перезапуск во время обработки
+- 10k+ вложений и 50k писем в БД — проверка производительности запросов
+- **Приёмка:** сценарий-чеклист пройден, регрессии пофикшены
 
-**API:**
-```
-GET /api/tasks?page=1&per_page=50&project=ТРК&status=new&assignee=Иванов&search=баннер
-Response: { tasks: [...], total: 150, page: 1, per_page: 50 }
-```
+### D.3. Наблюдаемость до уровня SLO
+- Trace/ID запросов через API + log; алерты по метрикам (описание в operations.md)
+- **Приёмка:** по логам можно восстановить путь одного письма (id → цепочка → задача)
 
-**Критерии приёмки:**
-- [ ] Таблица отображает список задач
-- [ ] Колонки: ID, Дата, От кого, Тема, Тип, Приоритет, Проект, Статус, Исполнитель
-- [ ] Сортировка по клику на заголовок колонки
-- [ ] Фильтры: проект, статус, исполнитель (выпадающие списки)
-- [ ] Поиск по теме/тексту (поле ввода)
-- [ ] Пагинация (если задач >50)
-- [ ] `make test` проходит
+### D.4. Документация релиза
+- `README.md` — деплой «с нуля» (env-переменные, Docker, бинарник)
+- `docs/operations.md` — runbook бэкапа/восстановления, деградация (no-LLM mode)
+- **Приёмка:** новый разработчик разворачивает по README за 15 минут
 
 ---
 
-### Этап 19.3: Карточка задачи
+## Этап E: Приёмка v1.0.0
 
-**Цель:** Модальное окно или страница с деталями задачи: описание, вложения, комментарии, действия.
+### E.1. Полный цикл на реальных данных
+- 50 реальных писем через полный цикл (email → лента → AI → задача → ответ)
+- 2–3 сценария Telegram/web-form (если в E влезло)
+- Проверка точности классификации: отчёт на выборке ≥30 писем (цель >85%)
+- **Приёмка:** чеклист пройден, отчёт приложен к релизу
 
-**Файлы:**
-- `frontend/src/components/TaskCard.vue`
-- `frontend/src/components/CommentList.vue`
-- `frontend/src/views/TaskDetailView.vue`
-- `frontend/src/router/index.js` (обновление — маршрут `/tasks/:id`)
+### E.2. Стабильность
+- 100+ писем «нагрузкой», без потерь и дубликатов; AI-очередь не теряет вердикты
+- **Приёмка:** тест пройден, метрики в норме
 
-**API:**
-```
-GET /api/tasks/:id
-Response: {
-  task: { id, subject, body_text, body_html, from_email, from_name, project, type,
-          priority, status, assignee, created_at },
-  comments: [{ id, author, body, direction, created_at }],
-  attachments: [{ id, filename, content_type, size, storage_path }]
-}
-```
-
-**Критерии приёмки:**
-- [ ] Клик по задаче в таблице → открывается карточка
-- [ ] Вкладка «Описание»: текст письма, вложения (ссылки)
-- [ ] Вкладка «Комментарии»: список комментариев с автором и датой
-- [ ] Из карточки можно вернуться к таблице
-- [ ] `make test` проходит
+### E.3. Релиз
+- Тег `v1.0.0`, финальный CHANGELOG, обновление README как «стабильного продукта»
+- **Приёмка:** тег + публичная инструкция по деплою
 
 ---
 
-### Этап 19.4: Действия с задачей
+## Порядок и зависимости
 
-**Цель:** Изменить статус, проект, исполнителя через UI. Ответить клиенту.
-
-**Файлы:**
-- `frontend/src/components/ReplyForm.vue`
-- `frontend/src/components/TaskCard.vue` (обновление — кнопки действий)
-- `frontend/src/stores/tasks.js` (обновление — actions)
-
-**API:**
 ```
-PATCH /api/tasks/:id
-Body: { "project": "Отель" }
-ИЛИ: { "status": "in_progress" }
-ИЛИ: { "assignee": "Иванов" }
-Response: { task: {...} }
-
-POST /api/tasks/:id/reply
-Body: { "body": "Текст ответа" }
-Response: { comment: {...} }
+A (зачистка) ──► B (источники) ──► C (UX/автоматизация) ──► D (production) ──► E (v1.0.0)
 ```
+А — можно параллельно с B (разные слои). C и D — переплетены (аналитика требует метрик). E — финальная точка.
 
-**Критерии приёмки:**
-- [ ] Выпадающий список «Проект» — меняет проект задачи
-- [ ] Выпадающий список «Статус» — меняет статус
-- [ ] Выпадающий список «Исполнитель» — назначает исполнителя
-- [ ] Форма ответа: ввод текста → отправка → комментарий появляется в списке
-- [ ] Ответ уходит клиенту на email
-- [ ] Все изменения сохраняются в БД
-- [ ] `make test` проходит
-
----
-
-### Этап 19.5: Интеграция с Go (embed + production build)
-
-**Цель:** Настроить production-сборку: Vite собирает статику, Go внедряет через `embed` и раздаёт. Один бинарник.
-
-**Файлы:**
-- `cmd/mailbridge/main.go` (обновление — раздача статики)
-- `Makefile` (обновление — сборка фронтенда перед Go)
-- `frontend/vite.config.js` (обновление — production-настройки)
-
-**Критерии приёмки:**
-- [ ] `make build` собирает фронтенд и бекенд
-- [ ] Бинарник запускается и отдаёт SPA на `:8080`
-- [ ] API работает на `/api/`
-- [ ] SPA работает без dev-сервера
-- [ ] `make test` проходит
-
-## Этап 20: ИИ-классификатор (локальный Qwen 14B)
-
-### Цель
-Повысить точность классификации до >85% с помощью локальной LLM.
-
-### Архитектура
-```
-Mailbridge → текст письма → HTTP POST → Ollama API (localhost:11434)
-                                              ↓
-                                         Qwen 2.5 14B
-                                              ↓
-                                         JSON: {project, type, priority, confidence}
-                                              ↓
-Mailbridge ← если confidence < 0.7 → fallback на rules.yml
-           ← если Ollama недоступна → fallback на rules.yml
-```
-
-### Файлы
-```
-internal/classifier/ai_based.go     — клиент Ollama API
-internal/classifier/classifier.go   — CompositeClassifier (ИИ → rules → triage)
-internal/config/config.go           — настройки Ollama
-configs/rules.yml                   — флаг ai_enabled
-cmd/mailbridge/main.go              — инициализация
-```
-
-### Промпт
-```
-Ты — классификатор обращений в техподдержку.
-Определи проект, тип и приоритет по тексту обращения.
-
-Проекты: ТРК, Отель, Фитнес-клуб, Театр, Мебельный центр, Складской комплекс,
-         Кафе, Ледовая арена, Корпоративные сайты, Входящие
-Типы: bug, feature, support, access, seo, content
-Приоритеты: urgent, high, medium, low
-
-Ответь ТОЛЬКО валидным JSON без форматирования:
-{"project":"...","type":"...","priority":"...","confidence":0.0-1.0}
-
-Текст обращения: {text}
-```
-
-### Критерии приёмки
-- [ ] Ollama установлена, модель загружена
-- [ ] AI-классификатор возвращает корректный JSON
-- [ ] Fallback на rules.yml при ошибке
-- [ ] Точность >85% на 30 тестовых письмах
-- [ ] Задержка <2 секунд на запрос
-
----
-
-## Этап 21: Финальное тестирование и приёмка v1.0.0
-
-### Цель
-Проверить полный цикл работы системы, зафиксировать v1.0.0.
-
-### Действия
-- [ ] Прогнать 50 реальных писем через полный цикл (email → задача → ответ)
-- [ ] Проверить точность классификации (ИИ + rules)
-- [ ] Проверить веб-интерфейс (дашборд, фильтры, ответы)
-- [ ] Проверить отказоустойчивость (обрыв IMAP, перезапуск)
-- [ ] Нагрузочный тест (100+ писем)
-- [ ] Финальный коммит, тег v1.0.0
-- [ ] README с инструкцией по развёртыванию
-
----
-
-## Оценка трудозатрат
-
-| Этап | Содержание | Часов |
-|------|-----------|-------|
-| 17 | БД + REST API | 12 |
-| 18 | Интеграция процессора | 6 |
-| 19 | Vue.js интерфейс | 34 |
-| 20 | ИИ-классификатор | 8 |
-| 21 | Тестирование и приёмка | 10 |
-| **Итого** | | **70 часов** |
+## Критерии «готово для v1.0.0»
+- Все этапы A–D с зелёным `make lint && make test`, CI зелёный
+- Документация (README, operations) — «с нуля до работающего»
+- Отчёт по нагрузке и точности AI
+- Тег v1.0.0

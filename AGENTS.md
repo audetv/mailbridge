@@ -24,6 +24,7 @@ Mailbridge — сервис управления входящими обраще
 - `cd frontend && npm run dev` — dev-сервер (Vite, порт 5173)
 - `cd frontend && npm run build` — production-сборка
 - `cd frontend && npm run preview` — предпросмотр собранного
+- `cd frontend && npm run lint` / `npm run format` — ESLint 9 + Prettier (CI гоняет lint перед сборкой)
 
 ## Repo Map
 
@@ -80,6 +81,7 @@ data/                    — БД и вложения (НЕ коммитить)
 - WebSocket: `src/stores/websocket.js` (EventSource-подобный паттерн)
 - Стили: scoped, CSS-переменные PrimeVue (`--p-surface-*`)
 - После правок фронта: `make build` (статику копирует в `cmd/mailbridge/static/`)
+- Линтер обязателен: `npm run lint` без ошибок — и в CI перед сборкой (npm run lint → eslint .)
 
 ## Config & Secrets
 
@@ -101,8 +103,8 @@ data/                    — БД и вложения (НЕ коммитить)
 | [docs/ai-pipeline.md](docs/ai-pipeline.md) | AI-обработка, промпты |
 | [docs/operations.md](docs/operations.md) | Деплой, запуск, отладка |
 | [docs/adr/](docs/adr/) | Архитектурные решения |
-| [PLAN.md](PLAN.md) | Текущий план разработки |
-| [PLAN.ai-inbox.md](PLAN.ai-inbox.md) | План AI-интеграции |
+| [PLAN.md](PLAN.md) | Текущий план разработки (v0.21.x → v1.0.0) |
+| [archive/](archive/) | Реализованные планы (v0–16, v17–21, реархитектура) — только история |
 
 ## Workflow
 
