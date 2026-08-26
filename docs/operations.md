@@ -113,7 +113,7 @@ git push origin v0.X.Y
 # 3) Проверка
 gh run list --workflow release.yml --limit 1
 gh release view v0.X.Y --json name,assets --jq .assets
-./build/mailbridge version   # локальная сборка: make build, версия из git describe --tags
+./build/mailbridge version   # локальная сборка: make build; версия = git describe --tags --abbrev=0 (v срезан)
 ```
 
 > Workflow: `.github/workflows/release.yml` — триггер `push: tags: v*`, шаги: `make build` → `gh release create` с asset `mailbridge`.

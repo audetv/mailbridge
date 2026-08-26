@@ -37,7 +37,9 @@ make lint
   1. CHANGELOG: секция `[0.X.Y]` с датой (обязательно, входит в notes релиза),
   2. **Тег `v0.X.Y` на смерженный commit main** — он запускает workflow `Release` (`.github/workflows/release.yml`): `make build` → GitHub Release + бинарник (asset `mailbridge`) автоматически,
   3. Проверка: `gh run list --workflow release.yml --limit 1` green, `gh release view v0.X.Y --json assets`.
-- Версия в бинарнике: `git describe --tags` → Makefile `VERSION` → ldflags → `internal/version`.
+- Версия в бинарнике (после мержа PR со сменой кода):
+  тег `v0.X.Y` → workflow `Release` (fetch с полной историей) → `git describe --tags --abbrev=0` → Makefile `VERSION` (префикс `v` срезан: `0.X.Y`) → ldflags → `internal/version`;
+  проверка: шаг «Version check» сравнивает вывод `./build/mailbridge version` с тегом.
 - Локальный (offline) вариант: `make build && gh release create v0.X.Y build/mailbridge --title v0.X.Y` (см. `docs/operations.md`, «Релизы»).
 
 ## Перед PR

@@ -3,8 +3,11 @@
 APP_NAME := mailbridge
 BUILD_DIR := build
 
-# Версия из git tag или dev
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Версия: git tag (v0.X.Y -> 0.X.Y) или dev.
+# git describe даёт "v0.21.1" / "v0.21.1-3-gf2eb712" при dirty HEAD —
+# шьём в Version сам тег (или "dev"), COMMIT отдельным полем.
+RAW_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
+VERSION ?= $(if $(RAW_TAG),$(patsubst v%,%,$(RAW_TAG)),dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS = -ldflags "-X github.com/audetv/mailbridge/internal/version.Version=$(VERSION) \

@@ -29,13 +29,17 @@ jobs:
       - name: Build (frontend + static + binary)
         run: make build
 
-      - name: Version check
-        run: ./build/mailbridge version
+      - name: Version check (вшитая версия == тег)
+        run: |
+          OUT="$(./build/mailbridge version)"
+          echo "$OUT"
+          # вшитая версия должна совпадать с пуш-тегом (без префикса v)
+          EXPECTED="${GITHUB_REF_NAME#v}"
+          echo "$OUT" | grep -q "$EXPECTED" || { echo "MISMATCH: expected $EXPECTED in '$OUT'"; exit 1; }
 
       - name: Create GitHub Release + binary
-        # gh CLI на.runner'е использует GITHUB_TOKEN автоматически
+        # gh CLI на runner'е использует GITHUB_TOKEN автоматически
         run: |
-          ./build/mailbridge version
           gh release create "${GITHUB_REF_NAME}" build/mailbridge \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
