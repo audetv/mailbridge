@@ -98,6 +98,25 @@ JSON-формат:
 | `completed` | Завершить + комментарий |
 | `none` | Ничего, только в inbox_items.ai_verdict |
 
+## Календарные приглашения (text/calendar)
+
+Приглашения Exchange приходят как `multipart/alternative` с пустыми `text/plain`/`text/html`
+и частью `text/calendar` (iCalendar, RFC 5545), которую enmime размещает в `env.OtherParts`,
+а не в вложениях.
+
+Обработка (v0.21.0, issue #1):
+
+1. `extractor`: части `text/calendar` из `env.OtherParts` извлекаются в поле
+   `ExtractedEmail.Calendar` (вызывает `preprocessor.ExtractICal`).
+2. `preprocessor/ics.go`: парсер с unfolding строк (RFC 5545 §3.1) — без него
+   реальные Exchange-строки `ORGANIZER;CN=…`/`ATTENDEE`, сложенные из-за переноса, ломались.
+   Вывод — секция `[СОБЫТИЕ] …` (тема, метод REQUEST/CANCEL, время, описание, место,
+   организатор, участники).
+3. `adapters/email_adapter.go`: если `Calendar` не пусто — секция приклеивается к
+   `InboxItem.BodyText` (ПЕРЫЙ блок, после `Текст:`), т.е. AI видит событие в теле письма.
+4. Промпт (orchestrator + Modelfile): правило — `[СОБЫТИЕ]` ≠ «пустое письмо»:
+   REQUEST → задача-напоминание о встрече; CANCEL → закрыть/отменить задачу.
+
 ## Вложения для AI
 
 | Тип | Обработка |

@@ -441,6 +441,78 @@ UEsDBBQABgAIAAAAIQCq5n2yMQAAADAAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbI2QwWrDMAyG
 	}
 }
 
+func TestExtractor_CalendarFromOtherParts(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := extractor.NewAttachmentStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAttachmentStore error: %v", err)
+	}
+
+	ext := extractor.NewExtractor(store)
+
+	raw, err := os.ReadFile("testdata/calendar_invite.eml")
+	if err != nil {
+		t.Fatalf("read testdata/calendar_invite.eml: %v", err)
+	}
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	// Календарные части (enmime → OtherParts) должны попасть в Calendar
+	if result.Calendar == "" {
+		t.Fatal("Calendar is empty — text/calendar part lost (issue #1 root cause)")
+	}
+	if !strings.Contains(result.Calendar, "[СОБЫТИЕ]") {
+		t.Errorf("Calendar missing [СОБЫТИЕ] header, got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "онлайн продажи") {
+		t.Errorf("Calendar missing SUMMARY «онлайн продажи», got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "14:30") {
+		t.Errorf("Calendar missing start time 14:30, got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "у Алексея") {
+		t.Errorf("Calendar missing LOCATION «у Алексея» (folded line!), got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "Бухтина") {
+		t.Errorf("Calendar missing ORGANIZER CN «Бухтина» (folded line!), got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "Кузьмина") {
+		t.Errorf("Calendar missing ATTENDEE «Кузьмина», got: %q", result.Calendar)
+	}
+	if !strings.Contains(result.Calendar, "REQUEST") {
+		t.Errorf("Calendar missing METHOD REQUEST, got: %q", result.Calendar)
+	}
+
+	// BodyText при этом остаётся как есть (пустым для этого письма) —
+	// календарь не смешивается с телом на уровне extractor.
+	t.Logf("Calendar output:\n%s", result.Calendar)
+}
+
+func TestExtractor_NoCalendarPassthrough(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := extractor.NewAttachmentStore(tmpDir)
+	ext := extractor.NewExtractor(store)
+
+	raw := []byte(`From: user@example.com
+To: support@example.com
+Subject: Без календаря
+Message-ID: <no-ical@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Просто обычное письмо без событий.`)
+
+	result, err := ext.Extract(raw)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+	if result.Calendar != "" {
+		t.Errorf("Calendar should be empty for plain email, got: %q", result.Calendar)
+	}
+}
+
 func TestCleaner_HTMLToText(t *testing.T) {
 	c := extractor.NewCleaner()
 

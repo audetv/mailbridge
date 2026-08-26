@@ -1,0 +1,205 @@
+Return-Path: <abuhtina@ao-solomon.ru>
+Delivered-To: support@audetv.ru
+Received: from mail.audetv.ru ([172.22.1.253])
+	by a15526d54ab1 with LMTP
+	id gLEZCqyRjmp5ZQIAS27L5Q
+	(envelope-from <abuhtina@ao-solomon.ru>)
+	for <support@audetv.ru>; Wed, 26 Aug 2026 10:11:40 +0300
+X-Original-To: support@audetv.ru
+Received: from relay.gcconsulting.ru (relay.gcconsulting.ru [195.5.145.10])
+	by mail.audetv.ru (Postcow) with ESMTP id 81591288343
+	for <support@audetv.ru>; Wed, 26 Aug 2026 10:11:39 +0300 (MSK)
+Authentication-Results: mail.audetv.ru;
+	dkim=none;
+	spf=pass (mail.audetv.ru: domain of abuhtina@ao-solomon.ru designates 195.5.145.10 as permitted sender) smtp.mailfrom=abuhtina@ao-solomon.ru;
+	dmarc=none
+ARC-Seal: i=1; a=rsa-sha256; d=audetv.ru; s=dkim; cv=none; t=1787728299;
+	b=ECnZWSVsdak3xs6swFJKBN3SjvNrvIo5MMYGSWCMG8xUuDGOvxHunfKmcfrezttPnxM0F/
+	JOn7FMb46cjM5jx2mJTZ6RUDI01ctoKaYvUKmlvxwfF+hLH7rXG5LsnoyM6ZUGvMDWuJwL
+	TTCu8JqPGY9nmEBbNSjGf2LS77hio5+ty4CIb/KSwmOMfCaCIjjm3638cxWtCtRDRUx+3V
+	GeKbs8pLWusbbrOhqktm4pqW8HRLinmvPn+79MIODZpeXzkxlACf7l9vgLr/spkG2NZvlb
+	jWNchMQsFhgVhl683ci9zzj7RcRJcTD3QuJPkA4vv0Kx1r4RP9/SUc9/3a0Fkg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=audetv.ru;
+	s=dkim; t=1787728299;
+	h=from:from:reply-to:subject:subject:date:date:message-id:message-id:
+	 to:to:cc:mime-version:mime-version:content-type:content-type;
+	bh=ZZKwDt2bw5aS+IcIGFm4qVZlTjymdqjYBznjnFeEH/0=;
+	b=N6kHgz2wRTPo+QvhMVHiM9iKXcvpTP1vkAcRLt1IsL17NiHTo7RBj13pOP3ff4eCdop1c1
+	V/tirNiZ5IpsPlr9hfRkPmexo4nVjeGL21HZsdjp3iSzZy8uYxGiNE3pmFyTVuCjJ52TeH
+	/B3Eq0Zornkvld9vY0Hg9ZuBPw4Y3D3EC5zDMw1VS8tslkaA79e1jfGARBwM3ISDumau2v
+	pSrfww/qnqOpoZ4eYF0n7PlNoOQnyPZg/lrS6ZV9svzxXzTpiTXSz0h+bjAAUczWbeXhZE
+	gi5r1EMR+7Ax2fdxZJBoCNgmEPvT5SsU61XxY46HzlwCcNThk4blz5B84MKc4Q==
+ARC-Authentication-Results: i=1;
+	mail.audetv.ru;
+	dkim=none;
+	spf=pass (mail.audetv.ru: domain of abuhtina@ao-solomon.ru designates 195.5.145.10 as permitted sender) smtp.mailfrom=abuhtina@ao-solomon.ru;
+	dmarc=none
+Received: by relay.gcconsulting.ru (Postfix, from userid 58)
+	id 0C4F0267B6; Wed, 26 Aug 2026 10:15:58 +0300 (MSK)
+Received: from mail13.solomon.local (mail13.solomon.local [192.168.1.20])
+	by relay.gcconsulting.ru (Postfix) with ESMTP id F0A742665C
+	for <support@audetv.ru>; Wed, 26 Aug 2026 10:15:55 +0300 (MSK)
+Received: from mail13.solomon.local (192.168.1.20) by mail13.solomon.local
+ (192.168.1.20) with Microsoft SMTP Server (TLS) id 15.0.1497.2; Wed, 26 Aug
+ 2026 10:11:37 +0300
+Received: from mail13.solomon.local ([fe80::b57d:193f:d501:f5ac]) by
+ mail13.solomon.local ([fe80::b57d:193f:d501:f5ac%12]) with mapi id
+ 15.00.1497.000; Wed, 26 Aug 2026 10:11:37 +0300
+From: =?koi8-r?B?4tXI1MnOwSDhzsHT1MHTydEg4czFy9PBzsTSz9fOwQ==?=
+	<abuhtina@ao-solomon.ru>
+To: =?koi8-r?B?69Xa2M3JzsEg8M/Myc7BIPfBzMXS2MXXzsE=?=
+	<pkuzmina@gcconsulting.ru>, =?koi8-r?B?59XTxdcg4czFy9PFyg==?=
+	<agusev@gcconsulting.ru>
+Subject: =?koi8-r?B?z87MwcrOINDSz8TB1sk=?=
+Thread-Topic: =?koi8-r?B?z87MwcrOINDSz8TB1sk=?=
+Thread-Index: Ad01KiHEelDxk9YDS9abagISkYZbngAAAAJQ
+Date: Wed, 26 Aug 2026 07:11:37 +0000
+Message-ID: <33f2c3b75db6424f8d282c29731d9606@mail13.solomon.local>
+Accept-Language: ru-RU, en-US
+Content-Language: ru-RU
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+x-ms-exchange-messagesentrepresentingtype: 1
+x-ms-exchange-transport-fromentityheader: Hosted
+x-originating-ip: [192.168.9.60]
+Content-Type: multipart/alternative;
+	boundary="_000_33f2c3b75db6424f8d282c29731d9606mail13solomonlocal_"
+MIME-Version: 1.0
+X-Last-TLS-Session-Version: None
+X-Rspamd-Queue-Id: 81591288343
+X-Spamd-Result: default: False [-1997.50 / 100.00];
+	MAILCOW_WHITE(-1998.00)[];
+	FORGED_RECIPIENTS(2.00)[m:pkuzmina@gcconsulting.ru,m:agusev@gcconsulting.ru,s:support@audetv.ru];
+	IP_REPUTATION_HAM(-1.30)[asn: 20632(-0.37), country: RU(-0.01), ip: 195.5.145.10(-0.92)];
+	R_SPF_ALLOW(-0.20)[+ip4:195.5.145.10/32:c];
+	MIME_GOOD(-0.10)[multipart/alternative,text/plain];
+	MIME_BASE64_TEXT(0.10)[];
+	MX_GOOD(-0.10)[relay.ao-solomon.ru];
+	RCVD_NO_TLS_LAST(0.10)[];
+	ARC_NA(0.00)[];
+	FROM_HAS_DN(0.00)[];
+	MIME_TRACE(0.00)[0:+,1:+,2:~,3:~];
+	ASN(0.00)[asn:20632, ipnet:195.5.128.0/19, country:RU];
+	CLAM_VIRUS_FAIL(0.00)[failed to scan and retransmits exceed];
+	RCPT_MAILCOW_DOMAIN(0.00)[audetv.ru];
+	DMARC_NA(0.00)[ao-solomon.ru];
+	R_DKIM_NA(0.00)[];
+	TO_DN_ALL(0.00)[];
+	FROM_EQ_ENVFROM(0.00)[];
+	ARC_SIGNED(0.00)[audetv.ru:s=dkim:i=1];
+	SUSPICIOUS_AUTH_ORIGIN(0.00)[];
+	RCVD_COUNT_THREE(0.00)[4];
+	HAS_XOIP(0.00)[];
+	RCPT_COUNT_TWO(0.00)[2];
+	MISSING_XM_UA(0.00)[]
+
+--_000_33f2c3b75db6424f8d282c29731d9606mail13solomonlocal_
+Content-Type: text/plain; charset="koi8-r"
+Content-Transfer-Encoding: quoted-printable
+
+
+
+--_000_33f2c3b75db6424f8d282c29731d9606mail13solomonlocal_
+Content-Type: text/html; charset="koi8-r"
+Content-Transfer-Encoding: quoted-printable
+
+<html xmlns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-micr=
+osoft-com:office:office" xmlns:w=3D"urn:schemas-microsoft-com:office:word" =
+xmlns:m=3D"http://schemas.microsoft.com/office/2004/12/omml" xmlns=3D"http:=
+//www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dkoi8-r">
+<meta name=3D"Generator" content=3D"Microsoft Word 15 (filtered medium)">
+<style><!--
+/* Font Definitions */
+@font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Calibri;
+	panose-1:2 15 5 2 2 2 4 3 2 4;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin:0cm;
+	margin-bottom:.0001pt;
+	font-size:11.0pt;
+	font-family:"Calibri",sans-serif;
+	mso-fareast-language:EN-US;}
+a:link, span.MsoHyperlink
+	{mso-style-priority:99;
+	color:#0563C1;
+	text-decoration:underline;}
+a:visited, span.MsoHyperlinkFollowed
+	{mso-style-priority:99;
+	color:#954F72;
+	text-decoration:underline;}
+p.msonormal0, li.msonormal0, div.msonormal0
+	{mso-style-name:msonormal;
+	mso-margin-top-alt:auto;
+	margin-right:0cm;
+	mso-margin-bottom-alt:auto;
+	margin-left:0cm;
+	font-size:12.0pt;
+	font-family:"Times New Roman",serif;}
+span.EmailStyle18
+	{mso-style-type:personal;
+	font-family:"Calibri",sans-serif;
+	color:windowtext;}
+span.EmailStyle19
+	{mso-style-type:personal-compose;}
+.MsoChpDefault
+	{mso-style-type:export-only;
+	font-size:10.0pt;}
+@page WordSection1
+	{size:612.0pt 792.0pt;
+	margin:2.0cm 42.5pt 2.0cm 3.0cm;}
+div.WordSection1
+	{page:WordSection1;}
+--></style><!--[if gte mso 9]><xml>
+<o:shapedefaults v:ext=3D"edit" spidmax=3D"1026" />
+</xml><![endif]--><!--[if gte mso 9]><xml>
+<o:shapelayout v:ext=3D"edit">
+<o:idmap v:ext=3D"edit" data=3D"1" />
+</o:shapelayout></xml><![endif]-->
+</head>
+<body lang=3D"RU" link=3D"#0563C1" vlink=3D"#954F72">
+<div class=3D"WordSection1">
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+</div>
+</body>
+</html>
+
+--_000_33f2c3b75db6424f8d282c29731d9606mail13solomonlocal_
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6UkVRVUVTVA0KUFJPRElEOk1pY3Jvc29mdCBFeGNoYW5n
+ZSBTZXJ2ZXIgMjAxMA0KVkVSU0lPTjoyLjANCkJFR0lOOlZUSU1FWk9ORQ0KVFpJRDpSdXNzaWFu
+IFN0YW5kYXJkIFRpbWUNCkJFR0lOOlNUQU5EQVJEDQpEVFNUQVJUOjE2MDEwMTAxVDAwMDAwMA0K
+VFpPRkZTRVRGUk9NOiswMzAwDQpUWk9GRlNFVFRPOiswMzAwDQpFTkQ6U1RBTkRBUkQNCkJFR0lO
+OkRBWUxJR0hUDQpEVFNUQVJUOjE2MDEwMTAxVDAwMDAwMA0KVFpPRkZTRVRGUk9NOiswMzAwDQpU
+Wk9GRlNFVFRPOiswMzAwDQpFTkQ6REFZTElHSFQNCkVORDpWVElNRVpPTkUNCkJFR0lOOlZFVkVO
+VA0KT1JHQU5JWkVSO0NOPdCR0YPRhdGC0LjQvdCwINCQ0L3QsNGB0YLQsNGB0LjRjyDQkNC70LXQ
+utGB0LDQvdC00YDQvtCy0L3QsDpNDQogQUlMVE86YWJ1aHRpbmFAYW8tc29sb21vbi5ydQ0KQVRU
+RU5ERUU7Uk9MRT1SRVEtUEFSVElDSVBBTlQ7UEFSVFNUQVQ9TkVFRFMtQUNUSU9OO1JTVlA9VFJV
+RTtDTj3QmtGD0LfRjNC8DQog0LjQvdCwINCf0L7Qu9C40L3QsCDQktCw0LvQtdGA0YzQtdCy0L3Q
+sDpNQUlMVE86cGt1em1pbmFAZ2Njb25zdWx0aW5nLnJ1DQpBVFRFTkRFRTtST0xFPVJFUS1QQVJU
+SUNJUEFOVDtQQVJUU1RBVD1ORUVEUy1BQ1RJT047UlNWUD1UUlVFO0NOPdCT0YPRgdC10LINCiAg
+0JDQu9C10LrRgdC10Lk6TUFJTFRPOmFndXNldkBnY2NvbnN1bHRpbmcucnUNCkRFU0NSSVBUSU9O
+O0xBTkdVQUdFPXJ1LVJVOlxuDQpTVU1NQVJZO0xBTkdVQUdFPXJ1LVJVOtC+0L3Qu9Cw0LnQvSDQ
+v9GA0L7QtNCw0LbQuA0KRFRTVEFSVDtUWklEPVJ1c3NpYW4gU3RhbmRhcmQgVGltZToyMDI2MDgy
+NlQxNDMwMDANCkRURU5EO1RaSUQ9UnVzc2lhbiBTdGFuZGFyZCBUaW1lOjIwMjYwODI2VDE1MDAw
+MA0KVUlEOjA0MDAwMDAwODIwMEUwMDA3NEM1QjcxMDFBODJFMDA4MDAwMDAwMDA2MDQ5MUM0NzQz
+MzVERDAxMDAwMDAwMDAwMDAwMDAwDQogMDEwMDAwMDAwRDlFNjcyQTZCM0JDRDU0NUE0NUJGRkI1
+MzMyREVERjMNCkNMQVNTOlBVQkxJQw0KUFJJT1JJVFk6NQ0KRFRTVEFNUDoyMDI2MDgyNlQwNzEx
+MzZaDQpUUkFOU1A6T1BBUVVFDQpTVEFUVVM6Q09ORklSTUVEDQpTRVFVRU5DRTowDQpMT0NBVElP
+TjtMQU5HVUFHRT1ydS1SVTrRgyDQkNC70LXQutGB0LXRjw0KWC1NSUNST1NPRlQtQ0RPLUFQUFQt
+U0VRVUVOQ0U6MA0KWC1NSUNST1NPRlQtQ0RPLU9XTkVSQVBQVElEOi0xNjAyNTgyNTUwDQpYLU1J
+Q1JPU09GVC1DRE8tQlVTWVNUQVRVUzpURU5UQVRJVkUNClgtTUlDUk9TT0ZULUNETy1JTlRFTkRF
+RFNUQVRVUzpCVVNZDQpYLU1JQ1JPU09GVC1DRE8tQUxMREFZRVZFTlQ6RkFMU0UNClgtTUlDUk9T
+T0ZULUNETy1JTVBPUlRBTkNFOjENClgtTUlDUk9TT0ZULUNETy1JTlNUVFlQRTowDQpYLU1JQ1JP
+U09GVC1ESVNBTExPVy1DT1VOVEVSOkZBTFNFDQpCRUdJTjpWQUxBUk0NCkRFU0NSSVBUSU9OOlJF
+TUlOREVSDQpUUklHR0VSO1JFTEFURUQ9U1RBUlQ6LVBUMTVNDQpBQ1RJT046RElTUExBWQ0KRU5E
+OlZBTEFSTQ0KRU5EOlZFVkVOVA0KRU5EOlZDQUxFTkRBUg0K
+
+--_000_33f2c3b75db6424f8d282c29731d9606mail13solomonlocal_--

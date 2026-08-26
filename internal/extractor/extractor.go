@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jhillyerd/enmime"
+
+	"github.com/audetv/mailbridge/internal/preprocessor"
 )
 
 // ExtractedEmail содержит результат извлечения данных из письма.
@@ -20,6 +22,7 @@ type ExtractedEmail struct {
 	Subject     string
 	BodyText    string
 	BodyHTML    string
+	Calendar    string
 	References  []string
 	InReplyTo   string
 	Attachments []Attachment
@@ -112,11 +115,31 @@ func (e *Extractor) Extract(raw []byte) (*ExtractedEmail, error) {
 		Subject:     subject,
 		BodyText:    bodyText,
 		BodyHTML:    bodyHTML,
+		Calendar:    extractCalendarParts(env),
 		References:  refs,
 		InReplyTo:   inReplyTo,
 		Attachments: attachments,
 		ReceivedAt:  time.Now(),
 	}, nil
+}
+
+// extractCalendarParts извлекает iCalendar-части (text/calendar) из OtherParts
+// envelope и превращает их в читаемый текст секций событий.
+// Календарные приглашения Exchange (multipart/alternative → text/calendar)
+// enmime кладёт в OtherParts, а не в Attachments — без этой функции такие
+// письма приходят в AI с пустым телом (issue #1).
+func extractCalendarParts(env *enmime.Envelope) string {
+	var calendars []string
+	for _, p := range env.OtherParts {
+		if p == nil || !strings.HasPrefix(p.ContentType, "text/calendar") {
+			continue
+		}
+		if text := preprocessor.ExtractICal(p.Content); text != "" {
+			calendars = append(calendars, text)
+		}
+	}
+
+	return strings.Join(calendars, "")
 }
 
 // cleanHeader очищает заголовок от MIME-слов и лишних символов.

@@ -1,6 +1,7 @@
 package adapters_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -87,4 +88,67 @@ Content-Type: text/plain
 	if item.ThreadID != "msg-1@example.com" {
 		t.Errorf("ThreadID = %s, want msg-1@example.com", item.ThreadID)
 	}
+}
+
+// TestEmailAdapter_CalendarInvite — приёмка issue #1:
+// приглашение Exchange (text/calendar в multipart/alternative) должно
+// дойти до InboxItem.BodyText секцией [СОБЫТИЕ], а не потеряться.
+func TestEmailAdapter_CalendarInvite(t *testing.T) {
+	adapter := setupEmailAdapter(t)
+
+	raw, err := os.ReadFile("testdata/calendar_invite.eml")
+	if err != nil {
+		t.Fatalf("read testdata/calendar_invite.eml: %v", err)
+	}
+
+	parseResult, err := adapter.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	item := parseResult.InboxItem
+
+	if !strings.Contains(item.BodyText, "[СОБЫТИЕ]") {
+		t.Errorf("BodyText missing [СОБЫТИЕ] section, got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "онлайн продажи") {
+		t.Errorf("BodyText missing event summary, got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "14:30") {
+		t.Errorf("BodyText missing event start time, got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "у Алексея") {
+		t.Errorf("BodyText missing location (folded RFC 5545 line), got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "Бухтина") {
+		t.Errorf("BodyText missing organizer (folded RFC 5545 line), got: %q", item.BodyText)
+	}
+	t.Logf("Adapted body:\n%s", item.BodyText)
+}
+
+// TestEmailAdapter_CalendarCancel — ветка CANCEL (письмо 2.eml, записыв 61):
+// отмена регулярных встреч тоже должна дойти до AI как [СОБЫТИЕ] с METHOD CANCEL.
+func TestEmailAdapter_CalendarCancel(t *testing.T) {
+	adapter := setupEmailAdapter(t)
+
+	raw, err := os.ReadFile("testdata/calendar_cancel.eml")
+	if err != nil {
+		t.Fatalf("read testdata/calendar_cancel.eml: %v", err)
+	}
+
+	parseResult, err := adapter.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	item := parseResult.InboxItem
+
+	if !strings.Contains(item.BodyText, "[СОБЫТИЕ]") {
+		t.Errorf("BodyText missing [СОБЫТИЕ] section, got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "CANCEL") {
+		t.Errorf("BodyText missing METHOD CANCEL, got: %q", item.BodyText)
+	}
+	if !strings.Contains(item.BodyText, "Сайт Гостиницы") {
+		t.Errorf("BodyText missing event summary «Сайт Гостиницы», got: %q", item.BodyText)
+	}
+	t.Logf("Adapted CANCEL body:\n%s", item.BodyText)
 }

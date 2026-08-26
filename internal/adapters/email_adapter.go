@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
@@ -61,6 +62,17 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 		if htmlText := cleaner.HTMLToText(email.BodyHTML); htmlText != "" {
 			bodyText = htmlText
 		}
+	}
+
+	// Календарные приглашения (text/calendar → секция [СОБЫТИЕ]):
+	// добавляем ВСЕГДА, если есть, — после HTML-перезаписи, чтобы не потерять.
+	// Без этого Exchange-приглашения приходили в AI с пустым телом (issue #1).
+	if email.Calendar != "" {
+		bodyText = strings.TrimSpace(bodyText)
+		if bodyText != "" {
+			bodyText += "\n\n"
+		}
+		bodyText += email.Calendar
 	}
 
 	item := &store.InboxItem{

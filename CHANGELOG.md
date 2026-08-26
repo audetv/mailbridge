@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Приглашения Exchange-календаря (text/calendar) больше не теряются: событие извлекается
+  в секцию `[СОБЫТИЕ]` и попадает в текст письма для AI (issue #1, docs/issues/1.md);
+  парсер iCalendar поддерживает unfolding строк (RFC 5545 §3.1) — ранее реальные
+  Exchange-писма давали обрезанный ORGANIZER и потерянных ATTENDEE.
+
 ## [0.20.2] - 2026-08-26
 
 ### Added
