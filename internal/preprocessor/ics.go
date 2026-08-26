@@ -69,7 +69,7 @@ func unescapeICalValue(s string) string {
 			case 'r', 'R':
 				// \r\n схлопывается в один перевод строки (\n обработаем на след. итерации)
 			case ';', ',', '\\', '"':
-				b.WriteByte(s[i + 1])
+				b.WriteByte(s[i+1])
 			default:
 				b.WriteByte(s[i])
 			}

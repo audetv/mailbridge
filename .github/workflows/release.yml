@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # полная история для git describe (версия в бинарнике)
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install frontend deps
+        run: cd frontend && npm ci
+
+      - name: Build (frontend + static + binary)
+        run: make build
+
+      - name: Version check
+        run: ./build/mailbridge version
+
+      - name: Create GitHub Release + binary
+        # gh CLI на.runner'е использует GITHUB_TOKEN автоматически
+        run: |
+          ./build/mailbridge version
+          gh release create "${GITHUB_REF_NAME}" build/mailbridge \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

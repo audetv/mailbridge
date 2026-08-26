@@ -19,8 +19,26 @@ make lint
 
 - **Прямой push / merge в `main` запрещён** — `main` защищена на GitHub, все изменения только через PR.
 - Одна задача — отдельная ветка от актуального `main` (`fix/...`, `feat/...`, `docs/...`).
-- Перед открытием PR — CI зелёное, `make test` локально.
+- **Green CI обязателен:** merge только после того, как Actions/CI полностью зелёная (оба джоба CI — Lint и Test — успешны). CI красная = merge запрещён, сначала починить на ветке.
 - Мерж только после ревью; после мержа ветка удаляется.
+
+## Правила CI/CD (gate)
+
+- CI: `.github/workflows/ci.yml` → джобы `Lint` (golangci-lint + npm lint + build) и `Test` (`go test -race`).
+- `main` защищена **required status check `CI`** → GitHub не даст mergнуть PR без зелёного CI.
+- `go` lint (golangci-lint, gofmt) и `npm run lint` обязаны проходить до мержа.
+- Коммит не считается готовым, пока `gh run list` для его head sha не green.
+- После мержа убедиться, что push-запуск на `main` тоже green (иначе чинить отдельной веткой).
+
+## Правила релизов
+
+- **Релиз — минорный `0.x.y` (до v1.0.0).** До v1 меняется архитектура и API, поэтому релизы минорные; выход v1 — отдельное решение.
+- После мержа PR в `main` делаем:
+  1. CHANGELOG: секция `[0.X.Y]` с датой (обязательно, входит в notes релиза),
+  2. **Тег `v0.X.Y` на смерженный commit main** — он запускает workflow `Release` (`.github/workflows/release.yml`): `make build` → GitHub Release + бинарник (asset `mailbridge`) автоматически,
+  3. Проверка: `gh run list --workflow release.yml --limit 1` green, `gh release view v0.X.Y --json assets`.
+- Версия в бинарнике: `git describe --tags` → Makefile `VERSION` → ldflags → `internal/version`.
+- Локальный (offline) вариант: `make build && gh release create v0.X.Y build/mailbridge --title v0.X.Y` (см. `docs/operations.md`, «Релизы»).
 
 ## Перед PR
 

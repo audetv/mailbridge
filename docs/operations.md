@@ -98,6 +98,26 @@ tar czf backup-$(date +%Y%m%d).tar.gz data/
 systemctl --user start mailbridge
 ```
 
+## Релизы
+
+**Версионирование:** до v1.0.0 — только минорные `0.x.y` (архитектура и API ещё меняются; переход на v1 — отдельное решение). Формат SemVer, тег `v0.X.Y`.
+
+Последовательность после мержа PR в `main` (CI обязана быть зелёной):
+
+```bash
+# 1) CHANGELOG.md — секция [0.X.Y] с датой (обязательно)
+# 2) Тег на main — запускает workflow Release (автомат. сборка + GitHub Release + бинарник)
+git tag v0.X.Y
+git push origin v0.X.Y
+
+# 3) Проверка
+gh run list --workflow release.yml --limit 1
+gh release view v0.X.Y --json name,assets --jq .assets
+./build/mailbridge version   # локальная сборка: make build, версия из git describe --tags
+```
+
+> Workflow: `.github/workflows/release.yml` — триггер `push: tags: v*`, шаги: `make build` → `gh release create` с asset `mailbridge`.
+
 ## Деплой (systemd user)
 
 ```ini
