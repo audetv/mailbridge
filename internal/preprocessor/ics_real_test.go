@@ -19,14 +19,14 @@ func TestRealICalFromEmL(t *testing.T) {
 
 	expectations := []string{
 		"[СОБЫТИЕ]",
-		"онлайн продажи",                          // SUMMARY
-		"26.08.2026 14:30",                        // DTSTART
-		"Russian Standard Time",                   // TZID
-		"у Алексея",                               // LOCATION — полное, без обрыва
-		"Бухтина Анастасия Александровна",         // ORGANIZER — полный CN (unfolding)
-		"Кузьмина Полина Валерьевна",              // ATTENDEE 1 — полный (unfolding)
-		"Гусев Алексей",                           // ATTENDEE 2
-		"Метод: REQUEST",                          // METHOD
+		"онлайн продажи",        // SUMMARY
+		"26.08.2026 14:30",      // DTSTART
+		"Russian Standard Time", // TZID
+		"у Алексея",             // LOCATION — полное, без обрыва
+		"Бухтина Анастасия Александровна", // ORGANIZER — полный CN (unfolding)
+		"Кузьмина Полина Валерьевна",      // ATTENDEE 1 — полный (unfolding)
+		"Гусев Алексей",                   // ATTENDEE 2
+		"Метод: REQUEST",                  // METHOD
 	}
 	for _, e := range expectations {
 		if !strings.Contains(text, e) {

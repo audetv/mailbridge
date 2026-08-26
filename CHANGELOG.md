@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.21.1] - 2026-08-26
+
+### Added
+- Workflow `Release` (`.github/workflows/release.yml`): тег `v*` автоматически собирает бинарник и публикует GitHub Release
+
+### Fixed
+- gofmt: `ics.go` (`s[i+1]`) и выравнивание комментариев в `ics_real_test.go` — CI Lint зелёный
+
+### Changed
+- Правила веток/CI/релизов в CONTRIBUTING.md/AGENTS.md/operations.md: PR-only, green CI обязателен, релизы минорные до v1
+
 ## [0.21.0] - 2026-08-26
 
 ### Fixed
