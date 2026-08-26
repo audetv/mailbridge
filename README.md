@@ -79,6 +79,15 @@ make lint
 ## Документация
 
 - [Архитектура](docs/ARCHITECTURE.md)
+- [Модель данных](docs/data-model.md)
+- [REST API](docs/api.md)
+- [AI-конвейер](docs/ai-pipeline.md)
+- [Эксплуатация](docs/operations.md)
+- [Архитектурные решения (ADR)](docs/adr/)
+
+## Агентный контекст
+
+Для AI-агентов: [AGENTS.md](AGENTS.md) — команды, карта репозитория, правила и инварианты.
 
 ## Лицензия
 
