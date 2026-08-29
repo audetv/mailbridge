@@ -99,4 +99,21 @@ describe('CreateTaskDialog', () => {
     expect(locked.vm.showProjectSelect).toBe(false)
     expect(free.vm.showProjectSelect).toBe(true)
   })
+
+  it('REGRESSION: Select ставит объект-опцию в v-model → payload получает примитив', async () => {
+    // PrimeVue Select без optionValue кладёт в v-model ЦЕЛЫЙ объект-опцию.
+    // До фикса buildPayload улетал с project={id,name} / epic_id={value,label}
+    // → бэк 400 "invalid request body".
+    const w = mountDialog({ projects: [{ id: 3, name: 'A' }], initialProject: 'A' })
+    w.vm.title = 'Заголовок'
+    w.vm.setProject({ id: 3, name: 'A' })
+    const p = await w.vm.buildPayload()
+    expect(typeof p.project).toBe('string')
+    expect(p.project).toBe('A')
+
+    w.vm.setEpic({ value: 9, label: 'Модуль' })
+    const p2 = await w.vm.buildPayload()
+    expect(typeof p2.epic_id).toBe('number')
+    expect(p2.epic_id).toBe(9)
+  })
 })

@@ -77,14 +77,16 @@ watch(
       epic.value = null
       description.value = ''
       localEpics.value = []
-      loadProjectEpics(project.value)
+      loadProjectEpics(toName(project.value))
     }
   }
 )
 
-watch(project, (name) => {
+watch(project, (raw) => {
   // Старый модуль невалиден для нового проекта — сбрасываем.
   epic.value = null
+  // Select мог положить объект-опцию — нормализуем к имени.
+  const name = typeof raw === 'object' ? raw?.name : raw
   loadProjectEpics(name)
 })
 
@@ -96,18 +98,40 @@ const showProjectSelect = computed(
   () => !props.lockProject && props.projects.length > 1
 )
 
-// Ставим модуль (value из effectiveEpics). Вынесено в метод, чтобы тест мог
-// задать его без обхода ref-прокси (shallow setupState: присваивание w.vm.epic
-// затирало бы сам ref). В реальном UI это делает Select через v-model.
+// Ставим проект (любой raw, который даёт Select: строка или объект-опция).
+// Вынесено в метод: в тестах w.vm.project = X на shallow setupState затирал
+// бы сам ref, а здесь мы работаем с рефакторным API.
+function setProject(raw) {
+  project.value = raw
+}
+
+// Ставим модуль (value из effectiveEpics). В реальном UI это делает Select
+// через v-model (optionValue="value" → числовой id).
 function setEpic(id) {
   epic.value = id
 }
 
-async function buildPayload() {
+// PrimeVue Select БЕЗ optionValue кладёт в v-model ЦЕЛЫЙ объект-опцию,
+// а не его значение. Приводим к примитивам, иначе бэк получает
+// JSON-объект вместо строки/числа и отвечает 400 "invalid request body".
+// Контракт API: project = имя (строка), epic_id = число.
+function toName(v) {
+  if (v == null) return ''
+  if (typeof v === 'object') return v.name ?? v.value ?? ''
+  return String(v)
+}
 
-  const payload = { title: title.value.trim(), project: project.value }
+function toId(v) {
+  if (v == null) return null
+  if (typeof v === 'object') return v.value ?? v.id ?? null
+  return v
+}
+
+async function buildPayload() {
+  const payload = { title: title.value.trim(), project: toName(project.value) }
   if (description.value.trim()) payload.description = description.value.trim()
-  if (epic.value) payload.epic_id = epic.value
+  const epicId = toId(epic.value)
+  if (epicId != null) payload.epic_id = epicId
   return payload
 }
 
@@ -136,7 +160,7 @@ function cancel() {
   emit('cancel')
 }
 
-defineExpose({ title, project, epic, description, submit, buildPayload, canSubmit, showProjectSelect, effectiveEpics, loadProjectEpics, localEpics, setEpic })
+defineExpose({ title, project, epic, description, submit, buildPayload, canSubmit, showProjectSelect, effectiveEpics, loadProjectEpics, localEpics, setEpic, setProject })
 </script>
 
 <template>
@@ -162,16 +186,20 @@ defineExpose({ title, project, epic, description, submit, buildPayload, canSubmi
 
       <label v-if="showProjectSelect" class="field">
         <span>Проект</span>
-        <Select v-model="project" :options="projects" optionLabel="name" placeholder="Выберите проект" />
+        <!-- optionValue обязателен: без него PrimeVue Select ставит в v-model
+             ЦЕЛЫЙ объект-опцию, и бэк отвечает "invalid request body" -->
+        <Select v-model="project" :options="projects" optionLabel="name" optionValue="name" placeholder="Выберите проект" />
       </label>
       <div v-else-if="project" class="ctx-project">Проект: <strong>{{ project }}</strong></div>
 
       <label v-if="effectiveEpics().length > 0" class="field">
         <span>Модуль (необязательно)</span>
+        <!-- optionValue="value" → v-model получает числовой id, а не объект -->
         <Select
           v-model="epic"
           :options="effectiveEpics()"
           optionLabel="label"
+          optionValue="value"
           allowEmpty
           placeholder="без модуля"
         />
