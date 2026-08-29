@@ -62,7 +62,7 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
-| 1 | Базовая линия: ветка `feat/...` от main; `make lint`, `make test`, `npm run lint` зелёные; **зафиксировать этот манифест коммитом** | — | `[ ]` |
+| 1 | Базовая линия: ветка `feat/...` от main; `make lint`, `make test`, `npm run lint` зелёные; **зафиксировать этот манифест коммитом** | — | `[x]` 64497ab (lint 0 issues, тесты green, npm green) |
 | 2 | Миграция `projects` + сида из `configs/rules.yml` (секция `# Проекты`: ТРК, Отель, Лидер Спорт, Театр, Мебельный центр, Складской комплекс, Кафе, Ледовая арена, Корпоративные сайты, + `Входящие`) + из distinct `tasks.project`; **идемпотентно** (`IF NOT EXISTS` + upsert по `name`) | 1 | `[ ]` |
 | 3 | `store.Store`: модели `Project`, методы `CreateProject / GetProject / GetProjectByName / ListProjects(includeArchived) / UpdateProject / ArchiveProject`; sqlite-реализация + table-driven тесты (sqlite-инстанс) | 2 | `[ ]` |
 | 4 | API `/api/projects` (GET/POST), `/api/projects/{id}` (GET/PUT/DELETE→archive, ре-активация `POST /{id}/unarchive`); валидация имени (≠ пустое, ≤ 128, не дубль); WS-события `project_created/updated/archived` | 3 | `[ ]` |
