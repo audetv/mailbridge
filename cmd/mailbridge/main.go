@@ -337,6 +337,41 @@ func main() {
 	})
 	mux.HandleFunc("/api/projects/{id}/unarchive", projectHandler.UnarchiveProject)
 
+	// Epics API (модули)
+	epicHandler := web.NewEpicHandler(st, broker)
+	mux.HandleFunc("/api/projects/{id}/epics", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			epicHandler.ListEpicsList(w, r)
+		case http.MethodPost:
+			epicHandler.CreateEpicList(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/epics/{epic_id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			epicHandler.GetEpicDetailHandler(w, r)
+		case http.MethodPut:
+			epicHandler.UpdateEpicDetail(w, r)
+		case http.MethodDelete:
+			epicHandler.DeleteEpicDetail(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/epics/{epic_id}/tasks/{taskId}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			epicHandler.LinkTaskEpic(w, r)
+		case http.MethodDelete:
+			epicHandler.UnlinkTaskEpic(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
 	mux.HandleFunc("/api/inbox/{id}", taskHandler.GetInboxItem)
 	mux.HandleFunc("/api/inbox/{id}/attachments", taskHandler.GetInboxAttachments)
