@@ -1,3 +1,4 @@
+// Хранение задач: список, фильтры, CRUD
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import apiClient from '@/api/client'
@@ -92,6 +93,17 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchTasks()
   }
 
+  // Привязка / отвязка задачи к модулю (epic). epicId = null — отвязать.
+  async function setEpic(taskId, epicId) {
+    const { data } = await apiClient.patch(`/tasks/${taskId}`, { epic_id: epicId ?? null })
+    const t = tasks.value.find((x) => x.id === taskId)
+    if (t) t.epic_id = epicId ?? null
+    if (currentTask.value && currentTask.value.id === taskId) {
+      currentTask.value.epic_id = epicId ?? null
+    }
+    return data
+  }
+
   return {
     tasks,
     total,
@@ -108,6 +120,7 @@ export const useTasksStore = defineStore('tasks', () => {
     markAsRead,
     setFilter,
     setStatuses,
+    setEpic,
     fetchInboxCount,
     fetchTaskInbox
   }

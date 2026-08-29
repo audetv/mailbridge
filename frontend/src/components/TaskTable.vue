@@ -43,6 +43,12 @@
       </template>
     </Column>
     <Column field="project" header="Проект" style="width: 150px" />
+    <Column field="epic_id" header="Модуль" style="width: 130px">
+      <template #body="{ data }">
+        <Tag v-if="epicName(data)" :value="epicName(data)" severity="secondary" />
+        <span v-else class="epic-none">—</span>
+      </template>
+    </Column>
     <Column field="status" header="Статус" style="width: 120px">
       <template #body="{ data }">
         <Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" />
@@ -55,14 +61,23 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
+import { useEpicsStore } from '@/stores/epics'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Badge from 'primevue/badge'
 
 const store = useTasksStore()
+const epics = useEpicsStore()
 const router = useRouter()
 const route = useRoute()
+
+// Имя модуля по task.epic_id из epics-store (если загружен), иначе null.
+function epicName(task) {
+  if (!task.epic_id) return null
+  const e = epics.epicById(task.epic_id)
+  return e ? e.name : null
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
@@ -101,6 +116,8 @@ function onPage(event) {
   store.filters.page = event.page + 1
   store.fetchTasks()
 }
+
+defineExpose({ epicName })
 </script>
 
 <style scoped>
@@ -112,6 +129,10 @@ function onPage(event) {
 
 .unread-badge {
   flex-shrink: 0;
+}
+
+.epic-none {
+  opacity: 0.4;
 }
 
 :deep(.task-unread) {
