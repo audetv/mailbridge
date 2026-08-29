@@ -77,6 +77,13 @@ export const useTasksStore = defineStore('tasks', () => {
     return data
   }
 
+  // Ручное создание задачи. body: {title, project, description?, epic_id?}.
+  // Статус всегда new (на сервере). Возвращает созданную задачу (data) с id.
+  async function createTask(body) {
+    const { data } = await apiClient.post('/tasks', body)
+    return data
+  }
+
   async function markAsRead(id) {
     await apiClient.post(`/tasks/${id}/mark-read`)
   }
@@ -115,6 +122,7 @@ export const useTasksStore = defineStore('tasks', () => {
     filters,
     fetchTasks,
     fetchTask,
+    createTask,
     updateTask,
     replyTask,
     markAsRead,

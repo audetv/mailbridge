@@ -70,6 +70,52 @@ func TestMigrate_EpicsTable(t *testing.T) {
 	}
 }
 
+// TestMigrate_EpicsDescription_Backfill — регрессия: БД, созданная ранним билдсом
+// (epics без description/status), после Migrate получает недостающие колонки.
+func TestMigrate_EpicsDescription_Backfill(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Имитация старой схемы: epics без description/status
+	if _, err := s.ExecForTest(ctx, "DROP TABLE epics"); err != nil {
+		t.Fatalf("drop epics: %v", err)
+	}
+	legacy := `CREATE TABLE epics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		number INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(project_id, number)
+	)`
+	if _, err := s.ExecForTest(ctx, legacy); err != nil {
+		t.Fatalf("create legacy epics: %v", err)
+	}
+	if exists, _ := s.ColumnExistsForTest(ctx, "epics", "description"); exists {
+		t.Fatal("precondition: legacy epics must NOT have description")
+	}
+
+	// Migrate должен дособирать недостающие колонки
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate on legacy schema: %v", err)
+	}
+	if exists, err := s.ColumnExistsForTest(ctx, "epics", "description"); err != nil || !exists {
+		t.Fatalf("epics.description after Migrate: %v %v", exists, err)
+	}
+	if exists, err := s.ColumnExistsForTest(ctx, "epics", "status"); err != nil || !exists {
+		t.Fatalf("epics.status after Migrate: %v %v", exists, err)
+	}
+
+	// CRUD теперь работает через полную схему
+	proj := &store.Project{Name: "Backfill"}
+	if err := s.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := s.CreateEpic(ctx, &store.Epic{ProjectID: proj.ID, Name: "После backfill"}); err != nil {
+		t.Fatalf("CreateEpic after backfill: %v", err)
+	}
+}
+
 func TestMigrate_EpicsIdempotent(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()

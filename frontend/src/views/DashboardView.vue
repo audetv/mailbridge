@@ -23,10 +23,25 @@
       <InboxView v-if="activeTab === 'inbox'" />
       <ProjectsView v-else-if="activeTab === 'projects'" />
       <template v-else>
+        <div class="tasks-toolbar">
+          <Button
+            label="Создать задачу"
+            icon="pi pi-plus"
+            @click="createTaskDialogOpen = true"
+          />
+        </div>
         <FilterBar />
         <TaskTable />
       </template>
     </main>
+
+    <!-- Диалог создания задачи (кнопка в «Активных задачах»): проект выбирается -->
+    <CreateTaskDialog
+      :visible="createTaskDialogOpen"
+      :projects="projectsStore.projects"
+      @cancel="createTaskDialogOpen = false"
+      @success="onTaskCreated"
+    />
   </div>
 </template>
 
@@ -49,6 +64,7 @@ import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
 import InboxView from '@/views/InboxView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
+import CreateTaskDialog from '@/components/CreateTaskDialog.vue'
 
 const themeStore = useThemeStore()
 const router = useRouter()
@@ -63,6 +79,14 @@ const epicsStore = useEpicsStore()
 
 const activeTab = ref('active')
 const activeCount = ref(0)
+const createTaskDialogOpen = ref(false)
+
+// Задача создана из диалога: диалог уже ушёл на /tasks/:id —
+// здесь только актуализируем счётчики, чтобы «Задачи: N» не устарело.
+function onTaskCreated() {
+  fetchActiveCount()
+  store.fetchTasks()
+}
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },

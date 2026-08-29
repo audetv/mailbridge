@@ -4,33 +4,35 @@
     <Card class="create-card">
       <template #title>Новый проект</template>
       <template #subtitle>Внутренний проект — ссылка для задач и модулей</template>
-      <div class="create-form">
-        <div class="create-fields">
-          <label class="field">
-            <span>Название</span>
-            <InputText
-              v-model="newName"
-              maxlength="128"
-              placeholder="Например: ТРК"
-              @keyup.enter="create"
-            />
-          </label>
-          <label class="field grow">
-            <span>Описание (необязательно)</span>
-            <Textarea v-model="newDesc" rows="1" :autoResize="true" @keyup.enter="create" />
-          </label>
+      <template #content>
+        <div class="create-form">
+          <div class="create-fields">
+            <label class="field">
+              <span>Название</span>
+              <InputText
+                v-model="newName"
+                maxlength="128"
+                placeholder="Например: ТРК"
+                @keyup.enter="create"
+              />
+            </label>
+            <label class="field grow">
+              <span>Описание (необязательно)</span>
+              <Textarea v-model="newDesc" rows="1" :autoResize="true" @keyup.enter="create" />
+            </label>
+          </div>
+          <Button label="Создать" icon="pi pi-plus" :loading="store.loading" :disabled="!newName.trim()" @click="create" />
+          <Message
+            v-if="createError"
+            severity="error"
+            :closable="true"
+            @close="createError = ''"
+            class="create-error"
+          >
+            {{ createError }}
+          </Message>
         </div>
-        <Button label="Создать" icon="pi pi-plus" :loading="store.loading" :disabled="!newName.trim()" @click="create" />
-      </div>
-      <Message
-        v-if="createError"
-        severity="error"
-        :closable="true"
-        @close="createError = ''"
-        class="create-error"
-      >
-        {{ createError }}
-      </Message>
+      </template>
     </Card>
 
     <!-- Список -->
@@ -61,6 +63,18 @@
             size="small"
             icon="pi pi-box"
             @click="epicProject = epicProject && epicProject.id === data.id ? null : data"
+          />
+        </template>
+      </Column>
+      <Column header="Задача" style="width: 110px">
+        <template #body="{ data }">
+          <Button
+            label="Создать"
+            severity="secondary"
+            text
+            size="small"
+            icon="pi pi-plus"
+            @click="openCreateTask(data)"
           />
         </template>
       </Column>
@@ -112,6 +126,16 @@
     <!-- Панель модулей выбранного проекта -->
     <EpicPanel v-if="epicProject" :project="epicProject" />
 
+    <!-- Диалог создания задачи (проект закреплён) -->
+    <CreateTaskDialog
+      :visible="createTaskProject !== null"
+      :projects="store.projects"
+      :initial-project="createTaskProject?.name || ''"
+      :lock-project="true"
+      :epic-options="createTaskEpics"
+      @cancel="createTaskProject = null"
+    />
+
     <Message v-if="store.error" severity="error" :closable="true" @close="store.error = ''">
       {{ store.error }}
     </Message>
@@ -130,11 +154,28 @@ import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Message from 'primevue/message'
 import { useProjectsStore } from '@/stores/projects'
+import { useEpicsStore } from '@/stores/epics'
 import EpicPanel from '@/components/EpicPanel.vue'
+import CreateTaskDialog from '@/components/CreateTaskDialog.vue'
 
 const store = useProjectsStore()
+const epicsStore = useEpicsStore()
 const toast = useToast()
 const epicProject = ref(null)
+
+
+// Диалог создания задачи: проект закреплён, модуль опциональный
+const createTaskProject = ref(null)
+const createTaskEpics = ref([])
+
+async function openCreateTask(p) {
+  createTaskProject.value = { id: p.id, name: p.name }
+  createTaskEpics.value = []
+  try {
+    const epics = await epicsStore.fetchEpics(p.id)
+    createTaskEpics.value = epics.map((e) => ({ value: e.id, label: e.name }))
+  } catch { /* без модулей — поле в диалоге пустое */ }
+}
 
 const newName = ref('')
 const newDesc = ref('')

@@ -291,6 +291,24 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		}
 	}
 
+	// Модули: в ранней версии схемы (v0.22 шаг 3) epics создавались без description/status;
+	// идемпотентно дособираем колонки, если их нет.
+	epicsBackfillColumns := map[string]string{
+		"description": "TEXT NOT NULL DEFAULT ''",
+		"status":      "TEXT NOT NULL DEFAULT 'open'",
+	}
+	for col, typ := range epicsBackfillColumns {
+		has, err := s.columnExists(ctx, "epics", col)
+		if err != nil {
+			return fmt.Errorf("failed to check epics column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE epics ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add epics column %s: %w", col, err)
+			}
+		}
+	}
+
 	// Добавляем новые колонки в threads если их нет
 	threadColumns := map[string]string{
 		"source":       "TEXT NOT NULL DEFAULT 'email'",
