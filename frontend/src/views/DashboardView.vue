@@ -42,6 +42,7 @@ import { useTasksStore } from '@/stores/tasks'
 import { useProjectsStore } from '@/stores/projects'
 import { useWebSocket } from '@/stores/websocket'
 import { useInboxStore } from '@/stores/inbox'
+import { useEpicsStore } from '@/stores/epics'
 import apiClient from '@/api/client'
 import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
@@ -58,6 +59,7 @@ const store = useTasksStore()
 const projectsStore = useProjectsStore()
 const wsStore = useWebSocket()
 const inboxStore = useInboxStore()
+const epicsStore = useEpicsStore()
 
 const activeTab = ref('active')
 const activeCount = ref(0)
@@ -158,6 +160,16 @@ watch(
         projectsStore.fetchProjects({ archived: 'false' })
         toast.add({ severity: 'info', summary: latest.message, life: 3000 })
         break
+      case 'epic_created':
+      case 'epic_updated':
+      case 'epic_deleted': {
+        // перечитываем список модулей, если уже загружен для проекта
+        if (epicsStore.currentProjectId) {
+          epicsStore.fetchEpics(epicsStore.currentProjectId)
+        }
+        toast.add({ severity: 'info', summary: latest.message, life: 3000 })
+        break
+      }
     }
   }
 )
