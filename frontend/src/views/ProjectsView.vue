@@ -52,6 +52,18 @@
       <Column field="created_at" header="Создан" style="width: 150px">
         <template #body="{ data }">{{ formatDate(data.created_at) }}</template>
       </Column>
+      <Column header="Модули" style="width: 130px">
+        <template #body="{ data }">
+          <Button
+            label="Показать"
+            severity="secondary"
+            text
+            size="small"
+            icon="pi pi-box"
+            @click="epicProject = epicProject && epicProject.id === data.id ? null : data"
+          />
+        </template>
+      </Column>
       <Column header="Действия" style="width: 320px">
         <template #body="{ data }">
           <div class="row-actions">
@@ -97,6 +109,9 @@
       </template>
     </DataTable>
 
+    <!-- Панель модулей выбранного проекта -->
+    <EpicPanel v-if="epicProject" :project="epicProject" />
+
     <Message v-if="store.error" severity="error" :closable="true" @close="store.error = ''">
       {{ store.error }}
     </Message>
@@ -115,9 +130,11 @@ import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Message from 'primevue/message'
 import { useProjectsStore } from '@/stores/projects'
+import EpicPanel from '@/components/EpicPanel.vue'
 
 const store = useProjectsStore()
 const toast = useToast()
+const epicProject = ref(null)
 
 const newName = ref('')
 const newDesc = ref('')
