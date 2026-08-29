@@ -148,6 +148,7 @@ type TaskAttachment struct {
 // TaskFilter содержит параметры фильтрации списка задач.
 type TaskFilter struct {
 	Project  string
+	EpicID   *int64   // фильтр по модулю (epic)
 	Statuses []string // множественный фильтр по статусам
 	Assignee string
 	Type     string

@@ -272,6 +272,14 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(q.Get("page"))
 	perPage, _ := strconv.Atoi(q.Get("per_page"))
 
+	// Фильтр по модулю (эпику)
+	var epicID *int64
+	if raw := q.Get("epic_id"); raw != "" {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			epicID = &v
+		}
+	}
+
 	username := extractUserFromToken(r)
 	// Статусы — может быть несколько ?status=new&status=in_progress
 	var statuses []string
@@ -283,6 +291,7 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	filter := &store.TaskFilter{
 		Project:  q.Get("project"),
+		EpicID:   epicID,
 		Statuses: statuses,
 		Assignee: q.Get("assignee"),
 		Type:     q.Get("type"),
@@ -380,7 +389,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Разрешённые поля для обновления
 	allowedFields := map[string]bool{
 		"project": true, "status": true, "assignee": true,
-		"type": true, "priority": true,
+		"type": true, "priority": true, "epic_id": true,
 	}
 
 	filtered := make(map[string]interface{})

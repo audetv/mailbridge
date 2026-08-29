@@ -278,3 +278,63 @@ func TestDeleteEpicKeepsTasks(t *testing.T) {
 		t.Fatalf("task epic_id after delete = %v, want NULL", got.EpicID)
 	}
 }
+
+// TestListTasks_EpicFilter проверяет фильтр списка задач по модулю (v0.22 step 10).
+func TestListTasks_EpicFilter(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj := &store.Project{Name: "Проект фильтров"}
+	if err := s.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	epic := &store.Epic{ProjectID: proj.ID, Name: "Фильтр"}
+	if err := s.CreateEpic(ctx, epic); err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+
+	const total = 5
+	const epicCount = 3
+	for i := 1; i <= total; i++ {
+		task := &store.Task{MessageID: fmt.Sprintf("epic-filt-%d", i), Subject: "s", BodyText: "b", Status: "active", Project: proj.Name}
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask: %v", err)
+		}
+		if i <= epicCount {
+			if err := s.SetTaskEpic(ctx, task.ID, epic.ID); err != nil {
+				t.Fatalf("SetTaskEpic: %v", err)
+			}
+		}
+	}
+
+	// Без фильтра — все задачи
+	all, err := s.ListTasks(ctx, &store.TaskFilter{Project: proj.Name, Page: 1, PerPage: 50})
+	if err != nil || all == nil {
+		t.Fatalf("ListTasks: %v, %v", all, err)
+	}
+	if int(all.Total) != total {
+		t.Fatalf("total = %d, want %d", all.Total, total)
+	}
+
+	// Фильтр по модулю — только его задачи
+	filt, err := s.ListTasks(ctx, &store.TaskFilter{EpicID: &epic.ID, Page: 1, PerPage: 50})
+	if err != nil || filt == nil {
+		t.Fatalf("ListTasks epic: %v, %v", filt, err)
+	}
+	if int(filt.Total) != epicCount {
+		t.Fatalf("filtered total = %d, want %d", filt.Total, epicCount)
+	}
+	for _, task := range filt.Tasks {
+		if task.EpicID == nil || *task.EpicID != epic.ID {
+			t.Fatalf("task in epic filter: %+v", task)
+		}
+	}
+
+	// Чужой модуль — пусто
+	other := int64(999999)
+	none, err := s.ListTasks(ctx, &store.TaskFilter{EpicID: &other, Page: 1, PerPage: 50})
+	if err != nil || none == nil || int(none.Total) != 0 {
+		t.Fatalf("ListTasks other epic: %v, %v", none, err)
+	}
+}

@@ -280,6 +280,10 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		conditions = append(conditions, "t.project = ?")
 		args = append(args, filter.Project)
 	}
+	if filter.EpicID != nil {
+		conditions = append(conditions, "t.epic_id = ?")
+		args = append(args, *filter.EpicID)
+	}
 	if len(filter.Statuses) > 0 {
 		placeholders := make([]string, len(filter.Statuses))
 		for i, s := range filter.Statuses {
@@ -324,7 +328,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -350,11 +354,15 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	for rows.Next() {
 		task := &store.Task{}
 		unread := 0
+		var epicID sql.NullInt64
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		if epicID.Valid {
+			task.EpicID = &epicID.Int64
 		}
 		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}
