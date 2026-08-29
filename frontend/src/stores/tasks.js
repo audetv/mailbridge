@@ -12,11 +12,12 @@ export const useTasksStore = defineStore('tasks', () => {
   const currentAttachments = ref([])
   const filters = ref({
     project: '',
+    epic_id: '',
     statuses: ['new', 'in_progress'],
     assignee: '',
     search: '',
     page: 1,
-    perPage: 50
+    per_page: 50
   })
 
   async function fetchTasks() {
@@ -24,6 +25,8 @@ export const useTasksStore = defineStore('tasks', () => {
     try {
       const params = { ...filters.value }
       delete params.statuses
+      // пусто → не слать (иначе бекенд будет парсить '' как отсутствующий)
+      if (!params.epic_id) delete params.epic_id
       const { data } = await apiClient.get('/tasks', {
         params: {
           ...params,
