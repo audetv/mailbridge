@@ -658,6 +658,11 @@ func (s *Store) QueryRowForTest(ctx context.Context, query string) *sql.Row {
 	return s.db.QueryRowContext(ctx, query)
 }
 
+// ExecForTest — экспортируемый метод для тестов.
+func (s *Store) ExecForTest(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return s.db.ExecContext(ctx, query, args...)
+}
+
 // GetPendingAIItems возвращает входящие с ai_processed = 0.
 func (s *Store) GetPendingAIItems(ctx context.Context) ([]*store.InboxItem, error) {
 	query := `SELECT id, source, source_id, thread_id, from_contact, from_name, subject, body_text, body_html, meta, received_at, ai_processed, ai_attempts, ai_verdict, ai_summary, status

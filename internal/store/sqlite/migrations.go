@@ -149,7 +149,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
 			number INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'open',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(project_id, number)
