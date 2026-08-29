@@ -1,7 +1,10 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -10,14 +13,32 @@ import (
 	"github.com/audetv/mailbridge/internal/store"
 )
 
+// newManualID генерирует 16 hex-символов для уникального message_id ручной задачи.
+func newManualID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(b)
+}
+
+// deref возвращает значение строки по указателю или "".
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // TaskHandler обрабатывает запросы к задачам.
 type TaskHandler struct {
-	store store.Store
+	store  store.Store
+	broker *EventBroker
 }
 
 // NewTaskHandler создаёт новый TaskHandler.
-func NewTaskHandler(st store.Store) *TaskHandler {
-	return &TaskHandler{store: st}
+func NewTaskHandler(st store.Store, broker *EventBroker) *TaskHandler {
+	return &TaskHandler{store: st, broker: broker}
 }
 
 // ListInbox обрабатывает GET /api/inbox
@@ -320,6 +341,95 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		log.Printf("encode error: %v", err)
 	}
+}
+
+// CreateTask обрабатывает POST /api/tasks — ручное создание задачи.
+// Обязательно: title, project (имя). Опционально: description, epic_id.
+// Статус всегда new. WS: task_created.
+func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Title       string  `json:"title"`
+		Project     string  `json:"project"`
+		Description *string `json:"description"`
+		EpicID      *int64  `json:"epic_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" || len(req.Title) > 500 {
+		writeError(w, http.StatusBadRequest, "title is required (1..500 chars)")
+		return
+	}
+	req.Project = strings.TrimSpace(req.Project)
+	if req.Project == "" {
+		writeError(w, http.StatusBadRequest, "project is required")
+		return
+	}
+
+	p, err := h.store.GetProjectByName(r.Context(), req.Project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	if req.EpicID != nil {
+		e, err := h.store.GetEpic(r.Context(), *req.EpicID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if e == nil {
+			writeError(w, http.StatusBadRequest, "epic not found")
+			return
+		}
+		if e.ProjectID != p.ID {
+			writeError(w, http.StatusBadRequest, "epic doesn't belong to project")
+			return
+		}
+	}
+
+	task := &store.Task{
+		MessageID: "manual-" + newManualID(),
+		Subject:   req.Title,
+		BodyText:  deref(req.Description),
+		Project:   req.Project,
+		Status:    string(store.StatusNew),
+	}
+	if err := h.store.CreateTask(r.Context(), task); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.EpicID != nil {
+		if err := h.store.SetTaskEpic(r.Context(), task.ID, *req.EpicID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		task.EpicID = req.EpicID
+	}
+
+	if h.broker != nil {
+		h.broker.Publish(WSEvent{
+			Type:    "task_created",
+			TaskID:  task.ID,
+			Message: fmt.Sprintf("Новая задача #%d: %s", task.ID, task.Subject),
+			Data:    task,
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, task)
 }
 
 // GetTask обрабатывает GET /api/tasks/{id}

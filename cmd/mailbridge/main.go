@@ -309,7 +309,7 @@ func main() {
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
-	taskHandler := web.NewTaskHandler(st)
+	taskHandler := web.NewTaskHandler(st, broker)
 	// Projects API
 	projectHandler := web.NewProjectHandler(st, broker)
 
@@ -380,7 +380,13 @@ func main() {
 	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
-	mux.HandleFunc("/api/tasks", taskHandler.ListTasks)
+	mux.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			taskHandler.CreateTask(w, r)
+			return
+		}
+		taskHandler.ListTasks(w, r)
+	})
 	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)
 	mux.HandleFunc("/api/tasks/{id}/attachments/{attId}", taskHandler.UnlinkTaskAttachment)
 	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)
