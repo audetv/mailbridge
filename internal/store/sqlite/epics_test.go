@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/store"
@@ -99,5 +100,181 @@ func TestMigrate_EpicsIdempotent(t *testing.T) {
 	}
 	if _, err := s.ExecForTest(ctx, "INSERT INTO epics (project_id, number, name) VALUES (?, 7, 'B')", proj.ID); err == nil {
 		t.Fatal("duplicate epic number accepted — expected UNIQUE violation")
+	}
+}
+
+func TestEpicCRUD(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj := &store.Project{Name: "Проект CRUD"}
+	if err := s.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	// Создание: номер auto (max+1), статус по умолчанию open
+	e := &store.Epic{ProjectID: proj.ID, Name: "Модуль Alpha"}
+	if err := s.CreateEpic(ctx, e); err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+	if e.ID == 0 || e.Number != 1 || e.Status != "open" {
+		t.Fatalf("unexpected new epic: id=%d number=%d status=%q", e.ID, e.Number, e.Status)
+	}
+
+	e2 := &store.Epic{ProjectID: proj.ID, Name: "Модуль Beta", Status: "in_progress"}
+	if err := s.CreateEpic(ctx, e2); err != nil {
+		t.Fatalf("CreateEpic 2: %v", err)
+	}
+	if e2.Number != 2 {
+		t.Fatalf("expected auto number 2, got %d", e2.Number)
+	}
+
+	// Get / List
+	got, err := s.GetEpic(ctx, e.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetEpic: %v %v", got, err)
+	}
+	if got.Name != "Модуль Alpha" {
+		t.Fatalf("epic name: %q", got.Name)
+	}
+	list, err := s.ListEpics(ctx, proj.ID)
+	if err != nil {
+		t.Fatalf("ListEpics: %v", err)
+	}
+	if len(list) != 2 || list[0].ID != e.ID || list[1].ID != e2.ID {
+		t.Fatalf("ListEpics order/len: %d", len(list))
+	}
+
+	// Update
+	if err := s.UpdateEpic(ctx, e.ID, "Модуль Alpha v2", "описание", "done"); err != nil {
+		t.Fatalf("UpdateEpic: %v", err)
+	}
+	got, _ = s.GetEpic(ctx, e.ID)
+	if got.Name != "Модуль Alpha v2" || got.Description != "описание" || got.Status != "done" {
+		t.Fatalf("updated epic: %+v", got)
+	}
+	if err := s.UpdateEpic(ctx, e.ID, "x", "", "bogus"); err == nil {
+		t.Fatal("UpdateEpic accepted invalid status")
+	}
+
+	// Нет записей → empty
+	if absent, err := s.GetEpic(ctx, 999999); err != nil || absent != nil {
+		t.Fatalf("GetEpic(absent) = %v, %v", absent, err)
+	}
+
+	// Delete
+	if err := s.DeleteEpic(ctx, e2.ID); err != nil {
+		t.Fatalf("DeleteEpic: %v", err)
+	}
+	if deleted, _ := s.GetEpic(ctx, e2.ID); deleted != nil {
+		t.Fatal("deleted epic still present")
+	}
+	if err := s.DeleteEpic(ctx, e2.ID); err == nil {
+		t.Fatal("second delete should fail")
+	}
+}
+
+func TestSetTaskEpicAndProgress(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj := &store.Project{Name: "Проект прогресса"}
+	if err := s.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	epic := &store.Epic{ProjectID: proj.ID, Name: "Модуль"}
+	if err := s.CreateEpic(ctx, epic); err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+
+	// 3 задачи в эпику: 2 open-ish, 1 completed
+	var ids []int64
+	for i, status := range []string{"active", "backlog", "completed"} {
+		task := &store.Task{
+			MessageID: fmt.Sprintf("epic-prog-%d", i),
+			Subject:   "Задача", BodyText: "t", Status: status, Project: proj.Name,
+		}
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask %d: %v", i, err)
+		}
+		if err := s.SetTaskEpic(ctx, task.ID, epic.ID); err != nil {
+			t.Fatalf("SetTaskEpic %d: %v", i, err)
+		}
+		ids = append(ids, task.ID)
+	}
+
+	p, err := s.EpicProgress(ctx, epic.ID)
+	if err != nil {
+		t.Fatalf("EpicProgress: %v", err)
+	}
+	if p.Total != 3 || p.Done != 1 || p.Open != 2 {
+		t.Fatalf("progress: %+v", p)
+	}
+
+	// Перенос задачи в другой модуль
+	epic2 := &store.Epic{ProjectID: proj.ID, Name: "Второй"}
+	if err := s.CreateEpic(ctx, epic2); err != nil {
+		t.Fatalf("CreateEpic 2: %v", err)
+	}
+	if err := s.SetTaskEpic(ctx, ids[0], epic2.ID); err != nil {
+		t.Fatalf("move task: %v", err)
+	}
+	if p, _ = s.EpicProgress(ctx, epic.ID); p.Total != 2 || p.Done != 1 {
+		t.Fatalf("progress after move: %+v", p)
+	}
+
+	// Отвязка (epic_id = NULL)
+	if err := s.SetTaskEpic(ctx, ids[1], 0); err != nil {
+		t.Fatalf("unlink task: %v", err)
+	}
+	if got, _ := s.GetTask(ctx, ids[1]); got == nil || got.EpicID != nil {
+		t.Fatalf("task after unlink: %+v", got)
+	}
+	if p, _ = s.EpicProgress(ctx, epic.ID); p.Total != 1 || p.Done != 1 {
+		t.Fatalf("progress after unlink: %+v", p)
+	}
+
+	// Нет задачи → ошибка
+	if err := s.SetTaskEpic(ctx, 999999, epic.ID); err == nil {
+		t.Fatal("SetTaskEpic for missing task should fail")
+	}
+}
+
+func TestDeleteEpicKeepsTasks(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj := &store.Project{Name: "Проект удаления"}
+	if err := s.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	epic := &store.Epic{ProjectID: proj.ID, Name: "Куда уйдёт"}
+	if err := s.CreateEpic(ctx, epic); err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+	task := &store.Task{MessageID: "epic-del-1", Subject: "Задача", BodyText: "t", Status: "active", Project: proj.Name}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := s.SetTaskEpic(ctx, task.ID, epic.ID); err != nil {
+		t.Fatalf("SetTaskEpic: %v", err)
+	}
+
+	if n, err := s.CountTasksInEpic(ctx, epic.ID); err != nil || n != 1 {
+		t.Fatalf("CountTasksInEpic = %d, %v", n, err)
+	}
+
+	if err := s.DeleteEpic(ctx, epic.ID); err != nil {
+		t.Fatalf("DeleteEpic: %v", err)
+	}
+	got, err := s.GetTask(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("task after epic delete: %v, %v", got, err)
+	}
+	if got.EpicID != nil {
+		t.Fatalf("task epic_id after delete = %v, want NULL", got.EpicID)
 	}
 }

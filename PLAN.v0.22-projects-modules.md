@@ -78,8 +78,8 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
-| 7 | Миграция `epics` + `tasks.epic_id INT NULL`; индексы; идемпотентно | 2 | `[x]` 5f1d2b0 — таблица + FK + UNIQUE(project_id,number) + tasks.epic_id (SET NULL, ALTER для старых БД) + Task.EpicID; тесты TestEpicsMigration/Idempotency |
-| 8 | `store`: `Epic` + CRUD + `SetTaskEpic` + прогресс (`EpicProgress{open,done,total}`); тесты | 7 | `[ ]` |
+| 7 | Миграция `epics` + `tasks.epic_id INT NULL`; индексы; идемпотентно | 2 | `[x]` 2218397 — таблица + FK CASCADE + UNIQUE(project_id,number) + tasks.epic_id (SET NULL, ALTER для старых БД) + Task.EpicID; тесты TestMigrate_EpicsTable/Idempotency |
+| 8 | `store`: `Epic` + CRUD + `SetTaskEpic` + прогресс (`EpicProgress{open,done,total}`); тесты | 7 | `[x]` — Epic struct + 7 методов + epicStatuses; тесты TestEpicCRUD/Progress/DeleteKeepsTasks |
 | 9 | API `/api/projects/{id}/epics` (GET/POST), `/api/epics/{id}` (GET/PUT/DELETE); `POST/DELETE /api/epics/{id}/tasks/{taskId}`; прогресс в `GET /api/epics/{id}`; WS `epic_*` | 8 | `[ ]` |
 | 10 | UI: панель модулей в `ProjectView`/списке задач; фильтр задач по модулю; карточка прогресса (Bar) | 9 | `[ ]` |
 | 11 | Задача ↔ модуль: поле `epic_id` в форме создания/редактирования задачи (UI в `TaskDetailView` + API в Фазе 3 `POST /api/tasks`) | 9 | `[ ]` |

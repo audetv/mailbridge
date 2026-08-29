@@ -33,6 +33,25 @@ type ProjectFilter struct {
 	Search   string
 }
 
+// Epic представляет модуль (эпик) внутри проекта.
+type Epic struct {
+	ID          int64     `json:"id"`
+	ProjectID   int64     `json:"project_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Number      int       `json:"number"`
+	Status      string    `json:"status"` // open | in_progress | done
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// EpicProgress — сводка задач эпика для карточки.
+type EpicProgress struct {
+	Total int `json:"total"`
+	Open  int `json:"open"`
+	Done  int `json:"done"` // задачи со статусом completed|closed
+}
+
 // InboxItem представляет элемент ленты входящих.
 type InboxItem struct {
 	ID          int64     `json:"id"`
@@ -194,6 +213,16 @@ type Store interface {
 	ListProjects(ctx context.Context, filter *ProjectFilter) ([]*Project, error)
 	UpdateProject(ctx context.Context, id int64, name, description string) error
 	SetProjectArchived(ctx context.Context, id int64, archived bool) error
+
+	// Epics (модули)
+	CreateEpic(ctx context.Context, e *Epic) error
+	GetEpic(ctx context.Context, id int64) (*Epic, error)
+	ListEpics(ctx context.Context, projectID int64) ([]*Epic, error)
+	UpdateEpic(ctx context.Context, id int64, name, description, status string) error
+	DeleteEpic(ctx context.Context, id int64) error
+	EpicProgress(ctx context.Context, epicID int64) (*EpicProgress, error)
+	// SetTaskEpic привязывает задачу к модулю (epicID = 0 — отвязать).
+	SetTaskEpic(ctx context.Context, taskID, epicID int64) error
 
 	// Attachments
 	CreateAttachment(ctx context.Context, att *Attachment) error
