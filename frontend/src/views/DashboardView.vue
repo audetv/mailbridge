@@ -21,6 +21,7 @@
     <main class="dashboard-content">
       <TabBar :tabs="tabItems" :activeTab="activeTab" @select="onTabSelect" />
       <InboxView v-if="activeTab === 'inbox'" />
+      <ProjectsView v-else-if="activeTab === 'projects'" />
       <template v-else>
         <FilterBar />
         <TaskTable />
@@ -38,6 +39,7 @@ import Toast from 'primevue/toast'
 import Button from 'primevue/button'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
+import { useProjectsStore } from '@/stores/projects'
 import { useWebSocket } from '@/stores/websocket'
 import { useInboxStore } from '@/stores/inbox'
 import apiClient from '@/api/client'
@@ -45,6 +47,7 @@ import FilterBar from '@/components/FilterBar.vue'
 import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
 import InboxView from '@/views/InboxView.vue'
+import ProjectsView from '@/views/ProjectsView.vue'
 
 const themeStore = useThemeStore()
 const router = useRouter()
@@ -52,6 +55,7 @@ const route = useRoute()
 const toast = useToast()
 const authStore = useAuthStore()
 const store = useTasksStore()
+const projectsStore = useProjectsStore()
 const wsStore = useWebSocket()
 const inboxStore = useInboxStore()
 
@@ -63,7 +67,8 @@ const tabItems = computed(() => [
   { key: 'active', label: 'Активные', count: 0 },
   { key: 'backlog', label: 'Бэклог', count: 0 },
   { key: 'completed', label: 'Выполненные', count: 0 },
-  { key: 'closed', label: 'Закрытые', count: 0 }
+  { key: 'closed', label: 'Закрытые', count: 0 },
+  { key: 'projects', label: 'Проекты', count: 0 }
 ])
 
 const tabStatuses = {
@@ -80,15 +85,16 @@ onMounted(() => {
   const saved = localStorage.getItem('mailbridge_active_tab')
 
   let tab = 'active'
-  if (tabFromUrl && (tabStatuses[tabFromUrl] || tabFromUrl === 'inbox')) {
+  const isKnownTab = (k) => k === 'inbox' || k === 'projects' || tabStatuses[k]
+  if (tabFromUrl && isKnownTab(tabFromUrl)) {
     tab = tabFromUrl
-  } else if (saved && (tabStatuses[saved] || saved === 'inbox')) {
+  } else if (saved && isKnownTab(saved)) {
     tab = saved
   }
 
   activeTab.value = tab
   if (tab !== 'inbox') {
-    store.setStatuses(tabStatuses[tab])
+    store.setStatuses(tabStatuses[tab] || ['new', 'in_progress'])
   }
 
   fetchActiveCount()
@@ -114,7 +120,7 @@ function onTabSelect(key) {
   activeTab.value = key
   localStorage.setItem('mailbridge_active_tab', key)
   router.replace({ query: { ...route.query, tab: key } })
-  if (key !== 'inbox') {
+  if (key !== 'inbox' && key !== 'projects') {
     store.setStatuses(tabStatuses[key])
   }
 }
@@ -144,6 +150,13 @@ watch(
         break
       case 'connected':
         toast.add({ severity: 'success', summary: latest.message, life: 2000 })
+        break
+      case 'project_created':
+      case 'project_updated':
+      case 'project_archived':
+      case 'project_unarchived':
+        projectsStore.fetchProjects({ archived: 'false' })
+        toast.add({ severity: 'info', summary: latest.message, life: 3000 })
         break
     }
   }
