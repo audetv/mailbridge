@@ -310,6 +310,33 @@ func main() {
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
 	taskHandler := web.NewTaskHandler(st)
+	// Projects API
+	projectHandler := web.NewProjectHandler(st, broker)
+
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			projectHandler.ListProjects(w, r)
+		case http.MethodPost:
+			projectHandler.CreateProject(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			projectHandler.GetProject(w, r)
+		case http.MethodPut:
+			projectHandler.UpdateProject(w, r)
+		case http.MethodDelete:
+			projectHandler.ArchiveProject(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/projects/{id}/unarchive", projectHandler.UnarchiveProject)
+
 	mux.HandleFunc("/api/inbox", taskHandler.ListInbox)
 	mux.HandleFunc("/api/inbox/{id}", taskHandler.GetInboxItem)
 	mux.HandleFunc("/api/inbox/{id}/attachments", taskHandler.GetInboxAttachments)

@@ -63,9 +63,9 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
 | 1 | Базовая линия: ветка `feat/...` от main; `make lint`, `make test`, `npm run lint` зелёные; **зафиксировать этот манифест коммитом** | — | `[x]` 64497ab (lint 0 issues, тесты green, npm green) |
-| 2 | Миграция `projects` + сида из `configs/rules.yml` (секция `# Проекты`: ТРК, Отель, Лидер Спорт, Театр, Мебельный центр, Складской комплекс, Кафе, Ледовая арена, Корпоративные сайты, + `Входящие`) + из distinct `tasks.project`; **идемпотентно** (`IF NOT EXISTS` + upsert по `name`) | 1 | `[ ]` |
-| 3 | `store.Store`: модели `Project`, методы `CreateProject / GetProject / GetProjectByName / ListProjects(includeArchived) / UpdateProject / ArchiveProject`; sqlite-реализация + table-driven тесты (sqlite-инстанс) | 2 | `[ ]` |
-| 4 | API `/api/projects` (GET/POST), `/api/projects/{id}` (GET/PUT/DELETE→archive, ре-активация `POST /{id}/unarchive`); валидация имени (≠ пустое, ≤ 128, не дубль); WS-события `project_created/updated/archived` | 3 | `[ ]` |
+| 2 | Миграция `projects` + сида из `configs/rules.yml` (секция `# Проекты`: ТРК, Отель, Лидер Спорт, Театр, Мебельный центр, Складской комплекс, Кафе, Ледовая арена, Корпоративные сайты, + `Входящие`) + из distinct `tasks.project`; **идемпотентно** (`IF NOT EXISTS` + upsert по `name`) | 1 | `[x]` 436a872 — таблица + идемпотентный сид из rules.yml «Проекты» + distinct tasks.project; тест TestMigrate_ProjectsTable / TestMigrate_SeedsDistinctTaskProjects |
+| 3 | `store.Store`: модели `Project`, методы `CreateProject / GetProject / GetProjectByName / ListProjects(includeArchived) / UpdateProject / ArchiveProject`; sqlite-реализация + table-driven тесты (sqlite-инстанс) | 2 | `[x]` 436a872 — projects.go + 10 тестов (CRUD, дубли, архив, фильтры); `make test` PASS, `golangci-lint` 0 issues |
+| 4 | API `/api/projects` (GET/POST), `/api/projects/{id}` (GET/PUT/DELETE→archive, ре-активация `POST /{id}/unarchive`); валидация имени (≠ пустое, ≤ 128, не дубль); WS-события `project_created/updated/archived` | 3 | `[x]` 436a872+ — web/projects.go + 6 тестов (CRUD/404/409/фильтры/WS), `golangci-lint` 0 issues, `go test ./...` green |
 | 5 | UI: `views/ProjectsView.vue` (таблица, карточка создания, inline-редактирование, archiving), роут `/projects`, вкладки Dashboard; `stores/projects.js` | 4 | `[ ]` |
 | 6 | Ссылка проекта на задачу: `GET /api/projects/{id}/tasks` (фильтр по `t.project = name`); UI: в задачах показываем проект-ссылку | 5 | `[ ]` |
 
