@@ -38,18 +38,21 @@
 - Статус: `go test ./internal/...` green, `golangci-lint` 0 issues.
 
 ### 1.3 Ручное создание задач (шаг 11) — НОВЫЙ ЭНДПОИНТ
-- `POST /api/tasks`
-```jsonc
-// Request (title и project_id — обязательны; остальное — опционально)
-{"title":"Зафиксировать контракт","project_id":3,
- "description":"...","epic_id":1}
-// Response 201 — созданная задача (та же JSON-форма, что в /api/tasks)
-```
-- `message_id` = `"manual-" + uuidv4` (не коллидит с реальными email-сообщениями; UNIQUE по таблице соблюдается).
+- `POST /api/tasks` — контракт зафиксирован в **§1.4** (реальный, после сверки со схемой): обязательны `title` + `project` (имя), опционально `description`, `epic_id`.
+- `message_id` = `"manual-" + 16 hex` (crypto/rand; не коллидит с реальными email-сообщениями; UNIQUE по таблице соблюдается).
 - Статус создаётся всегда как `new` — в запросе не передаётся.
-- `due_date` в схеме задач НЕТ (мigrations: только `created_at`/`updated_at`) — поле убрать из контракта.
-- Валидация: `title` пуст/>200 → `400`; проект не найден → `404`; `epic_id` чужого проекта → `400`.
-- Поведение: после создания → WS `task_created` (если событиям задач такой паттерн уже есть в ws-шине — использовать его; иначе добавить по аналогии с `epic_*`).
+- Реальная схема (проверено по коду, 2026-08-29): задача сшивается с проектом по **имени** (`tasks.project`, TEXT) — поля `project_id` в tasks НЕТ, поэтому запрос принимает `project` (имя). `due_date` в схеме задач НЕТ. `description` → `body_text`.
+- Валидация: `title` пуст/>500 или `project` пуст → `400`; проект не найден → `404`; `epic_id` не существует или чужого проекта → `400`.
+- Поведение: после создания → WS `task_created` (паттерн уже есть в `processor.go`/`ai/worker.go` — `WSEvent{Type, TaskID, Message, Data}`), задача → `201`.
+
+### 1.4 ИСПРАВЛЕНИЕ КОНТРАКТА (2026-08-29, после реализации 11.1)
+Исходный черновик §1.3 предполагал `project_id` — это неверно для текущей схемы. Фактический закоммиченный контракт (`507456d`):
+```jsonc
+// POST /api/tasks — Request (title и project — обязательны; остальное — опционально)
+{"title":"Зафиксировать контракт","project":"Деск X",
+ "description":"...","epic_id":1}
+// Response 201 — созданная задача (стандартная JSON-форма Task)
+```
 
 ---
 
@@ -79,11 +82,11 @@
 - Диалог создания: **обязательно — только заголовок** (+ проект: из контекста в ProjectsView, выбор в Dashboard). Всё остальное необязательно. **Статус всегда `new`** — в диалоге выбора статуса нет.
 - После создания → **автопереход на `/tasks/{id}`** — там уже форма полного редактирования (сайдбар TaskDetailView: проект, статус, приоритет, тип, исполнитель; + «Модуль» из 11.2). «Режим редактирования» — существующая страница задачи, ничего нового строить не надо.
 
-| # | Комит (сообщение) | Файлы | Что делаем | Acceptance |
-|---|---|---|---|---|
-| 11.1 | `feat: api — manual task creation POST /api/tasks (v0.22 step 11)` | `internal/web/api.go` (или `task_manual.go`), тесты рядом | Новый handler: контракт §1.3 (`title`+`project_id` обязательны; `description`, `epic_id` опц.; `epic_id` чужого проекта → 400). `message_id = manual-{uuid}`, статус `new`. WS `task_created` по паттерну эпиков. | `go test ./internal/...` + lint green |
-| 11.2 | `feat: ui — module field in task detail (v0.22 step 11)` | `frontend/src/views/TaskDetailView.vue` + тест | Select «Модуль» в сайдбаре (эпики проекта задачи, сброс → `epic_id:null`) → `PATCH /api/tasks/{id}`. Тест: выбор модуля шлёт PATCH с epic_id, сброс шлёт null. | test+lint+build |
-| 11.3 | `feat: ui — create task dialog in dashboard and projects (v0.22 step 11)` | `frontend/src/components/CreateTaskDialog.vue` (новый) + `DashboardView.vue` + `ProjectsView.vue` + тест | Dialog «Создать задачу»: заголовок (обязательно) + проект (из контекста ProjectsView / Select в Dashboard, дефолт = выбранный) + модуль (опция, эпиками проекта) → `POST /api/tasks` → redirect `/tasks/{id}`. Кнопки в обоих местах. Тест: валидация title, payload, redirect. | test+lint+build |
+| # | Коммит (сообщение) | Файлы | Что делаем | Acceptance | Статус |
+|---|---|---|---|---|---|
+| 11.1 | `feat: api — manual task creation POST /api/tasks (v0.22 step 11)` | `internal/web/api.go`, `internal/web/api_createtask_test.go` (новый), `internal/web/api_test.go` (helper), `cmd/mailbridge/main.go` | Handler `CreateTask`: контракт §1.4 (`title`+`project` обязательны; `description`, `epic_id` опц.; `epic_id` не существует/чужой → 400). `message_id = manual-{16hex}`, статус `new`. WS `task_created`. Тесты: OK/минимум/валидация/404/эпик-валидация/405. | `go test ./internal/...` + lint green | ✅ `507456d` |
+| 11.2 | `feat: ui — module field in task detail (v0.22 step 11)` | `frontend/src/views/TaskDetailView.vue` + тест | Select «Модуль» в сайдбаре (эпики проекта задачи, сброс → `epic_id:null`) → `PATCH /api/tasks/{id}`. Тест: выбор модуля шлёт PATCH с epic_id, сброс шлёт null. | test+lint+build | ⬜ |
+| 11.3 | `feat: ui — create task dialog in dashboard and projects (v0.22 step 11)` | `frontend/src/components/CreateTaskDialog.vue` (новый) + `DashboardView.vue` + `ProjectsView.vue` + тест | Dialog «Создать задачу»: заголовок (обязательно) + проект (из контекста ProjectsView / Select в Dashboard) + модуль (опция, эпиками проекта) → `POST /api/tasks` → redirect `/tasks/{id}`. Кнопки в обоих местах. Тест: валидация title, payload, redirect. | test+lint+build | ⬜ |
 
 Финальная проверка всей фазы: `make test && make lint && npm run lint && npm run build`, затем — только после твоего «ок»: PR → CI → merge → tag v0.22.0 (по общему PLAN).
 
