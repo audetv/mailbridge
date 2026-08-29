@@ -51,6 +51,11 @@ export const useProjectsStore = defineStore('projects', () => {
     return projects.value.find((p) => p.id === id) || null
   }
 
+  function projectByName(name) {
+    if (!name) return null
+    return projects.value.find((p) => p.name === name) || null
+  }
+
   return {
     projects,
     loading,
@@ -60,6 +65,7 @@ export const useProjectsStore = defineStore('projects', () => {
     renameProject,
     archiveProject,
     unarchiveProject,
-    projectById
+    projectById,
+    projectByName
   }
 })
