@@ -144,6 +144,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)`,
 
+		// Модули (эпики) v0.22.0: проект → модуль → задача
+		`CREATE TABLE IF NOT EXISTS epics (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			number INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(project_id, number)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_epics_project_id ON epics(project_id)`,
+
 		// Универсальная таблица вложений
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -261,6 +273,22 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		}
 	}
 
+	// Ссылка задачи на модуль (v0.22.0); nullable, удаление модуля не бьёт по задачам.
+	epicColumns := map[string]string{
+		"epic_id": "INTEGER REFERENCES epics(id) ON DELETE SET NULL",
+	}
+	for col, typ := range epicColumns {
+		has, err := s.columnExists(ctx, "tasks", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
 	// Добавляем новые колонки в threads если их нет
 	threadColumns := map[string]string{
 		"source":       "TEXT NOT NULL DEFAULT 'email'",
@@ -289,6 +317,7 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 	indexMigrations := []string{
 		`CREATE INDEX IF NOT EXISTS idx_tasks_thread_id ON tasks(thread_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_source_email_id ON tasks(source_email_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_epic_id ON tasks(epic_id)`,
 	}
 	for _, idx := range indexMigrations {
 		if _, err := s.db.ExecContext(ctx, idx); err != nil {

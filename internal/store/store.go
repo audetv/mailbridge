@@ -78,6 +78,7 @@ type Task struct {
 	ThreadID      string    `json:"thread_id"`
 	SourceEmailID string    `json:"source_email_id"`
 	AIVerdict     string    `json:"ai_verdict"`
+	EpicID        *int64    `json:"epic_id"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
