@@ -133,6 +133,17 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_task_id ON task_inbox_items(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_inbox_item_id ON task_inbox_items(inbox_item_id)`,
 
+		// Таблица проектов (v0.22.0): иерархия Проект → Модуль (эпик) → Задача
+		`CREATE TABLE IF NOT EXISTS projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT NOT NULL DEFAULT '',
+			archived INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)`,
+
 		// Универсальная таблица вложений
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,7 +190,55 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
+	if err := s.seedProjects(ctx); err != nil {
+		return fmt.Errorf("project seed failed: %w", err)
+	}
+
 	return nil
+}
+
+// seedProjects наполняет таблицу projects исходным набором:
+// «Входящие» (fallback-проект) + проекты задач (distinct tasks.project).
+// Идемпотентно: INSERT OR IGNORE по UNIQUE(name), повторный запуск не меняет данные.
+func (s *Store) seedProjects(ctx context.Context) error {
+	names, err := s.distinctTaskProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list distinct task projects: %w", err)
+	}
+
+	upsert := `INSERT OR IGNORE INTO projects (name, description) VALUES (?, '')`
+	for _, name := range append([]string{"Входящие"}, names...) {
+		if _, err := s.db.ExecContext(ctx, upsert, name); err != nil {
+			return fmt.Errorf("failed to seed project %q: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// distinctTaskProjects возвращает уникальные непустые значения tasks.project.
+func (s *Store) distinctTaskProjects(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT project FROM tasks
+		WHERE project IS NOT NULL AND project <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return names, nil
 }
 
 // migrateSchema выполняет миграции для обновления существующих таблиц.

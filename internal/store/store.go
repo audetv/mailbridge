@@ -17,6 +17,22 @@ type Attachment struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// Project представляет проект (внутренний «проект», контейнер модулей/эпиков и задач).
+type Project struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Archived    bool      `json:"archived"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ProjectFilter фильтрует список проектов.
+type ProjectFilter struct {
+	Archived *bool // nil = все, true = только архивные, false = только активные
+	Search   string
+}
+
 // InboxItem представляет элемент ленты входящих.
 type InboxItem struct {
 	ID          int64     `json:"id"`
@@ -169,6 +185,14 @@ type InboxListResult struct {
 type Store interface {
 	// Migrate выполняет миграции схемы.
 	Migrate(ctx context.Context) error
+
+	// Projects
+	CreateProject(ctx context.Context, p *Project) error
+	GetProject(ctx context.Context, id int64) (*Project, error)
+	GetProjectByName(ctx context.Context, name string) (*Project, error)
+	ListProjects(ctx context.Context, filter *ProjectFilter) ([]*Project, error)
+	UpdateProject(ctx context.Context, id int64, name, description string) error
+	SetProjectArchived(ctx context.Context, id int64, archived bool) error
 
 	// Attachments
 	CreateAttachment(ctx context.Context, att *Attachment) error
