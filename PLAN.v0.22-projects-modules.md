@@ -179,8 +179,8 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | 29 | `AGENTS.md`: обновить инварианты v0.22 (plane — removed; новые kinds `report/reply`; проекты/модули; auth admin + agent-юзер; `MAILBRIDGE_LISTEN`). **AGENTS.md-разделы «тестирование» + «dev-окружение» уже на шаге 13.5** (раньше Фазы 6, решение §7(#11)). Текст правки подготовим на шаге 28 (apply — вручную, protected). | `[x]` |
 | 30 | Docs: `docs/api.md` (новые маршруты), `docs/data-model.md` (таблицы), `docs/ARCHITECTURE.md` (сборка проектов/модулей, срез Plane), `configs/config.example.env` (нет PLANE, нет WEBHOOK_SECRET, есть LISTEN, AGENT_USER/PASS) | `[x]` |
 | 31 | Обновить root `PLAN.md`: v0.22.0 → архив `archive/PLAN.v0.22-projects-modules.md`; новая активная версия; «Plane: удалён, v0.22.0» | `[x]` |
-| 32 | PR в main, green CI (Lint + Test), merge | `[ ]` |
-| 33 | Релиз: тег `v0.22.0`, бинарник GitHub (release.yml — проверить), закрывающий PR | `[ ]` |
+| 32 | PR в main, green CI (Lint + Test), merge | `[x]` — PR #13 (squash, `083bd8a`), CI Lint+Test ✅ 2026-08-30 |
+| 33 | Релиз: тег `v0.22.0`, бинарник GitHub (release.yml — проверить), закрывающий PR | `[x]` — тег `v0.22.0`, Release-воркфлоу ✅ (`ad3a9c0`→tag), артефакт `mailbridge`, `./mailbridge version` = `0.22.0 (commit 083bd8a)`, URL https://github.com/audetv/mailbridge/releases/download/v0.22.0/mailbridge |
 
 ---
 
