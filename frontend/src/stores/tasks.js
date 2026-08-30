@@ -71,10 +71,31 @@ export const useTasksStore = defineStore('tasks', () => {
     return data
   }
 
-  async function replyTask(id, body) {
-    const { data } = await apiClient.post(`/tasks/${id}/reply`, { body })
+  async function replyTask(id, body, kind) {
+    const payload = { body }
+    if (kind) payload.kind = kind
+    const { data } = await apiClient.post(`/tasks/${id}/reply`, payload)
     currentComments.value.push(data.comment)
     return data
+  }
+
+  // Утверждение ответа пользователю (ФАЗА 4): PATCH /api/comments/{id}/approve.
+  // Бэкенд: 200 + {"comment": {...}} (approved=1). Idempotent. WS comment_approved.
+  async function approveComment(commentId) {
+    const { data } = await apiClient.patch(`/comments/${commentId}/approve`)
+    const c = currentComments.value.find((x) => x.id === commentId)
+    if (c) c.approved = 1
+    return data
+  }
+
+  // WS-событие comment_approved: синхронизация бейджа «Утверждён».
+  // event = {type, taskId, message, data: {…comment}}.
+  function applyCommentApproved(event) {
+    const c =
+      currentComments.value.find((x) => x.id === event?.data?.id) ||
+      currentComments.value.find((x) => x.id === event?.data?.comment?.id)
+    if (c && typeof c.approved === 'undefined') c.approved = null
+    if (c) c.approved = 1
   }
 
   // Ручное создание задачи. body: {title, project, description?, epic_id?}.
@@ -125,6 +146,8 @@ export const useTasksStore = defineStore('tasks', () => {
     createTask,
     updateTask,
     replyTask,
+    approveComment,
+    applyCommentApproved,
     markAsRead,
     setFilter,
     setStatuses,

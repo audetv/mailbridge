@@ -96,7 +96,7 @@
           <template #content>
             <CommentList :comments="store.currentComments" />
             <div class="reply-section">
-              <ReplyForm :taskId="store.currentTask.id" @sent="onReplySent" />
+              <ReplyForm :taskId="store.currentTask.id" :comments="store.currentComments" @sent="onReplySent" />
             </div>
           </template>
         </Card>
@@ -167,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useTasksStore } from '@/stores/tasks'
@@ -180,6 +180,8 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import CommentList from '@/components/CommentList.vue'
 import ReplyForm from '@/components/ReplyForm.vue'
+import { useWebSocket } from '@/stores/websocket'
+import { useAuthStore } from '@/stores/auth'
 import WorkflowButtons from '@/components/WorkflowButtons.vue'
 
 const route = useRoute()
@@ -188,6 +190,8 @@ const toast = useToast()
 const store = useTasksStore()
 const projectsStore = useProjectsStore()
 const epicsStore = useEpicsStore()
+const wsStore = useWebSocket()
+const authStore = useAuthStore()
 
 const project = ref(null)
 const status = ref(null)
@@ -240,12 +244,24 @@ const typeOptions = [
 ]
 
 onMounted(async () => {
+  wsStore.connect(authStore.token)
   await store.fetchTask(route.params.id)
   syncFields()
   await loadEpics()
   store.markAsRead(route.params.id)
   inboxItems.value = await store.fetchTaskInbox(route.params.id)
   taskAttachments.value = await fetchTaskAttachments(route.params.id)
+})
+
+onUnmounted(() => {
+  wsStore.disconnect()
+})
+
+// WS-событие comment_approved — бейдж «Утверждён» без перезагрузки (ФАЗА 4).
+wsStore.onEvent((event) => {
+  if (event?.type !== 'comment_approved') return
+  if (event.taskId != null && Number(event.taskId) !== Number(route.params.id)) return
+  store.applyCommentApproved(event)
 })
 
 watch(() => store.currentTask, () => {

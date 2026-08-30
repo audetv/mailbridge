@@ -6,6 +6,20 @@ export const useWebSocket = defineStore('websocket', () => {
   const events = ref([])
   let ws = null
   let reconnectTimer = null
+  const listeners = new Set()
+
+  function emit(event) {
+    events.value.push(event)
+    // Ограничиваем историю
+    if (events.value.length > 100) events.value.shift()
+    for (const fn of listeners) {
+      try {
+        fn(event)
+      } catch (e) {
+        console.error('ws listener error', e)
+      }
+    }
+  }
 
   function connect(token) {
     if (ws) return
@@ -27,9 +41,7 @@ export const useWebSocket = defineStore('websocket', () => {
 
     ws.onmessage = (e) => {
       const event = JSON.parse(e.data)
-      events.value.push(event)
-      // Ограничиваем историю
-      if (events.value.length > 100) events.value.shift()
+      emit(event)
     }
   }
 
@@ -48,5 +60,11 @@ export const useWebSocket = defineStore('websocket', () => {
     }
   }
 
-  return { connected, events, connect, disconnect, markAsRead }
+  // Подписка на WS-события (view'ы). Возвращает функцию отписки.
+  function onEvent(fn) {
+    listeners.add(fn)
+    return () => listeners.delete(fn)
+  }
+
+  return { connected, events, connect, disconnect, markAsRead, onEvent }
 })
