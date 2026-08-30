@@ -134,9 +134,10 @@ JSON-формат:
 
 ## Модель
 
-- Локально: Ollama, модель `email-assistant-v2`
-- Промпт модели: `configs/email-assistant-v2.Modelfile`
-- OpenAI-совместимые: Cloud.ru, OpenAI API
+- Локально: Ollama, модель `qwen3.8-74k:latest` — **та же модель, что и у hermes-агента**: одна в памяти, без выгрузок (решение §7 #16, 2026-08-30)
+- Системный промпт: `configs/email-assistant-v2.system.txt` (источник — Modelfile), передаётся в каждом `/api/generate` в поле `system`
+- `configs/email-assistant-v2.Modelfile` — оставлен как история SYSTEM-промпта (superseded)
+- OpenAI-совместимые: Cloud.ru, OpenAI API (system — `messages[0]`)
 
 ## Настройка
 
@@ -144,7 +145,9 @@ JSON-формат:
 MAILBRIDGE_AI_ENABLED=true
 MAILBRIDGE_AI_PROVIDER=ollama
 MAILBRIDGE_AI_BASE_URL=http://localhost:11434
-MAILBRIDGE_AI_MODEL=email-assistant-v2
+MAILBRIDGE_AI_MODEL=qwen3.8-74k:latest
+MAILBRIDGE_AI_SYSTEM_FILE=configs/email-assistant-v2.system.txt
+MAILBRIDGE_AI_TEMPERATURE=0.1   # строгий JSON, минимум креатива (минимум осознанный выбор)
 ```
 
 ## Отладка

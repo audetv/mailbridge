@@ -55,6 +55,13 @@ type AIConfig struct {
 	BaseURL  string
 	Model    string
 	APIKey   string
+	// SystemPrompt — системный промпт, передаваемый в запрос (Ollama: "system",
+	// OpenAI: messages[0] role=system). Пустая строка — не передавать.
+	// Источник: файл по пути SystemPromptFile (из Modelfile — SYSTEM-блок).
+	SystemPrompt     string
+	SystemPromptFile string
+	// Temperature — жёсткость ответов (0.1 — строгий JSON, минимум "креатива").
+	Temperature float64
 }
 
 // PlaneConfig настройки подключения к Plane API.
@@ -114,11 +121,14 @@ func Load() (*Config, error) {
 			TLS:      getEnvAsBool("MAILBRIDGE_SMTP_TLS", true),
 		},
 		AI: AIConfig{
-			Enabled:  getEnvAsBool("MAILBRIDGE_AI_ENABLED", false),
-			Provider: getEnv("MAILBRIDGE_AI_PROVIDER", "ollama"),
-			BaseURL:  getEnv("MAILBRIDGE_AI_BASE_URL", "http://localhost:11434"),
-			Model:    getEnv("MAILBRIDGE_AI_MODEL", "qwen3.8"),
-			APIKey:   getEnv("MAILBRIDGE_AI_API_KEY", ""),
+			Enabled:          getEnvAsBool("MAILBRIDGE_AI_ENABLED", false),
+			Provider:         getEnv("MAILBRIDGE_AI_PROVIDER", "ollama"),
+			BaseURL:          getEnv("MAILBRIDGE_AI_BASE_URL", "http://localhost:11434"),
+			Model:            getEnv("MAILBRIDGE_AI_MODEL", "qwen3.8-74k:latest"),
+			APIKey:           getEnv("MAILBRIDGE_AI_API_KEY", ""),
+			SystemPromptFile: getEnv("MAILBRIDGE_AI_SYSTEM_FILE", ""),
+			SystemPrompt:     getEnv("MAILBRIDGE_AI_SYSTEM_PROMPT", ""),
+			Temperature:      getEnvAsFloat("MAILBRIDGE_AI_TEMPERATURE", 0.1),
 		},
 		Plane: PlaneConfig{
 			BaseURL:        getEnv("MAILBRIDGE_PLANE_BASE_URL", ""),
@@ -201,6 +211,16 @@ func getEnvAsBool(key string, defaultVal bool) bool {
 	if val, ok := os.LookupEnv(key); ok {
 		if boolVal, err := strconv.ParseBool(val); err == nil {
 			return boolVal
+		}
+	}
+	return defaultVal
+}
+
+// getEnvAsFloat возвращает значение переменной окружения как float64.
+func getEnvAsFloat(key string, defaultVal float64) float64 {
+	if val, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
 		}
 	}
 	return defaultVal

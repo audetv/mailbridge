@@ -12,32 +12,49 @@ import (
 
 // OpenAIClient реализует Client для OpenAI-совместимых API (Cloud.ru, OpenAI).
 type OpenAIClient struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	baseURL     string
+	apiKey      string
+	model       string
+	system      string
+	temperature float64
+	httpClient  *http.Client
 }
 
 // NewOpenAIClient создаёт новый OpenAIClient.
 func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
 	return &OpenAIClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		model:   model,
+		baseURL:     baseURL,
+		apiKey:      apiKey,
+		model:       model,
+		temperature: 0.1,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
 	}
 }
 
+// SetSystem устанавливает системный промпт (в запрос — messages[0] role=system).
+func (c *OpenAIClient) SetSystem(system string) {
+	c.system = system
+}
+
+// SetTemperature устанавливает temperature (0.1 — строгий JSON, минимум креатива).
+func (c *OpenAIClient) SetTemperature(t float64) {
+	c.temperature = t
+}
+
 // Generate отправляет промпт в OpenAI-совместимый API и возвращает ответ.
 func (c *OpenAIClient) Generate(ctx context.Context, prompt string, _ []string) (string, error) {
+	messages := []map[string]string{}
+	if c.system != "" {
+		messages = append(messages, map[string]string{"role": "system", "content": c.system})
+	}
+	messages = append(messages, map[string]string{"role": "user", "content": prompt})
+
 	reqBody := map[string]interface{}{
-		"model": c.model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.1,
+		"model":       c.model,
+		"messages":    messages,
+		"temperature": c.temperature,
 	}
 
 	body, err := json.Marshal(reqBody)

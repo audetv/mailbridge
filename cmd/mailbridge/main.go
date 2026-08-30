@@ -156,13 +156,34 @@ func main() {
 	// ---------------------------------------------------------------------------
 	// AI Client (если включён в конфиге)
 	// ---------------------------------------------------------------------------
+	// Системный промпт: приоритет MAILBRIDGE_AI_SYSTEM_PROMPT > MAILBRIDGE_AI_SYSTEM_FILE.
+	// Файл — из Modelfile (SYSTEM-блок); выносим наружу, чтобы одна модель (qwen3.8-74k)
+	// работала и у агента, и у mailbridge в памяти без выгрузок (решение §7 #16, 2026-08-30).
+	var aiSystemPrompt string
+	if cfg.AI.SystemPrompt != "" {
+		aiSystemPrompt = cfg.AI.SystemPrompt
+	} else if cfg.AI.SystemPromptFile != "" {
+		data, err := os.ReadFile(cfg.AI.SystemPromptFile)
+		if err != nil {
+			logger.Error("failed to read AI system prompt file", "path", cfg.AI.SystemPromptFile, "error", err)
+			logger.Warn("continuing without system prompt (JSON-формат может деградировать)")
+		} else {
+			aiSystemPrompt = string(data)
+			logger.Info("AI system prompt loaded from file", "path", cfg.AI.SystemPromptFile, "chars", len(aiSystemPrompt))
+		}
+	}
+
 	var aiClient ai.Client
 	if cfg.AI.Enabled {
 		switch cfg.AI.Provider {
 		case "ollama":
 			aiClient = ai.NewOllamaClient(cfg.AI.BaseURL, cfg.AI.Model)
+			aiClient.(*ai.OllamaClient).SetSystem(aiSystemPrompt)
+			aiClient.(*ai.OllamaClient).SetTemperature(cfg.AI.Temperature)
 		case "openai":
 			aiClient = ai.NewOpenAIClient(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model)
+			aiClient.(*ai.OpenAIClient).SetSystem(aiSystemPrompt)
+			aiClient.(*ai.OpenAIClient).SetTemperature(cfg.AI.Temperature)
 		}
 	}
 

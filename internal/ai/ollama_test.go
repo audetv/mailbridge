@@ -26,7 +26,7 @@ func TestOllamaClient_Generate(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"response": "{\"verdicts\":[]}"}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]string{"response": `{"verdicts":[]}`}); err != nil {
 			t.Fatalf("encode error: %v", err)
 		}
 	}))
@@ -42,6 +42,43 @@ func TestOllamaClient_Generate(t *testing.T) {
 
 	if resp != `{"verdicts":[]}` {
 		t.Errorf("resp = %s", resp)
+	}
+}
+
+// TestOllamaClient_SystemAndTemperature — системный промпт передаётся как "system",
+// temperature не хардкодится, а берётся из конфига (решение §7 #16, 2026-08-30).
+func TestOllamaClient_SystemAndTemperature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+
+		if reqBody["system"] != "СТРОГИЙ СИСТЕМНЫЙ ПРОМПТ" {
+			t.Errorf("system = %v, want СТРОГИЙ СИСТЕМНЫЙ ПРОМПТ", reqBody["system"])
+		}
+
+		opts, ok := reqBody["options"].(map[string]interface{})
+		if !ok {
+			t.Fatal("options missing")
+		}
+		if opts["temperature"] != 0.1 {
+			t.Errorf("temperature = %v, want 0.1", opts["temperature"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"response": "{...}"}); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	client := ai.NewOllamaClient(srv.URL, "test-model")
+	client.SetSystem("СТРОГИЙ СИСТЕМНЫЙ ПРОМПТ")
+	client.SetTemperature(0.1)
+
+	if _, err := client.Generate(context.Background(), "test", nil); err != nil {
+		t.Fatalf("Generate error: %v", err)
 	}
 }
 

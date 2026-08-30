@@ -88,6 +88,70 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 }
 
+// TestLoad_AIConfig — новые поля AI-секции (решение §7 #16: system-prompt + temperature из конфига).
+func TestLoad_AIConfig(t *testing.T) {
+	envs := map[string]string{
+		"MAILBRIDGE_IMAP_SERVER":    "imap.example.com",
+		"MAILBRIDGE_IMAP_USER":      "user@example.com",
+		"MAILBRIDGE_IMAP_PASS":      "secret",
+		"MAILBRIDGE_SMTP_SERVER":    "smtp.example.com",
+		"MAILBRIDGE_SMTP_FROM":      "support@example.com",
+		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.example.com",
+		"MAILBRIDGE_PLANE_API_KEY":  "plane-key-123",
+		"MAILBRIDGE_WEBHOOK_SECRET": "webhook-secret-456",
+		"MAILBRIDGE_AI_ENABLED":     "true",
+		"MAILBRIDGE_AI_MODEL":       "qwen3.8-74k:latest",
+		"MAILBRIDGE_AI_SYSTEM_FILE": "configs/email-assistant-v2.system.txt",
+		"MAILBRIDGE_AI_TEMPERATURE": "0.2",
+	}
+	setEnvs(t, envs)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.AI.Enabled {
+		t.Error("AI.Enabled should be true")
+	}
+	if cfg.AI.Model != "qwen3.8-74k:latest" {
+		t.Errorf("AI.Model = %s, want qwen3.8-74k:latest", cfg.AI.Model)
+	}
+	if cfg.AI.SystemPromptFile != "configs/email-assistant-v2.system.txt" {
+		t.Errorf("AI.SystemPromptFile = %s", cfg.AI.SystemPromptFile)
+	}
+	if cfg.AI.Temperature != 0.2 {
+		t.Errorf("AI.Temperature = %v, want 0.2", cfg.AI.Temperature)
+	}
+}
+
+// TestLoad_AIConfig_TemperatureDefault — по умолчанию 0.1 (как в Modelfile).
+func TestLoad_AIConfig_TemperatureDefault(t *testing.T) {
+	envs := map[string]string{
+		"MAILBRIDGE_IMAP_SERVER":    "imap.example.com",
+		"MAILBRIDGE_IMAP_USER":      "user@example.com",
+		"MAILBRIDGE_IMAP_PASS":      "secret",
+		"MAILBRIDGE_SMTP_SERVER":    "smtp.example.com",
+		"MAILBRIDGE_SMTP_FROM":      "support@example.com",
+		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.example.com",
+		"MAILBRIDGE_PLANE_API_KEY":  "plane-key-123",
+		"MAILBRIDGE_WEBHOOK_SECRET": "webhook-secret-456",
+	}
+	setEnvs(t, envs)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.AI.Temperature != 0.1 {
+		t.Errorf("AI.Temperature default = %v, want 0.1", cfg.AI.Temperature)
+	}
+	if cfg.AI.SystemPromptFile != "" {
+		t.Errorf("AI.SystemPromptFile default = %s, want empty", cfg.AI.SystemPromptFile)
+	}
+}
+
 // setEnvs устанавливает переменные окружения и возвращает функцию очистки.
 func setEnvs(t *testing.T, envs map[string]string) {
 	t.Helper()
