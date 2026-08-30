@@ -1,6 +1,6 @@
 # Подплан v0.22 — Фаза 2, шаги 10–11 (Проект → Модуль → Задача)
 
-Статус: **ШАГ 10 ГОТОВ (2026-08-29, коммиты ed4a80e→1963152); шаг 11 — в работе**. Дата: 2026-08-29.
+Статус: **ШАГИ 10–11 ГОТОВЫ (шаг 10 — 2026-08-29; шаг 11 — 2026-08-29/30). Баг «invalid request body» починен и закоммичен 8cfa62c.**
 Метод: каждый подшаг = 1 коммит; acceptance = зелёные тесты + линт до коммита.
 Правило сессии: НЕ перечитывать код — контракт ниже финален, вопросы только в §4.
 
@@ -85,8 +85,8 @@
 | # | Коммит (сообщение) | Файлы | Что делаем | Acceptance | Статус |
 |---|---|---|---|---|---|
 | 11.1 | `feat: api — manual task creation POST /api/tasks (v0.22 step 11)` | `internal/web/api.go`, `internal/web/api_createtask_test.go` (новый), `internal/web/api_test.go` (helper), `cmd/mailbridge/main.go` | Handler `CreateTask`: контракт §1.4 (`title`+`project` обязательны; `description`, `epic_id` опц.; `epic_id` не существует/чужой → 400). `message_id = manual-{16hex}`, статус `new`. WS `task_created`. Тесты: OK/минимум/валидация/404/эпик-валидация/405. | `go test ./internal/...` + lint green | ✅ `507456d` |
-| 11.2 | `feat: ui — module field in task detail (v0.22 step 11)` | `frontend/src/views/TaskDetailView.vue` + тест | Select «Модуль» в сайдбаре (эпики проекта задачи, сброс → `epic_id:null`) → `PATCH /api/tasks/{id}`. Тест: выбор модуля шлёт PATCH с epic_id, сброс шлёт null. | test+lint+build | ⬜ |
-| 11.3 | `feat: ui — create task dialog in dashboard and projects (v0.22 step 11)` | `frontend/src/components/CreateTaskDialog.vue` (новый) + `DashboardView.vue` + `ProjectsView.vue` + тест | Dialog «Создать задачу»: заголовок (обязательно) + проект (из контекста ProjectsView / Select в Dashboard) + модуль (опция, эпиками проекта) → `POST /api/tasks` → redirect `/tasks/{id}`. Кнопки в обоих местах. Тест: валидация title, payload, redirect. | test+lint+build | ⬜ |
+| 11.2 | `feat: ui — module field in task detail (v0.22 step 11)` | `frontend/src/views/TaskDetailView.vue` + тест | Select «Модуль» в сайдбаре (эпики проекта задачи, сброс → `epic_id:null`) → `PATCH /api/tasks/{id}`. Тест: выбор модуля шлёт PATCH с epic_id, сброс шлёт null. | test+lint+build | ✅ `54d5f4b` (Select «Модуль» + `optionValue` — без бага) |
+| 11.3 | `feat: ui — create task dialog in dashboard and projects (v0.22 step 11)` | `frontend/src/components/CreateTaskDialog.vue` (новый) + `DashboardView.vue` + `ProjectsView.vue` + тест | Dialog «Создать задачу»: заголовок (обязательно) + проект (из контекста ProjectsView / Select в Dashboard) + модуль (опция, эпиками проекта) → `POST /api/tasks` → redirect `/tasks/{id}`. Кнопки в обоих местах. Тест: валидация title, payload, redirect. | test+lint+build | ✅ `7dc8b7a`; баг «invalid request body» → ✅ `8cfa62c` (Select без `optionValue` клал объект в v-model → 400; + нормализаторы + регрессионный тест) |
 
 Финальная проверка всей фазы: `make test && make lint && npm run lint && npm run build`, затем — только после твоего «ок»: PR → CI → merge → tag v0.22.0 (по общему PLAN).
 
