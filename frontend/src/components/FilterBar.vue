@@ -7,7 +7,7 @@
       optionLabel="label"
       optionValue="value"
       placeholder="Проект"
-      @change="onProjectChange"
+      @change="onProjectChange($event.value)"
       showClear
     />
     <Select
@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
 import { useProjectsStore } from '@/stores/projects'
@@ -42,19 +42,17 @@ const epic = ref(null)
 
 const epicOptions = ref([])
 
-const projectOptions = [
-  { label: 'Входящие', value: 'Входящие' },
-  { label: 'ТРК', value: 'ТРК' },
-  { label: 'Отель', value: 'Отель' },
-  { label: 'Лидер Спорт', value: 'Лидер Спорт' },
-  { label: 'Театр', value: 'Театр' },
-  { label: 'Мебельный центр', value: 'Мебельный центр' },
-  { label: 'Кафе', value: 'Кафе' },
-  { label: 'Ледовая арена', value: 'Ледовая арена' },
-  { label: 'Корпоративные сайты', value: 'Корпоративные сайты' }
-]
+// Опции «Проект» — из store (активные, archived=false), не хардкод:
+// проекты создаются/переименовываются/архивируются в рантайме,
+// статический список живёт вне БД (в т.ч. «Входящие» приходит из БД).
+const projectOptions = computed(() =>
+  projectsStore.projects.map((p) => ({ label: p.name, value: p.name }))
+)
 
 onMounted(async () => {
+  if (projectsStore.projects.length === 0) {
+    await projectsStore.fetchProjects({ archived: 'false' })
+  }
   // Восстанавливаем фильтры из store при возврате со страницы задачи
   search.value = store.filters.search || ''
   project.value = store.filters.project || null

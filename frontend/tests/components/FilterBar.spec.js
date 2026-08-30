@@ -11,6 +11,7 @@ import apiClient from '@/api/client'
 import FilterBar from '@/components/FilterBar.vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
+import Select from 'primevue/select'
 
 const EPIC = { id: 7, project_id: 42, number: 2, name: 'Строчка', description: '', status: 'open' }
 
@@ -90,5 +91,36 @@ describe('FilterBar', () => {
     await flushPromises()
     expect(tasks.filters.project).toBe('')
     expect(tasks.filters.epic_id).toBe('')
+  })
+
+  it('регрессия багов 2+3: PrimeVue 5 change = {originalEvent, value} (объект) — фильтр получает строку', async () => {
+    // PrimeVue 5.0.0 Select эмитит change объектом события
+    // (node_modules/primevue/select/index.mjs: $emit('change', {originalEvent, value})).
+    // Старый @change="onProjectChange" (без $event.value) принимал объект →
+    // setFilter('project', <объект>) → запрос с [object Object] + эпики не грузились.
+    mockApi()
+    const { wrapper, tasks, epics } = mountBar()
+    await flushPromises()
+    const select = wrapper.findComponent(Select)
+    expect(select.exists()).toBe(true)
+    select.vm.$emit('change', { originalEvent: new Event('change'), value: 'Лидер Спорт' })
+    await flushPromises()
+    // фильтр — строка (не объект), бекенд получит ?project=Лидер%20Спорт
+    expect(tasks.filters.project).toBe('Лидер Спорт')
+    expect(apiClient.get).toHaveBeenCalledWith(
+      '/tasks',
+      expect.objectContaining({ params: expect.objectContaining({ project: 'Лидер Спорт' }) })
+    )
+    // эпики проекта загрузились (баг 3: «No options available»)
+    expect(epics.epics).toEqual([EPIC])
+    expect(wrapper.vm.epicOptions).toEqual([{ label: '#2 Строчка', value: '7' }])
+  })
+
+  it('опции «Проект» — из store (БД), не хардкод', async () => {
+    mockApi()
+    const { wrapper } = mountBar()
+    await flushPromises()
+    // «Лидер Спорт» пришёл из mock /projects; хардкод-список (ТРК, Отель…) удалён
+    expect(wrapper.vm.projectOptions).toEqual([{ label: 'Лидер Спорт', value: 'Лидер Спорт' }])
   })
 })
