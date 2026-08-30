@@ -5,10 +5,20 @@
 // approve kind=report → 400, повторный approve → 200 (idempotent).
 //
 // Пароль агента: env MAILBRIDGE_AGENT_PASS (configs/config.env, не git).
+// Если env не задан — читаем из configs/config.env, чтобы тест не падал
+// в чистом shell без `source configs/config.env`.
 import { test, expect } from '@playwright/test'
+import { existsSync, readFileSync } from 'node:fs'
+
+function agentPassFromConfigEnv() {
+  const p = new URL('../../configs/config.env', import.meta.url).pathname
+  if (!existsSync(p)) return ''
+  const m = readFileSync(p, 'utf8').match(/^\s*MAILBRIDGE_AGENT_PASS\s*=\s*(\S+)\s*$/m)
+  return m ? m[1] : ''
+}
 
 const BASE = process.env.E2E_BASE_URL || 'http://127.0.0.1:5173'
-const AGENT_PASS = process.env.MAILBRIDGE_AGENT_PASS
+const AGENT_PASS = process.env.MAILBRIDGE_AGENT_PASS || agentPassFromConfigEnv()
 const MARK = `E2E-phase4-${Date.now()}`
 
 test.describe.configure({ mode: 'serial' })
