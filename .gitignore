@@ -36,3 +36,6 @@ frontend/dist/
 # Coverage
 coverage.out
 coverage.html
+# Playwright (при прогоне из корня)
+test-results/
+playwright-report/
