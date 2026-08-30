@@ -3,6 +3,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -15,6 +16,41 @@ type Attachment struct {
 	Size        int64     `json:"size"`
 	StoragePath string    `json:"storage_path"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Project представляет проект (внутренний «проект», контейнер модулей/эпиков и задач).
+type Project struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Archived    bool      `json:"archived"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ProjectFilter фильтрует список проектов.
+type ProjectFilter struct {
+	Archived *bool // nil = все, true = только архивные, false = только активные
+	Search   string
+}
+
+// Epic представляет модуль (эпик) внутри проекта.
+type Epic struct {
+	ID          int64     `json:"id"`
+	ProjectID   int64     `json:"project_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Number      int       `json:"number"`
+	Status      string    `json:"status"` // open | in_progress | done
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// EpicProgress — сводка задач эпика для карточки.
+type EpicProgress struct {
+	Total int `json:"total"`
+	Open  int `json:"open"`
+	Done  int `json:"done"` // задачи со статусом completed|closed
 }
 
 // InboxItem представляет элемент ленты входящих.
@@ -62,6 +98,7 @@ type Task struct {
 	ThreadID      string    `json:"thread_id"`
 	SourceEmailID string    `json:"source_email_id"`
 	AIVerdict     string    `json:"ai_verdict"`
+	EpicID        *int64    `json:"epic_id"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -95,6 +132,7 @@ type TaskComment struct {
 	Kind        string    `json:"kind"`
 	InboxItemID *int64    `json:"inbox_item_id,omitempty"`
 	VerdictJSON string    `json:"verdict_json,omitempty"`
+	Approved    *int      `json:"approved,omitempty"` // NULL = не утверждён; 0/1 — модерация ответа (ФАЗА 4)
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -112,6 +150,7 @@ type TaskAttachment struct {
 // TaskFilter содержит параметры фильтрации списка задач.
 type TaskFilter struct {
 	Project  string
+	EpicID   *int64   // фильтр по модулю (epic)
 	Statuses []string // множественный фильтр по статусам
 	Assignee string
 	Type     string
@@ -128,15 +167,6 @@ type TaskListResult struct {
 	Total   int64             `json:"total"`
 	Page    int               `json:"page"`
 	PerPage int               `json:"per_page"`
-}
-
-// ReplyLog записывает отправленный ответ для предотвращения дубликатов.
-type ReplyLog struct {
-	ID           int64
-	MessageID    string
-	InReplyTo    string
-	PlaneIssueID string
-	SentAt       time.Time
 }
 
 // OutboxItem представляет элемент очереди исходящих писем.
@@ -165,10 +195,31 @@ type InboxListResult struct {
 	PerPage int          `json:"per_page"`
 }
 
+// ErrCommentNotFound — комментарий не найден.
+var ErrCommentNotFound = errors.New("comment not found")
+
 // Store определяет интерфейс хранилища данных.
 type Store interface {
 	// Migrate выполняет миграции схемы.
 	Migrate(ctx context.Context) error
+
+	// Projects
+	CreateProject(ctx context.Context, p *Project) error
+	GetProject(ctx context.Context, id int64) (*Project, error)
+	GetProjectByName(ctx context.Context, name string) (*Project, error)
+	ListProjects(ctx context.Context, filter *ProjectFilter) ([]*Project, error)
+	UpdateProject(ctx context.Context, id int64, name, description string) error
+	SetProjectArchived(ctx context.Context, id int64, archived bool) error
+
+	// Epics (модули)
+	CreateEpic(ctx context.Context, e *Epic) error
+	GetEpic(ctx context.Context, id int64) (*Epic, error)
+	ListEpics(ctx context.Context, projectID int64) ([]*Epic, error)
+	UpdateEpic(ctx context.Context, id int64, name, description, status string) error
+	DeleteEpic(ctx context.Context, id int64) error
+	EpicProgress(ctx context.Context, epicID int64) (*EpicProgress, error)
+	// SetTaskEpic привязывает задачу к модулю (epicID = 0 — отвязать).
+	SetTaskEpic(ctx context.Context, taskID, epicID int64) error
 
 	// Attachments
 	CreateAttachment(ctx context.Context, att *Attachment) error
@@ -215,6 +266,8 @@ type Store interface {
 	// Task Comments
 	AddTaskComment(ctx context.Context, comment *TaskComment) error
 	GetTaskComments(ctx context.Context, taskID int64) ([]*TaskComment, error)
+	GetTaskComment(ctx context.Context, id int64) (*TaskComment, error)
+	SetTaskCommentApproved(ctx context.Context, id int64, approved bool) error
 
 	// Task Attachments
 	AddTaskAttachment(ctx context.Context, att *TaskAttachment) error
@@ -222,10 +275,6 @@ type Store interface {
 
 	// LinkAttachmentToComment связывает вложение с комментарием.
 	LinkAttachmentToComment(ctx context.Context, commentID, attachmentID int64) error
-
-	// Reply Log
-	SaveReplyLog(ctx context.Context, log *ReplyLog) error
-	ReplyExists(ctx context.Context, msgID string) (bool, error)
 
 	// Outbox
 	EnqueueOutbox(ctx context.Context, payload string) error

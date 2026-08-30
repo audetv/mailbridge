@@ -15,7 +15,7 @@ Mailbridge — сервис управления входящими обраще
 - `make vet` — go vet
 - `make fmt` — gofmt
 - `make run` — запуск (production, порт из config.env)
-- `make run-dev` — запуск в dev-режиме (порт берётся из `MAILBRIDGE_WEBHOOK_LISTEN`; vite-прокси при dev ждёт 8081 — т.е. в dev-конфиге `LISTEN=:8081`)
+- `make run-dev` — запуск в dev-режиме (порт берётся из `MAILBRIDGE_LISTEN`; vite-прокси при dev ждёт 8081 — т.е. в dev-конфиге `LISTEN=:8081`)
 - `make clean` — очистка артефактов
 - `make tidy` — go mod tidy
 
@@ -25,6 +25,20 @@ Mailbridge — сервис управления входящими обраще
 - `cd frontend && npm run build` — production-сборка
 - `cd frontend && npm run preview` — предпросмотр собранного
 - `cd frontend && npm run lint` / `npm run format` — ESLint 9 + Prettier (CI гоняет lint перед сборкой)
+
+### Тестирование
+
+- Unit: `make test` (Go) + `cd frontend && npm test` (vitest) — перед коммитом, который трогает код
+- **E2E (Playwright в `frontend/`)**: обязателен при UI-коммите, касающемся **Filter / Tab / Select / Dialog / роутинга вкладок** — `cd frontend && npx playwright test` (против живого dev-стека: moка PrimeVue скрывают реальные баги)
+- Стек для e2e: `make run-dev` (:8081) + `cd frontend && npm run dev` (:5173); данные — сид
+  `cd frontend && npm run e2e:seed` (идемпотентный: проекты + модуль «Сайт ТРК» + задачи).
+  **После КОПИРОВАНИЯ БД из прод в dev — ОБЯЗАТЕЛЬНО прогнать `e2e:seed` перед e2e.**
+
+### Dev-окружение (порты)
+
+- `:8080` = **ПРОД** mailbridge — НЕ трогать (не kill/restart, не писать в его БД); действия на проде — у пользователя
+- `:8081` = dev-бекенд (`make run-dev`); `:5173` = vite dev (прокси на 8081)
+- Агенту допустимо поднимать/останавливать dev-бекенд для тестов (по необходимости)
 
 ## Repo Map
 
@@ -41,7 +55,6 @@ internal/
   mailbox/               — IMAP-клиент
   metrics/               — Prometheus-метрики
   parser/                — извлечение полей из текста
-  plane/                 — клиент Plane API (отключён в маппинге задач, но env Plane **required** для валидации конфига — см. ADR-0001; удаление требует правки валидации в config.go)
   preprocessor/          — обработка вложений для AI
   processor/             — оркестрация обработки писем
   sender/                — SMTP-отправка
@@ -52,7 +65,6 @@ internal/
   store/                 — интерфейс хранилища
   store/sqlite/          — SQLite-реализация
   web/                   — HTTP-обработчики, API
-  webhook/               — приём webhook'ов
   worker/                — воркеры (inbound, outbound)
 frontend/                — Vue 3 SPA
   src/views/             — страницы
@@ -89,7 +101,7 @@ data/                    — БД и вложения (НЕ коммитить)
 - Образец: `configs/config.example.env` (обновлять при добавлении параметров)
 - Секреты: только через env-переменные `MAILBRIDGE_*` (словарь — `configs/config.example.env`)
 - `data/` — БД и вложения, НЕ коммитить
-- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM`, `MAILBRIDGE_PLANE_BASE_URL/API_KEY`, `MAILBRIDGE_WEBHOOK_SECRET` — без них бинарник не стартует
+- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM` — без них бинарник не стартует (Plane/webhook-secret сняты в v0.22.0)
 - `MAILBRIDGE_AUTH_USER/PASS` имеют дефолт `admin/admin` — **всегда** задавать свои в production
 
 ## Docs Index
@@ -120,14 +132,18 @@ data/                    — БД и вложения (НЕ коммитить)
 > Все изменения только через отдельную ветку под задачу + PR.
 > **Green CI обязателен** (required status check `CI` на `main`). **Релизы — минорные `0.x.y` до v1**; после мержа — тег + бинарник.
 
-## Критические инварианты
+## Критические инварианты (v0.22.0)
 
 - Миграции БД должны быть идемпотентными (`IF NOT EXISTS`)
 - `email_mapping` удалена — использовать `inbox_items`
 - Вложения: CAS (SHA-256), файл хранится по hash, имя в БД
 - AI-обработка: через очередь, не синхронно
 - Вердикты: строгий JSON с полем `action`
-- `task_comments.kind` — `user_comment` или `ai_verdict`
+- `task_comments.kind` — `user_comment` | `ai_verdict` (история входящих) | `report` (внутренний отчёт) | `reply` (черновик ответа)
+- `task_comments.approved` — флаг комментария (admin-only `PATCH /api/comments/{id}/approve`), NOT статус задачи
+- Проекты → Модули (API/UI: `epics`/`epic_id`) → Задачи; задача без модуля допустима
+- Auth: 2 юзера — admin (`MAILBRIDGE_AUTH_USER/PASS`) + агент `hermes` (`MAILBRIDGE_AGENT_PASS` обязателен для активации)
+- **Срез Plane (v0.22.0):** Plane/webhook удалены (ADR-0001); проекты для AI — из SQLite; отправка e-mail пользователю НЕ идёт (reply = только черновик)
 
 ## Hermes (agent-specific)
 

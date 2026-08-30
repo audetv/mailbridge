@@ -145,6 +145,16 @@
                 @change="updateField('type', $event.value)"
               />
             </div>
+            <div class="field" v-if="epicOptions.length > 0">
+              <label>Модуль</label>
+              <Select
+                v-model="epic"
+                :options="epicOptions"
+                optionLabel="label"
+                optionValue="value"
+                @change="onEpicChange($event.value)"
+              />
+            </div>
             <div class="field">
               <label>Исполнитель</label>
               <InputText v-model="assignee" @blur="updateField('assignee', assignee)" />
@@ -157,10 +167,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useTasksStore } from '@/stores/tasks'
+import { useProjectsStore } from '@/stores/projects'
+import { useEpicsStore } from '@/stores/epics'
 import apiClient from '@/api/client'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
@@ -168,21 +180,32 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import CommentList from '@/components/CommentList.vue'
 import ReplyForm from '@/components/ReplyForm.vue'
+import { useWebSocket } from '@/stores/websocket'
+import { useAuthStore } from '@/stores/auth'
 import WorkflowButtons from '@/components/WorkflowButtons.vue'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const store = useTasksStore()
+const projectsStore = useProjectsStore()
+const epicsStore = useEpicsStore()
+const wsStore = useWebSocket()
+const authStore = useAuthStore()
 
 const project = ref(null)
 const status = ref(null)
 const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
+const epic = ref(null)
 const inboxItems = ref([])
 const taskAttachments = ref([])
 const expanded = ref(false)
+
+const epicOptions = computed(() =>
+  epicsStore.epics.map((e) => ({ label: e.name, value: e.id }))
+)
 
 const projectOptions = [
   { label: 'Входящие', value: 'Входящие' },
@@ -221,14 +244,50 @@ const typeOptions = [
 ]
 
 onMounted(async () => {
+  wsStore.connect(authStore.token)
   await store.fetchTask(route.params.id)
   syncFields()
+  await loadEpics()
   store.markAsRead(route.params.id)
   inboxItems.value = await store.fetchTaskInbox(route.params.id)
   taskAttachments.value = await fetchTaskAttachments(route.params.id)
 })
 
-watch(() => store.currentTask, syncFields)
+onUnmounted(() => {
+  wsStore.disconnect()
+})
+
+// WS-событие comment_approved — бейдж «Утверждён» без перезагрузки (ФАЗА 4).
+wsStore.onEvent((event) => {
+  if (event?.type !== 'comment_approved') return
+  if (event.taskId != null && Number(event.taskId) !== Number(route.params.id)) return
+  store.applyCommentApproved(event)
+})
+
+watch(() => store.currentTask, () => {
+  syncFields()
+  loadEpics()
+})
+
+// Эпики проекта задачи (схема: задача → проект по ИМЕНИ, API эпиков по ID проекта)
+async function loadEpics() {
+  const task = store.currentTask
+  if (!task || !task.project) {
+    epicsStore.epics = []
+    return
+  }
+  let project = projectsStore.projectByName(task.project)
+  if (!project) {
+    await projectsStore.fetchProjects({ archived: 'false' })
+    project = projectsStore.projectByName(task.project)
+    if (!project) {
+      epicsStore.epics = []
+      return
+    }
+  }
+  await epicsStore.fetchEpics(project.id)
+  epic.value = task.epic_id || null
+}
 
 function syncFields() {
   if (!store.currentTask) return
@@ -241,6 +300,12 @@ function syncFields() {
 
 async function updateField(field, value) {
   await store.updateTask(route.params.id, { [field]: value })
+}
+
+// Смена модуля. null — сброс (задача без модуля).
+async function onEpicChange(epicId) {
+  epic.value = epicId || null
+  await store.updateTask(route.params.id, { epic_id: epicId || null })
 }
 
 async function onWorkflowTransition(newStatus) {
@@ -314,6 +379,8 @@ function formatSize(bytes) {
 function escapeHtml(text) {
   return text?.replace(/\n/g, '<br>') || ''
 }
+
+defineExpose({ epic, epicOptions, onEpicChange, loadEpics })
 </script>
 
 <style scoped>

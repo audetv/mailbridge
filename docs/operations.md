@@ -65,7 +65,6 @@ JSON-формат при `MAILBRIDGE_LOG_FORMAT=json`. Ключевые сооб
 - `mailbridge_emails_processed_total`
 - `mailbridge_issues_created_total`
 - `mailbridge_imap_connected`
-- `mailbridge_plane_available`
 
 ## Частые проблемы
 

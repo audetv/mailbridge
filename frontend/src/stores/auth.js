@@ -22,5 +22,19 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('token')
   }
 
-  return { token, user, isAuthenticated, login, logout }
+  // Восстановление user после полной перезагрузки (F5 / прямой URL).
+  // Token живёт в localStorage, user — только в памяти: без этого при
+  // перезагрузке «кто я» неизвестно (кнопка approve, RBAC — ломаются).
+  async function restore() {
+    if (user.value || !token.value) return
+    try {
+      const { data } = await apiClient.get('/auth/me')
+      if (data && data.username) user.value = { username: data.username }
+    } catch (err) {
+      // 401 — токен мёртв: чистим состояние.
+      if (err?.response?.status === 401) logout()
+    }
+  }
+
+  return { token, user, isAuthenticated, login, logout, restore }
 })

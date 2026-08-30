@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -244,7 +245,7 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 // GetTask возвращает задачу по ID.
 func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
 		FROM tasks WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -254,7 +255,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 // GetTaskByMessageID возвращает задачу по Message-ID.
 func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
 		FROM tasks WHERE message_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, messageID)
@@ -279,6 +280,10 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	if filter.Project != "" {
 		conditions = append(conditions, "t.project = ?")
 		args = append(args, filter.Project)
+	}
+	if filter.EpicID != nil {
+		conditions = append(conditions, "t.epic_id = ?")
+		args = append(args, *filter.EpicID)
 	}
 	if len(filter.Statuses) > 0 {
 		placeholders := make([]string, len(filter.Statuses))
@@ -324,7 +329,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -350,11 +355,15 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	for rows.Next() {
 		task := &store.Task{}
 		unread := 0
+		var epicID sql.NullInt64
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		if epicID.Valid {
+			task.EpicID = &epicID.Int64
 		}
 		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}
@@ -410,9 +419,54 @@ func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) 
 	return nil
 }
 
-// GetTaskComments возвращает комментарии к задаче.
+// SetTaskCommentApproved ставит/снимает флаг утверждения на комментарии (ФАЗА 4).
+func (s *Store) SetTaskCommentApproved(ctx context.Context, id int64, approved bool) error {
+	v := 0
+	if approved {
+		v = 1
+	}
+	res, err := s.db.ExecContext(ctx, "UPDATE task_comments SET approved = ? WHERE id = ?", v, id)
+	if err != nil {
+		return fmt.Errorf("failed to set approved on comment %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrCommentNotFound
+	}
+	return nil
+}
+
+// GetTaskComment возвращает один комментарий по id (для approve, ФАЗА 4).
+func (s *Store) GetTaskComment(ctx context.Context, id int64) (*store.TaskComment, error) {
+	c := &store.TaskComment{}
+	var inboxItemID sql.NullInt64
+	var verdictJSON sql.NullString
+	var approved sql.NullInt32
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
+		 FROM task_comments WHERE id = ?`, id).
+		Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction, &c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrCommentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get comment %d: %w", id, err)
+	}
+	if inboxItemID.Valid {
+		c.InboxItemID = &inboxItemID.Int64
+	}
+	if verdictJSON.Valid {
+		c.VerdictJSON = verdictJSON.String
+	}
+	if approved.Valid {
+		v := int(approved.Int32)
+		c.Approved = &v
+	}
+	return c, nil
+}
+
+// GetTaskComments возвращает список комментариев задачи.
 func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
-	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, created_at
+	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, taskID)
@@ -426,8 +480,9 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 		c := &store.TaskComment{}
 		var inboxItemID sql.NullInt64
 		var verdictJSON sql.NullString
+		var approved sql.NullInt32
 		err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction,
-			&c.Kind, &inboxItemID, &verdictJSON, &c.CreatedAt)
+			&c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
@@ -436,6 +491,10 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 		}
 		if verdictJSON.Valid {
 			c.VerdictJSON = verdictJSON.String
+		}
+		if approved.Valid {
+			v := int(approved.Int32)
+			c.Approved = &v
 		}
 		comments = append(comments, c)
 	}
@@ -476,21 +535,6 @@ func (s *Store) GetTaskAttachments(ctx context.Context, taskID int64) ([]*store.
 		attachments = append(attachments, a)
 	}
 	return attachments, rows.Err()
-}
-
-// SaveReplyLog сохраняет запись об отправленном ответе.
-func (s *Store) SaveReplyLog(ctx context.Context, log *store.ReplyLog) error {
-	query := `INSERT INTO reply_log (message_id, in_reply_to, plane_issue_id) VALUES (?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, log.MessageID, log.InReplyTo, log.PlaneIssueID)
-	return err
-}
-
-// ReplyExists проверяет существование ответа.
-func (s *Store) ReplyExists(ctx context.Context, msgID string) (bool, error) {
-	query := `SELECT COUNT(*) FROM reply_log WHERE message_id = ?`
-	var count int
-	err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count)
-	return count > 0, err
 }
 
 // EnqueueOutbox добавляет письмо в очередь.
@@ -571,14 +615,18 @@ func (s *Store) TableExists(ctx context.Context, table string) (bool, error) {
 // scanTask сканирует строку в Task.
 func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) {
 	t := &store.Task{}
+	var epicID sql.NullInt64
 	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
 		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
-		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &t.CreatedAt, &t.UpdatedAt)
+		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &epicID, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to scan task: %w", err)
+	}
+	if epicID.Valid {
+		t.EpicID = &epicID.Int64
 	}
 	return t, nil
 }
@@ -629,7 +677,7 @@ func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary strin
 // GetActiveTasksByThread возвращает активные задачи цепочки.
 func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
 		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved', 'info_only') ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, threadID)
@@ -652,6 +700,11 @@ func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]
 // QueryRowForTest — экспортируемый метод для тестов.
 func (s *Store) QueryRowForTest(ctx context.Context, query string) *sql.Row {
 	return s.db.QueryRowContext(ctx, query)
+}
+
+// ExecForTest — экспортируемый метод для тестов.
+func (s *Store) ExecForTest(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return s.db.ExecContext(ctx, query, args...)
 }
 
 // GetPendingAIItems возвращает входящие с ai_processed = 0.

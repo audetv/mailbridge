@@ -18,9 +18,10 @@ import (
 
 // Orchestrator координирует обработку писем через LLM.
 type Orchestrator struct {
-	client   Client
-	store    store.Store
-	projects []string
+	client           Client
+	store            store.Store
+	projects         []string
+	projectsProvider func(ctx context.Context) ([]string, error)
 }
 
 // NewOrchestrator создаёт новый Orchestrator.
@@ -31,9 +32,58 @@ func NewOrchestrator(client Client, st store.Store) *Orchestrator {
 	}
 }
 
+// DefaultProject — fallback-проект при пустом AI-классификаторе (шаг 15).
+// Переопределяется через MAILBRIDGE_DEFAULT_PROJECT.
+var DefaultProject = "Входящие"
+
 // SetProjects устанавливает список доступных проектов.
 func (o *Orchestrator) SetProjects(projects []string) {
 	o.projects = projects
+}
+
+// SetProjectsProvider устанавливает динамический источник активных проектов (из БД).
+// Если провайдер вернёт ошибку или пустой список, используется статический o.projects.
+func (o *Orchestrator) SetProjectsProvider(fn func(ctx context.Context) ([]string, error)) {
+	o.projectsProvider = fn
+}
+
+// activeProjectNames — активные проекты: провайдер (БД) → статика → пусто.
+func (o *Orchestrator) activeProjectNames(ctx context.Context) []string {
+	if o.projectsProvider != nil {
+		names, err := o.projectsProvider(ctx)
+		if err == nil && len(names) > 0 {
+			return names
+		}
+	}
+	return o.projects
+}
+
+// isKnownProject — проект из вердикта ∈ активных проектов (важе: нет archived).
+func (o *Orchestrator) isKnownProject(ctx context.Context, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, p := range o.activeProjectNames(ctx) {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveVerdictProject валидирует проект из вердикта; неизвестный — fallback-константа.
+// Имя приводится к виду списка (TrimSpace): LLM может вернуть с пробелами.
+func (o *Orchestrator) ResolveVerdictProject(ctx context.Context, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DefaultProject
+	}
+	if o.isKnownProject(ctx, name) {
+		return name
+	}
+	log.Printf("[AI] AI-вердикт указывает неизвестный проект %q — используется fallback %q", name, DefaultProject)
+	return DefaultProject
 }
 
 // ProcessEmail обрабатывает новое письмо через LLM и возвращает вердикты.
@@ -296,9 +346,10 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 		"Если [СОБЫТИЕ] есть — действуй по его данным: приглашение (REQUEST) → создай задачу-напоминание о встрече\n" +
 		"или подтверждение участия; отмена (CANCEL) → отметь отмену. Не отвечай «нет текста», если событие присутствует.\n\n")
 
-	if len(o.projects) > 0 {
+	projects := o.activeProjectNames(context.Background())
+	if len(projects) > 0 {
 		sb.WriteString("=== ДОСТУПНЫЕ ПРОЕКТЫ ===\n")
-		sb.WriteString(strings.Join(o.projects, ", "))
+		sb.WriteString(strings.Join(projects, ", "))
 		sb.WriteString("\nВАЖНО: Выбирай проект ТОЛЬКО из этого списка. Если не уверен — используй \"Входящие\".\n\n")
 	}
 

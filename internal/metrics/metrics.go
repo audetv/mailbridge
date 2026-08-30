@@ -14,8 +14,7 @@ type Metrics struct {
 	EmailsSent      atomic.Int64
 	Errors          atomic.Int64
 
-	IMAPConnected  atomic.Int32 // 1 = connected, 0 = disconnected
-	PlaneAvailable atomic.Int32 // 1 = available, 0 = unavailable
+	IMAPConnected atomic.Int32 // 1 = connected, 0 = disconnected
 }
 
 // New создаёт новый экземпляр Metrics.
@@ -29,15 +28,6 @@ func (m *Metrics) SetIMAPConnected(connected bool) {
 		m.IMAPConnected.Store(1)
 	} else {
 		m.IMAPConnected.Store(0)
-	}
-}
-
-// SetPlaneAvailable устанавливает доступность Plane API.
-func (m *Metrics) SetPlaneAvailable(available bool) {
-	if available {
-		m.PlaneAvailable.Store(1)
-	} else {
-		m.PlaneAvailable.Store(0)
 	}
 }
 
@@ -65,9 +55,6 @@ mailbridge_errors_total %d
 # HELP mailbridge_imap_connected IMAP connection status (1=connected)
 # TYPE mailbridge_imap_connected gauge
 mailbridge_imap_connected %d
-# HELP mailbridge_plane_available Plane API availability (1=available)
-# TYPE mailbridge_plane_available gauge
-mailbridge_plane_available %d
 `,
 		m.EmailsProcessed.Load(),
 		m.IssuesCreated.Load(),
@@ -75,6 +62,5 @@ mailbridge_plane_available %d
 		m.EmailsSent.Load(),
 		m.Errors.Load(),
 		m.IMAPConnected.Load(),
-		m.PlaneAvailable.Load(),
 	)
 }

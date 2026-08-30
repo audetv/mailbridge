@@ -12,20 +12,33 @@ import (
 
 // OllamaClient реализует Client для локального Ollama API.
 type OllamaClient struct {
-	baseURL    string
-	model      string
-	httpClient *http.Client
+	baseURL     string
+	model       string
+	system      string // Системный промпт (в запрос: "system")
+	temperature float64
+	httpClient  *http.Client
 }
 
 // NewOllamaClient создаёт новый OllamaClient.
 func NewOllamaClient(baseURL, model string) *OllamaClient {
 	return &OllamaClient{
-		baseURL: baseURL,
-		model:   model,
+		baseURL:     baseURL,
+		model:       model,
+		temperature: 0.1,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
 	}
+}
+
+// SetSystem устанавливает системный промпт (передаётся в запрос как "system").
+func (c *OllamaClient) SetSystem(system string) {
+	c.system = system
+}
+
+// SetTemperature устанавливает temperature (0.1 — строгий JSON, минимум креатива).
+func (c *OllamaClient) SetTemperature(t float64) {
+	c.temperature = t
 }
 
 // Generate отправляет промпт в Ollama и возвращает ответ.
@@ -35,8 +48,12 @@ func (c *OllamaClient) Generate(ctx context.Context, prompt string, images []str
 		"prompt": prompt,
 		"stream": false,
 		"options": map[string]interface{}{
-			"temperature": 0.1,
+			"temperature": c.temperature,
 		},
+	}
+
+	if c.system != "" {
+		reqBody["system"] = c.system
 	}
 
 	if len(images) > 0 {

@@ -1,3 +1,8 @@
+# ⚠ SUPERSEDED (2026-08-30, решение §7 #16): SYSTEM-промпт вынесен в
+#   configs/email-assistant-v2.system.txt и передаётся в каждом /api/generate
+#   через "system". Модель email-assistant-v2:latest больше не нужна — mailbridge
+#   и агент делят одну модель qwen3.8-74k:latest в памяти (без выгрузок).
+#   Файл оставлен как источник истории SYSTEM-промпта.
 FROM qwen3.8:latest
 
 # Параметры для стабильного JSON и работы с длинными цепочками

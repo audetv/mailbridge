@@ -52,7 +52,7 @@ func FormatAcknowledgement(data *AcknowledgementData) (string, string) {
 	return subject, body
 }
 
-// FormatCommentReply формирует письмо с комментарием из Plane.
+// FormatCommentReply формирует письмо с комментарием к задаче.
 func FormatCommentReply(data *CommentReplyData) (string, string) {
 	subject := fmt.Sprintf("Re: [%s] %s", data.IssueSequence, data.Subject)
 	body := fmt.Sprintf(`[MAILBRIDGE-INTERNAL]

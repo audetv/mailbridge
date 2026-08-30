@@ -29,7 +29,7 @@ Mailbridge — сервис для трансформации входящих e
 
 ### inbox_items — лента входящих
 
-Универсальное хранилище входящих сообщений. Каждый источник (email, telegram, webhook) создаёт записи здесь.
+Универсальное хранилище входящих сообщений. Каждый источник (email, telegram, web_form) создаёт записи здесь.
 
 - `source` — тип источника (email, telegram, web_form)
 - `source_id` — уникальный ID внутри источника (Message-ID для email)
@@ -44,6 +44,10 @@ Mailbridge — сервис для трансформации входящих e
 - `thread_id` — уникальный идентификатор цепочки
 - `summary` — резюме цепочки, обновляется LLM
 
+### projects / epics — иерархия (v0.22.0)
+
+Проекты → Модули (`epics`) → Задачи. Задача без модуля допустима (`epic_id NULL`); удаление модуля не бьёт по задачам (`ON DELETE SET NULL`). `projects.name` UNIQUE, `epics` — UNIQUE(project_id, number). `archived` в `projects` = soft-archive. (Plane удалён, ADR-0001.)
+
 ### tasks — задачи
 
 Создаются из входящих после AI-анализа или вручную.
@@ -51,6 +55,7 @@ Mailbridge — сервис для трансформации входящих e
 - `status`: new, backlog, in_progress, completed, closed
 - `thread_id` — связь с цепочкой
 - `source_email_id` — ID письма-источника
+- `epic_id` — ссылка на модуль (nullable)
 
 ### attachments — вложения
 
@@ -195,7 +200,8 @@ GET  /api/auth/me     → {username}
 GET    /api/tasks                    — список с фильтрами
 GET    /api/tasks/{id}               — задача + комментарии + вложения
 PATCH  /api/tasks/{id}               — обновить
-POST   /api/tasks/{id}/reply         — ответ клиенту
+POST   /api/tasks/{id}/reply         — ответ клиенту / отчёт / черновик (kind)
+PATCH  /api/comments/{id}/approve — утвердить черновик ответа (admin-only, idempotent)
 POST   /api/tasks/{id}/mark-read     — отметить прочитанной
 GET    /api/tasks/{id}/inbox         — входящие, связанные с задачей
 GET    /api/tasks/{id}/attachments   — вложения задачи
@@ -213,6 +219,25 @@ POST /api/inbox/{id}/archive          — в архив
 POST /api/inbox/{id}/task             — создать задачу из ленты
 GET  /api/inbox/{id}/attachments      — вложения
 GET  /api/inbox/{id}/tasks            — связанные задачи
+```
+
+### Проекты и модули (v0.22.0)
+
+```
+GET    /api/projects                          — список (archived=, search=)
+POST   /api/projects                          — создать
+GET    /api/projects/{id}                     — проект
+PUT    /api/projects/{id}                     — обновить
+DELETE /api/projects/{id}                     — archive (SOFT)
+POST   /api/projects/{id}/unarchive           — разархивировать
+GET    /api/projects/{id}/tasks               — задачи проекта
+GET    /api/projects/{id}/epics               — модули проекта
+POST   /api/projects/{id}/epics               — создать модуль
+GET    /api/epics/{epicId}                    — модуль + progress
+PUT    /api/epics/{epicId}                    — обновить
+DELETE /api/epics/{epicId}                    — удалить
+POST   /api/epics/{epicId}/tasks/{taskId}     — привязать задачу
+DELETE /api/epics/{epicId}/tasks/{taskId}     — отвязать задачу
 ```
 
 ### Вложения
@@ -247,6 +272,10 @@ MAILBRIDGE_AI_MODEL=email-assistant-v2
 # Auth
 MAILBRIDGE_AUTH_USER=admin
 MAILBRIDGE_AUTH_PASS=...
+MAILBRIDGE_AGENT_PASS=...          # (опционально) агент hermes; только approve
+
+# HTTP
+MAILBRIDGE_LISTEN=:8080
 ```
 
 ## Деплой

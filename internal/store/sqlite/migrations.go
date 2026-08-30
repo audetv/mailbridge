@@ -45,6 +45,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			kind TEXT NOT NULL DEFAULT 'user_comment',
 			inbox_item_id INTEGER REFERENCES inbox_items(id),
 			verdict_json TEXT,
+			approved INTEGER,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
@@ -60,15 +61,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id)`,
-
-		`CREATE TABLE IF NOT EXISTS reply_log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			in_reply_to TEXT NOT NULL,
-			plane_issue_id TEXT NOT NULL,
-			sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_reply_log_message_id ON reply_log(message_id)`,
 
 		`CREATE TABLE IF NOT EXISTS outbox (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,6 +125,31 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_task_id ON task_inbox_items(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_inbox_items_inbox_item_id ON task_inbox_items(inbox_item_id)`,
 
+		// Таблица проектов (v0.22.0): иерархия Проект → Модуль (эпик) → Задача
+		`CREATE TABLE IF NOT EXISTS projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT NOT NULL DEFAULT '',
+			archived INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)`,
+
+		// Модули (эпики) v0.22.0: проект → модуль → задача
+		`CREATE TABLE IF NOT EXISTS epics (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			number INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'open',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(project_id, number)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_epics_project_id ON epics(project_id)`,
+
 		// Универсальная таблица вложений
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,11 +196,64 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
+	if err := s.seedProjects(ctx); err != nil {
+		return fmt.Errorf("project seed failed: %w", err)
+	}
+
 	return nil
+}
+
+// seedProjects наполняет таблицу projects исходным набором:
+// «Входящие» (fallback-проект) + проекты задач (distinct tasks.project).
+// Идемпотентно: INSERT OR IGNORE по UNIQUE(name), повторный запуск не меняет данные.
+func (s *Store) seedProjects(ctx context.Context) error {
+	names, err := s.distinctTaskProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list distinct task projects: %w", err)
+	}
+
+	upsert := `INSERT OR IGNORE INTO projects (name, description) VALUES (?, '')`
+	for _, name := range append([]string{"Входящие"}, names...) {
+		if _, err := s.db.ExecContext(ctx, upsert, name); err != nil {
+			return fmt.Errorf("failed to seed project %q: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// distinctTaskProjects возвращает уникальные непустые значения tasks.project.
+func (s *Store) distinctTaskProjects(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT project FROM tasks
+		WHERE project IS NOT NULL AND project <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return names, nil
 }
 
 // migrateSchema выполняет миграции для обновления существующих таблиц.
 func (s *Store) migrateSchema(ctx context.Context) error {
+	// Срез Plane (v0.22, ФАЗА 5): reply_log больше не используется — аккуратно удаляем
+	// только из существующих БД (таблицы в свежих не создаётся).
+	_, _ = s.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_reply_log_message_id")
+	_, _ = s.db.ExecContext(ctx, "DROP TABLE IF EXISTS reply_log")
+
 	// Добавляем AI-колонки в tasks если их нет
 	aiColumns := map[string]string{
 		"thread_id":       "TEXT NOT NULL DEFAULT ''",
@@ -198,6 +268,40 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		if !has {
 			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
 				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	// Ссылка задачи на модуль (v0.22.0); nullable, удаление модуля не бьёт по задачам.
+	epicColumns := map[string]string{
+		"epic_id": "INTEGER REFERENCES epics(id) ON DELETE SET NULL",
+	}
+	for col, typ := range epicColumns {
+		has, err := s.columnExists(ctx, "tasks", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	// Модули: в ранней версии схемы (v0.22 шаг 3) epics создавались без description/status;
+	// идемпотентно дособираем колонки, если их нет.
+	epicsBackfillColumns := map[string]string{
+		"description": "TEXT NOT NULL DEFAULT ''",
+		"status":      "TEXT NOT NULL DEFAULT 'open'",
+	}
+	for col, typ := range epicsBackfillColumns {
+		has, err := s.columnExists(ctx, "epics", col)
+		if err != nil {
+			return fmt.Errorf("failed to check epics column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE epics ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add epics column %s: %w", col, err)
 			}
 		}
 	}
@@ -230,6 +334,7 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 	indexMigrations := []string{
 		`CREATE INDEX IF NOT EXISTS idx_tasks_thread_id ON tasks(thread_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_source_email_id ON tasks(source_email_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_epic_id ON tasks(epic_id)`,
 	}
 	for _, idx := range indexMigrations {
 		if _, err := s.db.ExecContext(ctx, idx); err != nil {
@@ -240,6 +345,23 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 	// Миграция task_comments: удалить старую, создать новую
 	if err := s.migrateTaskComments(ctx); err != nil {
 		return fmt.Errorf("failed to migrate task_comments: %w", err)
+	}
+
+	// task_comments.approved — модерационный флаг (ФАЗА 4, 2026-08-30):
+	// approved 0/1 на комментарии, NULL = не утверждён. Для существующих БД — backfill.
+	commentApprovedColumns := map[string]string{
+		"approved": "INTEGER",
+	}
+	for col, typ := range commentApprovedColumns {
+		has, err := s.columnExists(ctx, "task_comments", col)
+		if err != nil {
+			return fmt.Errorf("failed to check task_comments column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE task_comments ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add task_comments column %s: %w", col, err)
+			}
+		}
 	}
 
 	return nil
@@ -371,6 +493,7 @@ func (s *Store) migrateTaskComments(ctx context.Context) error {
 		kind TEXT NOT NULL DEFAULT 'user_comment',
 		inbox_item_id INTEGER REFERENCES inbox_items(id),
 		verdict_json TEXT,
+		approved INTEGER,
 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`
 	if _, err := s.db.ExecContext(ctx, createNew); err != nil {

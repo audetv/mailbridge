@@ -28,7 +28,7 @@ func setupAPI(t *testing.T) (*web.TaskHandler, *sqlite.Store, func()) {
 		t.Fatalf("Migrate error: %v", err)
 	}
 
-	handler := web.NewTaskHandler(st)
+	handler := web.NewTaskHandler(st, web.NewEventBroker(), "admin")
 
 	cleanup := func() {
 		st.Close()
@@ -268,6 +268,181 @@ func TestReplyTask(t *testing.T) {
 	comments, _ := st.GetTaskComments(ctx, 1)
 	if len(comments) != 1 {
 		t.Errorf("expected 1 comment, got %d", len(comments))
+	}
+}
+
+// TestReplyTaskKind — валидация поля kind (ФАЗА 4, шаг 18.3).
+func TestReplyTaskKind(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantKind string
+	}{
+		{name: "empty kind -> user_comment", body: `{"body":"a"}`, wantCode: http.StatusOK, wantKind: "user_comment"},
+		{name: "explicit user_comment", body: `{"body":"b","kind":"user_comment"}`, wantCode: http.StatusOK, wantKind: "user_comment"},
+		{name: "report", body: `{"body":"c","kind":"report"}`, wantCode: http.StatusOK, wantKind: "report"},
+		{name: "reply", body: `{"body":"d","kind":"reply"}`, wantCode: http.StatusOK, wantKind: "reply"},
+		{name: "invalid kind", body: `{"body":"e","kind":"junk"}`, wantCode: http.StatusBadRequest, wantKind: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, st, cleanup := setupAPI(t)
+			defer cleanup()
+			ctx := context.Background()
+			if err := st.CreateTask(ctx, &store.Task{MessageID: "kind-" + tc.name, Subject: "t", BodyText: "b", FromEmail: "u@e.com", Status: "new"}); err != nil {
+				t.Fatalf("CreateTask: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/tasks/1/reply", strings.NewReader(tc.body))
+			req.SetPathValue("id", "1")
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer token-hermes-20260830")
+			w := httptest.NewRecorder()
+			handler.ReplyTask(w, req)
+			if w.Code != tc.wantCode {
+				t.Fatalf("expected %d, got %d: %s", tc.wantCode, w.Code, w.Body.String())
+			}
+			if tc.wantCode != http.StatusOK {
+				return
+			}
+			comments, err := st.GetTaskComments(ctx, 1)
+			if err != nil {
+				t.Fatalf("GetTaskComments: %v", err)
+			}
+			if len(comments) != 1 {
+				t.Fatalf("expected 1 comment, got %d", len(comments))
+			}
+			if comments[0].Kind != tc.wantKind {
+				t.Errorf("kind = %s, want %s", comments[0].Kind, tc.wantKind)
+			}
+			if comments[0].Direction != "out" {
+				t.Errorf("direction = %s, want out", comments[0].Direction)
+			}
+			if comments[0].Author != "hermes" {
+				t.Errorf("author = %s, want hermes", comments[0].Author)
+			}
+		})
+	}
+}
+
+// TestApproveComment — PATCH /api/comments/{id}/approve (ФАЗА 4, шаг 19).
+func TestApproveComment(t *testing.T) {
+	cases := []struct {
+		name     string
+		token    string // Authorization: Bearer <token>
+		kind     string // kind создаваемого комментария
+		wantCode int
+		wantAppr *int // nil = NULL
+	}{
+		{name: "admin approves reply", token: "token-admin-20260101", kind: "reply", wantCode: http.StatusOK, wantAppr: ip(1)},
+		{name: "admin idempotent second call", token: "token-admin-20260101", kind: "reply", wantCode: http.StatusOK, wantAppr: ip(1)},
+		{name: "agent hermes forbidden", token: "token-hermes-20260101", kind: "reply", wantCode: http.StatusForbidden},
+		{name: "no auth 401", token: "", kind: "reply", wantCode: http.StatusUnauthorized},
+		{name: "non-reply kind forbidden", token: "token-admin-20260101", kind: "report", wantCode: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, st, cleanup := setupAPI(t)
+			defer cleanup()
+			ctx := context.Background()
+			if err := st.CreateTask(ctx, &store.Task{MessageID: "appr-" + tc.name, Subject: "t", BodyText: "b", FromEmail: "u@e.com", Status: "new"}); err != nil {
+				t.Fatalf("CreateTask: %v", err)
+			}
+			cm := &store.TaskComment{TaskID: 1, Author: "hermes", Body: "text", Direction: "out", Kind: tc.kind}
+			if err := st.AddTaskComment(ctx, cm); err != nil {
+				t.Fatalf("AddTaskComment: %v", err)
+			}
+
+			authHdr := ""
+			if tc.token != "" {
+				authHdr = "Bearer " + tc.token
+			}
+			req := httptest.NewRequest(http.MethodPatch, "/api/comments/1/approve", nil)
+			req.SetPathValue("id", "1")
+			if authHdr != "" {
+				req.Header.Set("Authorization", authHdr)
+			}
+			w := httptest.NewRecorder()
+			handler.ApproveComment(w, req)
+
+			if w.Code != tc.wantCode {
+				t.Fatalf("expected %d, got %d: %s", tc.wantCode, w.Code, w.Body.String())
+			}
+			if tc.wantAppr == nil {
+				return
+			}
+			// идемпотентность: второй вызов — тоже 200 (шаг 19)
+			req2 := httptest.NewRequest(http.MethodPatch, "/api/comments/1/approve", nil)
+			req2.SetPathValue("id", "1")
+			req2.Header.Set("Authorization", "Bearer "+tc.token)
+			w2 := httptest.NewRecorder()
+			handler.ApproveComment(w2, req2)
+			if w2.Code != http.StatusOK {
+				t.Fatalf("idempotent second call expected 200, got %d: %s", w2.Code, w2.Body.String())
+			}
+			got, err := st.GetTaskComment(ctx, cm.ID)
+			if err != nil {
+				t.Fatalf("GetTaskComment: %v", err)
+			}
+			if got.Approved == nil || *got.Approved != *tc.wantAppr {
+				t.Errorf("approved = %v, want %v", got.Approved, tc.wantAppr)
+			}
+		})
+	}
+}
+
+func TestApproveComment_NotFound(t *testing.T) {
+	handler, _, cleanup := setupAPI(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/comments/999/approve", nil)
+	req.SetPathValue("id", "999")
+	req.Header.Set("Authorization", "Bearer token-admin-20260101")
+	w := httptest.NewRecorder()
+	handler.ApproveComment(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestApproveComment_WrongMethod(t *testing.T) {
+	handler, _, cleanup := setupAPI(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/comments/1/approve", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	handler.ApproveComment(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func ip(v int) *int { return &v }
+
+// TestGetTaskCommentStore — чтение одного комментария + approved (шаг 17.1/19).
+func TestGetTaskCommentStore(t *testing.T) {
+	_, st, cleanup := setupAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+	if err := st.CreateTask(ctx, &store.Task{MessageID: "gc-store", Subject: "t", BodyText: "b", FromEmail: "u@e.com", Status: "new"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	cm := &store.TaskComment{TaskID: 1, Author: "admin", Body: "hello", Direction: "out", Kind: "reply"}
+	if err := st.AddTaskComment(ctx, cm); err != nil {
+		t.Fatalf("AddTaskComment: %v", err)
+	}
+	got, err := st.GetTaskComment(ctx, cm.ID)
+	if err != nil {
+		t.Fatalf("GetTaskComment: %v", err)
+	}
+	if got.Body != "hello" || got.Kind != "reply" || got.Author != "admin" {
+		t.Errorf("comment mismatch: %+v", got)
+	}
+	if _, err := st.GetTaskComment(ctx, 424242); err != store.ErrCommentNotFound {
+		t.Errorf("want ErrCommentNotFound, got %v", err)
 	}
 }
 

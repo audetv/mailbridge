@@ -13,8 +13,7 @@ type Config struct {
 	IMAP        IMAPConfig
 	SMTP        SMTPConfig
 	AI          AIConfig
-	Plane       PlaneConfig
-	Webhook     WebhookConfig
+	HTTP        HTTPConfig
 	Storage     StorageConfig
 	NLP         NLPConfig
 	Logging     LoggingConfig
@@ -55,19 +54,18 @@ type AIConfig struct {
 	BaseURL  string
 	Model    string
 	APIKey   string
+	// SystemPrompt — системный промпт, передаваемый в запрос (Ollama: "system",
+	// OpenAI: messages[0] role=system). Пустая строка — не передавать.
+	// Источник: файл по пути SystemPromptFile (из Modelfile — SYSTEM-блок).
+	SystemPrompt     string
+	SystemPromptFile string
+	// Temperature — жёсткость ответов (0.1 — строгий JSON, минимум "креатива").
+	Temperature float64
 }
 
-// PlaneConfig настройки подключения к Plane API.
-type PlaneConfig struct {
-	BaseURL        string
-	APIKey         string
-	DefaultProject string
-}
-
-// WebhookConfig настройки HTTP-сервера для приёма событий Plane.
-type WebhookConfig struct {
+// HTTPConfig настройки HTTP-сервера.
+type HTTPConfig struct {
 	Listen string
-	Secret string
 }
 
 // StorageConfig настройки хранилища.
@@ -114,20 +112,17 @@ func Load() (*Config, error) {
 			TLS:      getEnvAsBool("MAILBRIDGE_SMTP_TLS", true),
 		},
 		AI: AIConfig{
-			Enabled:  getEnvAsBool("MAILBRIDGE_AI_ENABLED", false),
-			Provider: getEnv("MAILBRIDGE_AI_PROVIDER", "ollama"),
-			BaseURL:  getEnv("MAILBRIDGE_AI_BASE_URL", "http://localhost:11434"),
-			Model:    getEnv("MAILBRIDGE_AI_MODEL", "qwen3.8"),
-			APIKey:   getEnv("MAILBRIDGE_AI_API_KEY", ""),
+			Enabled:          getEnvAsBool("MAILBRIDGE_AI_ENABLED", false),
+			Provider:         getEnv("MAILBRIDGE_AI_PROVIDER", "ollama"),
+			BaseURL:          getEnv("MAILBRIDGE_AI_BASE_URL", "http://localhost:11434"),
+			Model:            getEnv("MAILBRIDGE_AI_MODEL", "qwen3.8-74k:latest"),
+			APIKey:           getEnv("MAILBRIDGE_AI_API_KEY", ""),
+			SystemPromptFile: getEnv("MAILBRIDGE_AI_SYSTEM_FILE", ""),
+			SystemPrompt:     getEnv("MAILBRIDGE_AI_SYSTEM_PROMPT", ""),
+			Temperature:      getEnvAsFloat("MAILBRIDGE_AI_TEMPERATURE", 0.1),
 		},
-		Plane: PlaneConfig{
-			BaseURL:        getEnv("MAILBRIDGE_PLANE_BASE_URL", ""),
-			APIKey:         getEnv("MAILBRIDGE_PLANE_API_KEY", ""),
-			DefaultProject: getEnv("MAILBRIDGE_PLANE_DEFAULT_PROJECT", "Входящие"),
-		},
-		Webhook: WebhookConfig{
-			Listen: getEnv("MAILBRIDGE_WEBHOOK_LISTEN", ":8080"),
-			Secret: getEnv("MAILBRIDGE_WEBHOOK_SECRET", ""),
+		HTTP: HTTPConfig{
+			Listen: getEnv("MAILBRIDGE_LISTEN", ":8080"),
 		},
 		Storage: StorageConfig{
 			Driver: getEnv("MAILBRIDGE_STORAGE_DRIVER", "sqlite"),
@@ -166,15 +161,6 @@ func (c *Config) Validate() error {
 	if c.SMTP.From == "" {
 		return fmt.Errorf("MAILBRIDGE_SMTP_FROM is required")
 	}
-	if c.Plane.BaseURL == "" {
-		return fmt.Errorf("MAILBRIDGE_PLANE_BASE_URL is required")
-	}
-	if c.Plane.APIKey == "" {
-		return fmt.Errorf("MAILBRIDGE_PLANE_API_KEY is required")
-	}
-	if c.Webhook.Secret == "" {
-		return fmt.Errorf("MAILBRIDGE_WEBHOOK_SECRET is required")
-	}
 	return nil
 }
 
@@ -201,6 +187,16 @@ func getEnvAsBool(key string, defaultVal bool) bool {
 	if val, ok := os.LookupEnv(key); ok {
 		if boolVal, err := strconv.ParseBool(val); err == nil {
 			return boolVal
+		}
+	}
+	return defaultVal
+}
+
+// getEnvAsFloat возвращает значение переменной окружения как float64.
+func getEnvAsFloat(key string, defaultVal float64) float64 {
+	if val, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
 		}
 	}
 	return defaultVal

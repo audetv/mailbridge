@@ -74,9 +74,6 @@ func TestReadyEndpoint_AllOk(t *testing.T) {
 	srv.Register(health.NewNamedCheck("db", func(_ context.Context) error {
 		return nil
 	}))
-	srv.Register(health.NewNamedCheck("plane", func(_ context.Context) error {
-		return nil
-	}))
 	handler := srv.Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)

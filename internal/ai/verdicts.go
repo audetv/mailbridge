@@ -63,7 +63,7 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		BodyText:      verdict.Task.Description,
 		FromEmail:     email.From,
 		FromName:      extractName(email.From),
-		Project:       verdict.Task.Project,
+		Project:       o.ResolveVerdictProject(ctx, verdict.Task.Project),
 		Type:          verdict.Task.Type,
 		Priority:      verdict.Task.Priority,
 		Status:        "new",
