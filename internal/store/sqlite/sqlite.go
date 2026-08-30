@@ -420,7 +420,7 @@ func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) 
 
 // GetTaskComments возвращает комментарии к задаче.
 func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
-	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, created_at
+	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, taskID)
@@ -434,8 +434,9 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 		c := &store.TaskComment{}
 		var inboxItemID sql.NullInt64
 		var verdictJSON sql.NullString
+		var approved sql.NullInt32
 		err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction,
-			&c.Kind, &inboxItemID, &verdictJSON, &c.CreatedAt)
+			&c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
@@ -444,6 +445,10 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 		}
 		if verdictJSON.Valid {
 			c.VerdictJSON = verdictJSON.String
+		}
+		if approved.Valid {
+			v := int(approved.Int32)
+			c.Approved = &v
 		}
 		comments = append(comments, c)
 	}

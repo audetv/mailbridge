@@ -131,6 +131,7 @@ type TaskComment struct {
 	Kind        string    `json:"kind"`
 	InboxItemID *int64    `json:"inbox_item_id,omitempty"`
 	VerdictJSON string    `json:"verdict_json,omitempty"`
+	Approved    *int      `json:"approved,omitempty"` // NULL = не утверждён; 0/1 — модерация ответа (ФАЗА 4)
 	CreatedAt   time.Time `json:"created_at"`
 }
 

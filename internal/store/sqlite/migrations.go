@@ -45,6 +45,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			kind TEXT NOT NULL DEFAULT 'user_comment',
 			inbox_item_id INTEGER REFERENCES inbox_items(id),
 			verdict_json TEXT,
+			approved INTEGER,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)`,
@@ -350,6 +351,23 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		return fmt.Errorf("failed to migrate task_comments: %w", err)
 	}
 
+	// task_comments.approved — модерационный флаг (ФАЗА 4, 2026-08-30):
+	// approved 0/1 на комментарии, NULL = не утверждён. Для существующих БД — backfill.
+	commentApprovedColumns := map[string]string{
+		"approved": "INTEGER",
+	}
+	for col, typ := range commentApprovedColumns {
+		has, err := s.columnExists(ctx, "task_comments", col)
+		if err != nil {
+			return fmt.Errorf("failed to check task_comments column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE task_comments ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add task_comments column %s: %w", col, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -479,6 +497,7 @@ func (s *Store) migrateTaskComments(ctx context.Context) error {
 		kind TEXT NOT NULL DEFAULT 'user_comment',
 		inbox_item_id INTEGER REFERENCES inbox_items(id),
 		verdict_json TEXT,
+		approved INTEGER,
 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`
 	if _, err := s.db.ExecContext(ctx, createNew); err != nil {
