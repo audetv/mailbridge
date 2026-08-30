@@ -55,7 +55,6 @@ internal/
   mailbox/               — IMAP-клиент
   metrics/               — Prometheus-метрики
   parser/                — извлечение полей из текста
-  plane/                 — (удалён: срез Plane, v0.22 ФАЗА 5; ADR-0001)
   preprocessor/          — обработка вложений для AI
   processor/             — оркестрация обработки писем
   sender/                — SMTP-отправка
@@ -66,7 +65,6 @@ internal/
   store/                 — интерфейс хранилища
   store/sqlite/          — SQLite-реализация
   web/                   — HTTP-обработчики, API
-  webhook/               — приём webhook'ов (удалён: срез Plane, v0.22 ФАЗА 5)
   worker/                — воркеры (inbound, outbound)
 frontend/                — Vue 3 SPA
   src/views/             — страницы
@@ -103,7 +101,7 @@ data/                    — БД и вложения (НЕ коммитить)
 - Образец: `configs/config.example.env` (обновлять при добавлении параметров)
 - Секреты: только через env-переменные `MAILBRIDGE_*` (словарь — `configs/config.example.env`)
 - `data/` — БД и вложения, НЕ коммитить
-- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM` — без них бинарник не стартует (Plane/webhook-secret сняты в v0.22, ФАЗА 5)
+- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM` — без них бинарник не стартует (Plane/webhook-secret сняты в v0.22.0)
 - `MAILBRIDGE_AUTH_USER/PASS` имеют дефолт `admin/admin` — **всегда** задавать свои в production
 
 ## Docs Index
@@ -134,14 +132,18 @@ data/                    — БД и вложения (НЕ коммитить)
 > Все изменения только через отдельную ветку под задачу + PR.
 > **Green CI обязателен** (required status check `CI` на `main`). **Релизы — минорные `0.x.y` до v1**; после мержа — тег + бинарник.
 
-## Критические инварианты
+## Критические инварианты (v0.22.0)
 
 - Миграции БД должны быть идемпотентными (`IF NOT EXISTS`)
 - `email_mapping` удалена — использовать `inbox_items`
 - Вложения: CAS (SHA-256), файл хранится по hash, имя в БД
 - AI-обработка: через очередь, не синхронно
 - Вердикты: строгий JSON с полем `action`
-- `task_comments.kind` — `user_comment` или `ai_verdict`
+- `task_comments.kind` — `user_comment` | `ai_verdict` (история входящих) | `report` (внутренний отчёт) | `reply` (черновик ответа)
+- `task_comments.approved` — флаг комментария (admin-only `PATCH /api/comments/{id}/approve`), NOT статус задачи
+- Проекты → Модули (API/UI: `epics`/`epic_id`) → Задачи; задача без модуля допустима
+- Auth: 2 юзера — admin (`MAILBRIDGE_AUTH_USER/PASS`) + агент `hermes` (`MAILBRIDGE_AGENT_PASS` обязателен для активации)
+- **Срез Plane (v0.22.0):** Plane/webhook удалены (ADR-0001); проекты для AI — из SQLite; отправка e-mail пользователю НЕ идёт (reply = только черновик)
 
 ## Hermes (agent-specific)
 

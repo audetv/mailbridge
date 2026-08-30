@@ -85,8 +85,8 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | 7 | Миграция `epics` + `tasks.epic_id INT NULL`; индексы; идемпотентно | 2 | `[x]` 2218397 — таблица + FK CASCADE + UNIQUE(project_id,number) + tasks.epic_id (SET NULL, ALTER для старых БД) + Task.EpicID; тесты TestMigrate_EpicsTable/Idempotency |
 | 8 | `store`: `Epic` + CRUD + `SetTaskEpic` + прогресс (`EpicProgress{open,done,total}`); тесты | 7 | `[x]` — Epic struct + 7 методов + epicStatuses; тесты TestEpicCRUD/Progress/DeleteKeepsTasks |
 | 9 | API `/api/projects/{id}/epics` (GET/POST), `/api/epics/{id}` (GET/PUT/DELETE); `POST/DELETE /api/epics/{id}/tasks/{taskId}`; прогресс в `GET /api/epics/{id}`; WS `epic_*` | 8 | `[x]` — EpicHandler (epics.go), роуты main.go (path epic_id), тесты TestEpicsAPI_CRUD/TaskLinking |
-| 10 | UI: панель модулей в `ProjectView`/списке задач; фильтр задач по модулю; карточка прогресса (Bar) | 9 | `[ ]` |
-| 11 | Задача ↔ модуль: поле `epic_id` в форме создания/редактирования задачи (UI в `TaskDetailView` + API в Фазе 3 `POST /api/tasks`) | 9 | `[ ]` |
+| 10 | UI: панель модулей в `ProjectView`/списке задач; фильтр задач по модулю; карточка прогресса (Bar) | 9 | `[x]` — EpicPanel.vue (panel in ProjectsView) + FilterBar epic-селект + Bar прогресса; e2e C (фильтр модуля) зелёный |
+| 11 | Задача ↔ модуль: поле `epic_id` в форме создания/редактирования задачи (UI в `TaskDetailView` + API в Фазе 3 `POST /api/tasks`) | 9 | `[x]` — CreateTaskDialog epic-селект (шаг 13) + e2e D (создание из Проектов с модулем) |
 
 Заметки шага:
 - (7) `ON DELETE SET NULL` на `tasks.epic_id` — удаление модуля не бьёт по задачам.
@@ -175,10 +175,10 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Шаг | Статус |
 |---|-----|--------|
-| 28 | Рассолить: все `P/B` шаги (16, 21, если были P в Фазе 5); тесты → зелёные | `[ ]` |
-| 29 | `AGENTS.md`: обновить инварианты v0.22 (plane — removed; новые kinds `report/reply`; проекты/модули; auth admin + agent-юзер; `MAILBRIDGE_LISTEN`). **AGENTS.md-разделы «тестирование» + «dev-окружение» уже на шаге 13.5** (раньше Фазы 6, решение §7(#11)). Текст правки подготовим на шаге 28 (apply — вручную, protected). | `[ ]` |
-| 30 | Docs: `docs/api.md` (новые маршруты), `docs/data-model.md` (таблицы), `docs/ARCHITECTURE.md` (сборка проектов/модулей, срез Plane), `configs/config.example.env` (нет PLANE, нет WEBHOOK_SECRET, есть LISTEN, AGENT_USER/PASS) | `[ ]` |
-| 31 | Обновить root `PLAN.md`: v0.22.0 → архив `archive/PLAN.v0.22-projects-modules.md`; новая активная версия; «Plane: удалён, v0.22.0» | `[ ]` |
+| 28 | Рассолить: все `P/B` шаги (16, 21, если были P в Фазе 5); тесты → зелёные | `[x]` — остатков `P/B` нет (шаг 16 `[x]`(B-блок снят 08-30); F1–F5 все `[x]`); тесты зелёные: `make test` ✅, `make lint` 0, `npm run lint` 0, vitest 53/53, playwright 11/11, `make build` ✅ |
+| 29 | `AGENTS.md`: обновить инварианты v0.22 (plane — removed; новые kinds `report/reply`; проекты/модули; auth admin + agent-юзер; `MAILBRIDGE_LISTEN`). **AGENTS.md-разделы «тестирование» + «dev-окружение» уже на шаге 13.5** (раньше Фазы 6, решение §7(#11)). Текст правки подготовим на шаге 28 (apply — вручную, protected). | `[x]` |
+| 30 | Docs: `docs/api.md` (новые маршруты), `docs/data-model.md` (таблицы), `docs/ARCHITECTURE.md` (сборка проектов/модулей, срез Plane), `configs/config.example.env` (нет PLANE, нет WEBHOOK_SECRET, есть LISTEN, AGENT_USER/PASS) | `[x]` |
+| 31 | Обновить root `PLAN.md`: v0.22.0 → архив `archive/PLAN.v0.22-projects-modules.md`; новая активная версия; «Plane: удалён, v0.22.0» | `[x]` |
 | 32 | PR в main, green CI (Lint + Test), merge | `[ ]` |
 | 33 | Релиз: тег `v0.22.0`, бинарник GitHub (release.yml — проверить), закрывающий PR | `[ ]` |
 

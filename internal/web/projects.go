@@ -300,6 +300,6 @@ func (h *ProjectHandler) UnarchiveProject(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	h.publishWS("project_unarchived", p, fmt.Sprintf("Проект восстанавлизован: %s", p.Name))
+	h.publishWS("project_unarchived", p, fmt.Sprintf("Проект восстановлён: %s", p.Name))
 	writeJSON(w, http.StatusOK, p)
 }

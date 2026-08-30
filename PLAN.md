@@ -2,8 +2,8 @@
 
 ## Статус
 
-**Версия:** v0.20.2 — активная разработка (v1.0.0 ещё впереди)
-**История:** этапы v0–16 (Plane-based) — `archive/PLAN.v0-plane-era.md`, v17–21 (helpdesk + AI) — `archive/PLAN.v17-21.md`, реархитектура ленты/очереди — `archive/PLAN.rearchitecture-ai-inbox.md`. Архивные планы реализованы и заморожены.
+**Версия:** v0.22.0 (релиз 2026-08-30) — активная разработка (v1.0.0 ещё впереди)
+**История:** этапы v0–16 (Plane-based) — `archive/PLAN.v0-plane-era.md`, v17–21 (helpdesk + AI) — `archive/PLAN.v17-21.md`, v0.22 (проекты/модули + срез Plane) — `archive/PLAN.v0.22-projects-modules.md`, реархитектура ленты/очереди — `archive/PLAN.rearchitecture-ai-inbox.md`. Архивные планы реализованы и заморожены.
 
 ### Что уже работает (проверено по коду)
 
@@ -12,6 +12,7 @@
 | Входящий поток | IMAP (`internal/mailbox`, реконнекты), парсинг MIME (`internal/parser`), адаптер email → `inbox_items` (`internal/adapters`) |
 | Лента и цепочки | `inbox_items` + `threads` + `task_inbox_items`, статусы unread/read/archived |
 | Задачи | 5 статусов (new…closed), CRUD API, JWT, WS-события (`internal/web`) |
+| Проекты и модули (v0.22) | `projects` → `epics` (UI/API: Проекты → Модули) → задачи (`epic_id`); AI-контекст из SQLite (Plane удалён, ADR-0001) |
 | Классификация | rules.yml (NLP + стемминг) как base; AI-вердикты проекта/типа/приоритета/«решена» |
 | AI-обработка | асинхронная очередь с retry (1м → 5м → 15м → 1ч, ≤5 попыток, `ai_processed` 0/1/-1), промпт с контекстом цепочки и вложений, лимит 50K символов |
 | Вложения | content-addressable storage (SHA-256 дедуп), извлечение текста (PDF, XLSX, DOCX, PPTX, RTF, ICS, txt/csv) |
@@ -22,29 +23,29 @@
 
 ---
 
-## Этап A: Зачистка Plane-legacy и устойчивость (v0.21.x)
+## Этап A: Зачистка Plane-legacy и устойчивость (v0.21.x → v0.22.0)
 
 ### A.0. Приёмка календарных приглашений (issue #1) — ✅ выполнено (v0.21.0, 2026-08-26)
 - text/calendar из `env.OtherParts` → секция `[СОБЫТИЕ]` в тексте письма для AI (REQUEST и CANCEL)
 - RFC 5545 unfolding в парсере ICS; приёмка по письмам 61 (CANCEL) / 62 (REQUEST)
 - Подробности: `docs/issues/1.md`, `docs/issues/1-plan.md`, commit `7b68e4c`
 
-### A.1. Оценка зависимостей от Plane
-Аудит `internal/plane/` и всех ссылок: что ещё реально используется (список проектов? webhook'и?), что — мёртвый код.
-- Результат: список «используется / удаляем / оставляем на N релизов»
+### A.1. Оценка зависимостей от Plane — ✅ выполнено (v0.22.0)
+Аудит `internal/plane/` и всех ссылок: `list_projects` использовался для контекста AI и prompt-fallback, `list_issues` — дедуп-логика (mёртвая), webhook'и — только валидация Plane-событий (placeholder).
+- Результат: всё «используемое» заменено (проект → поле `project` в `inbox_items`/`tasks` из SQLite) или удалено
 
-### A.2. Удаление или явный quarantine
-- Мёртвый код — удалить; используемое — вынести за конфиг `MAILBRIDGE_PLANE_*` с логированием deprecation
-- `make test` + `make lint` зелёные
+### A.2. Удаление Plane — ✅ выполнено (v0.22.0, F5)
+`internal/plane/`, `internal/webhook/`, `reply_log`, `MAILBRIDGE_PLANE_*`/`WEBHOOK_SECRET`, `/webhook`-endpoint, `mailbridge_plane_available` — удалены (ADR-0001, `PLAN.v0.22-projects-modules.md` ФАЗА 5).
+- `make test` + `make lint` зелёные; idempotent `DROP TABLE reply_log` для legacy-БД
 
-### A.3. Миграции и бэкап
-- Скрипт бэкапа `data/` (`.db` + WAL, `attachments/`) с проверкой целостности (`PRAGMA integrity_check`)
-- `Makefile`: цель `backup` в `make`-help
-- **Приёмка:** восстановление БД из бэкапа в тесте/ручной приемке; WAL-файлы не ломают restore
+### A.3. Миграции и бэкап — ⚠️ ЧАСТИЧНО (осталось)
+- ✅ idempotent DDL-миграции (`IF NOT EXISTS`), миграции в `migrations.go`
+- ❌ Скрипт бэкапа `data/` (`.db` + WAL, `attachments/`) с проверкой целостности (`PRAGMA integrity_check`) — **НЕ реализован → в Этап D (Production, v0.24.x)**
+- ❌ `Makefile`: цель `backup` — **НЕ реализован → Этап D**
+- **Приёмка (Этап D):** восстановление БД из бэкапа в тесте/ручной приемке; WAL-файлы не ломают restore
 
-### A.4. Метрики Plane-доступа
-При сохранении интеграции — метрика `mailbridge_plane_available` ( Gauge ) в `internal/metrics`.
-- **Приёмка:** метрика видна на `/metrics`
+### A.4. Метрики Plane-доступности — ✅ снято (v0.22.0, F5)
+Интеграции Plane нет — метрика `mailbridge_plane_available` удалена вместе с кодом. Заменяется: `/metrics` уже даёт `mailbridge_ai_*`, `mailbridge_mail_*`, `mailbridge_web_auth_*` — достаточно для алертов (см. `docs/operations.md`).
 
 ---
 
