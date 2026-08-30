@@ -1,8 +1,14 @@
-// seed-dev.mjs — идемпотентный seed dev-БД для e2e (шаг 13.3)
-// Поднимает бекенд dev (8081) и гарантирует наличие фиксированных проектов.
-// Идемпотентность: проекты создаются, если их нет (API 409/400 — ignore).
-// Запуск: node scripts/seed-dev.mjs [BASE_URL]
-//   BASE_URL — http://127.0.0.1:5173 (через vite-прокси) или http://127.0.0.1:8081 (прямой бек)
+// seed-dev.mjs — идемпотентный seed dev-БД для e2e (шаги 13.3–13.4)
+// Поднимает бекенд dev (8081) и гарантирует фиксированные ФИКСАЦИИ:
+//   1. Проекты (ТРК, Отель, Лидер Спорт, Театр + «Входящие»-fallback).
+//   2. Модуль «Сайт ТРК» в проекте ТРК.
+//   3. Минимум одна задача в ТРК и в модуле «Сайт ТРК» (прек-условия A/B/C).
+//   4. Минимум одна задача НЕ в ТРК (прек-условие B: «список изменился»).
+// Идемпотентность: всё создаём только если ещё нет (проверка по API).
+// Пользователь периодически копирует прод-БД в dev → seed обязан сам
+// восстанавливать фитуры, не полагаясь на текущее состояние БД.
+// Запуск: cd frontend && npm run e2e:seed  (или node scripts/seed-dev.mjs [BASE_URL])
+//   BASE_URL — http://127.0.0.1:5173 (vite-прокси) или http://127.0.0.1:8081
 
 const BASE = process.argv[2] || process.env.E2E_BASE_URL || 'http://127.0.0.1:5173'
 
@@ -12,6 +18,12 @@ const PROJECTS = [
   { name: 'Отель', description: 'Отель/гостиница' },
   { name: 'Лидер Спорт', description: 'Фитнес' },
   { name: 'Театр', description: 'Театр' }
+]
+
+// Фиксированные задачи (e2e-фитуры; заголовок помечен E2E).
+const TASK_FIXTURES = [
+  { project: 'ТРК', epic: 'Сайт ТРК', title: 'E2E: задача в модуле Сайт ТРК — обслуживание торгового комплекса' },
+  { project: 'Отель', epic: null, title: 'E2E: задача Отель — бронирование номера' }
 ]
 
 function fail(err) {
@@ -46,51 +58,106 @@ async function login() {
   return r.body.token
 }
 
-const auth = async (token) => ({ 'Authorization': `Bearer ${token}` })
+const auth = (token) => ({ Authorization: `Bearer ${token}` })
 
-async function ensureProjects(token) {
-  // Сначала посмотрим, что уже есть
-  const existing = await api('/api/projects', { headers: auth(token) })
-  if (existing.status !== 200) {
-    fail(new Error(`GET /api/projects: ${existing.status} ${JSON.stringify(existing.body).slice(0, 200)}`))
-  }
-  const active = (existing.body || []).filter((p) => !p.archived)
-  const byName = new Map(active.map((p) => [p.name, p]))
-  const missing = PROJECTS.filter((p) => !byName.has(p.name))
-  if (missing.length === 0) {
-    console.log(`seed-dev: все ${PROJECTS.length} проектов уже есть (идемпотентно, 0 новых)`)
-    return
-  }
-  console.log(`seed-dev: создаю ${missing.length} проектов: ${missing.map((p) => p.name).join(', ')}`)
-  for (const p of missing) {
+async function getProject(token, name) {
+  // Возвращает активный проект по имени или null (не создаёт).
+  const r = await api('/api/projects', { headers: auth(token) })
+  if (r.status !== 200) fail(new Error(`GET /api/projects: ${r.status}`))
+  const ps = Array.isArray(r.body) ? r.body : (r.body.projects || [])
+  return ps.find((p) => p.name === name && !p.archived) || null
+}
+
+async function ensureProjects(token, names) {
+  for (const name of names) {
+    const p = await getProject(token, name)
+    if (p) continue
+    const meta = PROJECTS.find((x) => x.name === name) || {}
     const r = await api('/api/projects', {
       method: 'POST',
       headers: auth(token),
-      body: JSON.stringify(p)
+      body: JSON.stringify({ name, description: meta.description || 'e2e-fixture' })
     })
     if (r.status === 200 || r.status === 201) {
-      console.log(`  created: ${p.name} (${r.status})`)
+      console.log(`  project created: ${name}`)
     } else if (r.status === 409 || r.status === 400) {
-      // дубль или неверное имя — пропускаем
-      console.log(`  skip (уже существует/конфликт ${r.status}): ${p.name}`)
+      console.log(`  project skip (${r.status}): ${name}`)
     } else {
-      console.warn(`  WARN ${p.name}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)
+      fail(new Error(`POST /api/projects ${name}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`))
     }
   }
-  // Финальная проверка
-  const check = await api('/api/projects', { headers: auth(token) })
-  const final = (check.body || []).filter((p) => !p.archived)
-  const ok = PROJECTS.every((p) => final.some((x) => x.name === p.name))
-  if (!ok) {
-    fail(new Error('после seed: не все фиксированные проекты активны'))
+}
+
+async function ensureEpic(token, projectId, epicName) {
+  // Возвращает {id, name} — существующий модуль или только что созданный.
+  const r = await api(`/api/projects/${projectId}/epics`, { headers: auth(token) })
+  if (r.status === 200 || r.status === 404) {
+    const list = Array.isArray(r.body) ? r.body : (r.body.epics || [])
+    const found = list.find((e) => e.name === epicName)
+    if (found) return found
   }
-  console.log(`seed-dev: OK, активных проектов: ${final.length}`)
+  const c = await api(`/api/projects/${projectId}/epics`, {
+    method: 'POST',
+    headers: auth(token),
+    body: JSON.stringify({ name: epicName })
+  })
+  if (c.status === 200 || c.status === 201) {
+    console.log(`  epic created: ${epicName} (project ${projectId})`)
+    return Array.isArray(c.body) ? c.body.find((e) => e.name === epicName) : c.body
+  }
+  fail(new Error(`POST epic «${epicName}»: ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`))
+}
+
+function listTasks(r) {
+  return Array.isArray(r.body) ? r.body : (r.body.tasks || [])
+}
+
+async function tasksOfProject(token, projectName) {
+  const r = await api(`/api/tasks?project=${encodeURIComponent(projectName)}&per_page=200`, { headers: auth(token) })
+  if (r.status !== 200) fail(new Error(`GET /api/tasks?project=${projectName}: ${r.status}`))
+  return listTasks(r)
+}
+
+async function ensureTasks(token) {
+  for (const fx of TASK_FIXTURES) {
+    const p = await getProject(token, fx.project)
+    if (!p) fail(new Error(`ensureTasks: проект «${fx.project}» не найден (сначала ensureProjects)`))
+
+    let epicId = null
+    if (fx.epic) {
+      const epic = await ensureEpic(token, p.id, fx.epic)
+      epicId = epic?.id
+      if (!epicId) fail(new Error(`ensureTasks: epic_id для «${fx.epic}» не получен`))
+    }
+
+    const tasks = await tasksOfProject(token, fx.project)
+    // Уже создана? (тот же epic_id — для epic-задач; null — для без-эпик.)
+    const already = tasks.some((t) => (epicId ? t.epic_id === epicId : t.epic_id == null))
+    if (already) {
+      console.log(`  task exists: ${fx.project}${fx.epic ? '/' + fx.epic : ''}: ${fx.title}`)
+      continue
+    }
+
+    const body = { title: fx.title, project: fx.project, description: 'e2e-фитур (seed-dev.mjs)' }
+    if (epicId) body.epic_id = epicId
+    const c = await api('/api/tasks', { method: 'POST', headers: auth(token), body: JSON.stringify(body) })
+    if (c.status === 200 || c.status === 201) {
+      console.log(`  task created: ${fx.project}${fx.epic ? '/' + fx.epic : ''}: ${fx.title}`)
+    } else if (c.status === 409 || c.status === 400) {
+      console.log(`  task skip (${c.status}): ${fx.title}`)
+    } else {
+      fail(new Error(`POST /api/tasks «${fx.title}»: ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`))
+    }
+  }
 }
 
 async function main() {
   console.log(`seed-dev: target ${BASE}`)
   const token = await login()
-  await ensureProjects(token)
+  await ensureProjects(token, PROJECTS.map((p) => p.name))
+  // Фиксированный модуль ТРК + задачи-фитуры (A/B/C прек-условия)
+  await ensureTasks(token)
+  console.log(`seed-dev: OK`)
 }
 
 main().then(() => process.exit(0)).catch(fail)
