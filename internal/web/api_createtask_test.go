@@ -141,6 +141,18 @@ func TestCreateTask_ProjectNotFound(t *testing.T) {
 	}
 }
 
+func TestCreateTask_ArchivedProject(t *testing.T) {
+	e := newCreateTaskEnv(t)
+	p := e.mkProject(t, "Деск Архив")
+	if err := e.st.SetProjectArchived(context.Background(), p.ID, true); err != nil {
+		t.Fatalf("ArchiveProject: %v", err)
+	}
+	w := e.post(t, `{"title":"x","project":"Деск Архив"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("archived project status=%d body=%s want 400", w.Code, w.Body.String())
+	}
+}
+
 func TestCreateTask_EpicValidation(t *testing.T) {
 	e := newCreateTaskEnv(t)
 	p := e.mkProject(t, "Деск A")

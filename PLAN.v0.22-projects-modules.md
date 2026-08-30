@@ -67,7 +67,7 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | 3 | `store.Store`: модели `Project`, методы `CreateProject / GetProject / GetProjectByName / ListProjects(includeArchived) / UpdateProject / ArchiveProject`; sqlite-реализация + table-driven тесты (sqlite-инстанс) | 2 | `[x]` 436a872 — projects.go + 10 тестов (CRUD, дубли, архив, фильтры); `make test` PASS, `golangci-lint` 0 issues |
 | 4 | API `/api/projects` (GET/POST), `/api/projects/{id}` (GET/PUT/DELETE→archive, ре-активация `POST /{id}/unarchive`); валидация имени (≠ пустое, ≤ 128, не дубль); WS-события `project_created/updated/archived` | 3 | `[x]` 436a872+ — web/projects.go + 6 тестов (CRUD/404/409/фильтры/WS), `golangci-lint` 0 issues, `go test ./...` green |
 | 5 | UI: `views/ProjectsView.vue` (таблица, карточка создания, inline-редактирование, archiving), вкладки Dashboard; `stores/projects.js`; WS `project_*` → тосты + рефетч | 4 | `[x]` — ProjectsView + stores/projects.js + вкладка «Проекты» в Dashboard; `npm run lint` 0 errors, `npm run build` OK |
-| 6 | Ссылка проекта на задачу: `GET /api/projects/{id}/tasks` (фильтр по `t.project = name`); UI: в задачах показываем проект-ссылку | 5 | `[ ]` |
+| 6 | Ссылка проекта на задачу: `GET /api/projects/{id}/tasks` (фильтр по `t.project = name`); UI: в задачах показываем проект-ссылку | 5 | `✅ dfc8daa` |
 
 Заметки шага:
 - (2) Сид обязан быть идемпотентным: второй запуск — 0 новых строк; имена читаем парсером `config.LoadRules` + отдельно секцию `# Проекты` (пока правил `RuleDef{Project}`) → отдельный `config.ProjectsFromRules() []string` (без дублей, trim).

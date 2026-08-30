@@ -383,6 +383,10 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if p.Archived {
+		writeError(w, http.StatusBadRequest, "project is archived")
+		return
+	}
 
 	if req.EpicID != nil {
 		e, err := h.store.GetEpic(r.Context(), *req.EpicID)
