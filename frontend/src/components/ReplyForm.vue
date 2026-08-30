@@ -5,6 +5,7 @@
         v-model="kind"
         :options="KIND_OPTIONS"
         optionLabel="label"
+        optionValue="value"
         class="kind-select"
         :disabled="sending"
         aria-label="Тип сообщения"
@@ -13,42 +14,31 @@
     <div class="row">
       <Textarea v-model="body" rows="3" placeholder="Текст ответа..." :disabled="sending" />
       <div class="buttons">
-        <Button
-          v-if="isAdmin"
-          label="Утвердил ответ"
-          icon="pi pi-check"
-          severity="success"
-          :disabled="!latestReply || approving"
-          @click="approveLastReply"
-        />
         <Button label="Отправить" icon="pi pi-send" @click="send" :loading="sending" />
       </div>
     </div>
+    <div v-if="error" class="form-error" role="alert">{{ error }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import Textarea from 'primevue/textarea'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import { useTasksStore } from '@/stores/tasks'
-import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({
-  taskId: { type: Number, required: true },
-  // Комментарии задачи (для «Утвердил ответ» на последнем kind=reply)
-  comments: { type: Array, default: () => [] }
+  taskId: { type: Number, required: true }
 })
 
 const emit = defineEmits(['sent'])
 
 const store = useTasksStore()
-const authStore = useAuthStore()
 const body = ref('')
-const sending = ref(false)
-const approving = ref(false)
 const kind = ref('user_comment')
+const sending = ref(false)
+const error = ref('')
 
 const KIND_OPTIONS = [
   { value: 'user_comment', label: 'Комментарий' },
@@ -56,39 +46,22 @@ const KIND_OPTIONS = [
   { value: 'reply', label: 'Ответ пользователю' }
 ]
 
-const isAdmin = computed(() => authStore.user?.username === 'admin')
-
-// Последний «Ответ пользователю» (kind=reply, direction=out) — кандидат на утверждение.
-const latestReply = computed(() => {
-  const replies = props.comments.filter(c => c.direction === 'out' && c.kind === 'reply')
-  return replies.length ? replies[replies.length - 1] : null
-})
-
-async function approveLastReply() {
-  const target = latestReply.value
-  if (!target) {
-    window.alert('Сначала отправьте «Ответ пользователю»')
-    return
-  }
-  approving.value = true
-  try {
-    await store.approveComment(target.id)
-    target.approved = 1
-  } catch (err) {
-    window.alert(err?.response?.data?.error || 'Не удалось утвердить ответ')
-  } finally {
-    approving.value = false
-  }
-}
-
+// Утверждение конкретного ответа — только под комментарием в CommentList
+// (кнопка «Утвердить ответ»): контекст важен, из формы approve «последнего»
+// — мисклик-зона (админ подтвердил 2026-08-30: дубль кнопку не нужен).
 async function send() {
   if (!body.value.trim()) return
   sending.value = true
+  error.value = ''
   try {
     await store.replyTask(props.taskId, body.value, kind.value)
     body.value = ''
     kind.value = 'user_comment'
     emit('sent')
+  } catch (err) {
+    // Бэкенд: {"error": "..."} — показать, а не молчать (раньше ошибка
+    // терялась, и админ думал, что «отчёт» не работает).
+    error.value = err?.response?.data?.error || 'Не удалось отправить сообщение'
   } finally {
     sending.value = false
   }
@@ -121,5 +94,10 @@ async function send() {
   flex-direction: column;
   gap: 0.35rem;
   flex-shrink: 0;
+}
+
+.form-error {
+  color: #b3261e;
+  font-size: 0.85rem;
 }
 </style>

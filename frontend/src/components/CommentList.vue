@@ -25,7 +25,7 @@
           :disabled="approving"
           @click="approve(comment)"
         >
-          Утвердил ответ
+          Утвердить ответ
         </button>
         <span v-else class="approved-note">Ответ утверждён</span>
       </div>
@@ -77,7 +77,7 @@ function kindLabel(comment) {
   return KIND_LABELS[comment?.kind] || ''
 }
 
-// Кнопка «Утвердил ответ»: admin + kind=reply.
+// Кнопка «Утвердить ответ»: admin + kind=reply.
 function canApprove(comment) {
   const isAdmin = authStore.user?.username === 'admin'
   return isAdmin && comment?.kind === 'reply'

@@ -95,10 +95,10 @@ describe('CommentList (ФАЗА 4 — бейджи + approve)', () => {
     expect(wrapper.find('.approve-btn').exists()).toBe(false)
   })
 
-  it('кнопка "Утвердил ответ" видна только admin на kind=reply', () => {
+  it('кнопка "Утвердить ответ" видна только admin на kind=reply', () => {
     const wrapper = mountList([REPLY])
     expect(wrapper.find('.approve-btn').exists()).toBe(true)
-    expect(wrapper.find('.approve-btn').text()).toContain('Утвердил ответ')
+    expect(wrapper.find('.approve-btn').text()).toContain('Утвердить ответ')
   })
 
   it('approve: PATCH /comments/11/approve + обновляет approved=1', async () => {

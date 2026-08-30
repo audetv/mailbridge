@@ -89,7 +89,7 @@ test('UI: admin видит бейджи «Отчёт»/«Ответ пользо
   await expect(card.locator('.approved-badge')).toHaveCount(0)
 
   // Утверждаем.
-  await card.locator('.approve-btn', { hasText: 'Утвердил ответ' }).click()
+  await card.locator('.approve-btn', { hasText: 'Утвердить ответ' }).click()
 
   // Бейдж «Утверждён» появляется (локальная мутация или WS).
   await expect(card.locator('.approved-badge', { hasText: 'Утверждён' })).toBeVisible({ timeout: 5000 })
@@ -105,6 +105,37 @@ test('UI: reload — approved живёт в БД (approved=1 после пере
   await page.goto(`/tasks/${taskId}`)
   const card = page.locator('.comment', { hasText: `ответ ${MARK}` }).first()
   await expect(card.locator('.approved-badge', { hasText: 'Утверждён' })).toBeVisible({ timeout: 10000 })
+})
+
+test('UI: селект kind — выбор «Ответ пользователю» уходит в запрос как строка kind=reply', async ({ page }) => {
+  await page.goto(`/tasks/${taskId}`)
+  await page.waitForSelector('.reply-form', { timeout: 10000 })
+
+  const body = `ui-select ${MARK}`
+  const replyBodies = []
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith('/reply')) {
+      replyBodies.push(JSON.parse(r.postData() || '{}'))
+    }
+  })
+
+  // Выбор вида через PrimeVue Select: клик по поле → опция в дропдауне.
+  await page.locator('.kind-select').click()
+  await page.locator('.p-select-option, [role="option"]', { hasText: 'Ответ пользователю' }).first().click()
+
+  await page.locator('textarea').first().fill(body)
+  await page.getByRole('button', { name: 'Отправить' }).click()
+
+  const card = page.locator('.comment', { hasText: body }).first()
+  // Комментарий создан (до фикса бэкенд отвечал 400 и карточки не было).
+  await expect(card, 'комментарий из формы с выбранным kind виден в ленте').toBeVisible({ timeout: 10000 })
+  // Бейдж «Ответ пользователю» — kind сохранился на бэкенде.
+  await expect(card.locator('.kind-badge', { hasText: 'Ответ пользователю' })).toBeVisible()
+
+  // Запрос шёл с kind как строка, а не объектом {value,label}.
+  const sent = replyBodies.find((b) => b.body === body)
+  expect(sent, 'запрос POST /reply с нашим текстом').toBeTruthy()
+  expect(sent.kind, 'kind в payload — строка').toBe('reply')
 })
 
 test('API guards: hermes approve → 403, kind=report → 400, повтор → 200', async ({ request }) => {

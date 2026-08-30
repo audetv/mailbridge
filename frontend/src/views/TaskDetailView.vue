@@ -96,7 +96,7 @@
           <template #content>
             <CommentList :comments="store.currentComments" />
             <div class="reply-section">
-              <ReplyForm :taskId="store.currentTask.id" :comments="store.currentComments" @sent="onReplySent" />
+              <ReplyForm :taskId="store.currentTask.id" @sent="onReplySent" />
             </div>
           </template>
         </Card>
