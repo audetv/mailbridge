@@ -1,4 +1,5 @@
 <template>
+  <div data-testid="task-table">
   <DataTable
     :value="store.tasks"
     :loading="store.loading"
@@ -66,6 +67,7 @@
     </Column>
     <Column field="assignee" header="Исполнитель" style="width: 120px" />
   </DataTable>
+  </div>
 </template>
 
 <script setup>
@@ -122,12 +124,12 @@ function onRowClick(event) {
   router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
-// Ссылка «Проект» → задачи этого проекта (фильтр + вкладка «Активные»).
+// Ссылка «Проект» → вкладка «Активные» + фильтр по проекту (таб — по URL,
+// watch в DashboardView; epic от другого проекта сбрасываем).
 function goToProject(projectName) {
+  store.filters.epic_id = ''
   store.setFilter('project', projectName)
-  if (route.query.tab !== 'active') {
-    router.replace({ query: { ...route.query, tab: 'active' } })
-  }
+  router.replace({ query: { ...route.query, tab: 'active', project: projectName } })
 }
 
 function onPage(event) {

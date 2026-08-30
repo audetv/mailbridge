@@ -104,6 +104,28 @@ const tabStatuses = {
   closed: ['closed']
 }
 
+const isKnownTab = (k) => k === 'inbox' || k === 'projects' || !!tabStatuses[k]
+const defaultStatuses = (tab) => tabStatuses[tab] || ['new', 'in_progress']
+
+// URL — source of truth: deep-link «?project=…» переживает reload.
+// Сидим в setup (до onMounted дочернего FilterBar) — селект «Проект»
+// сразу покажет выбранный проект.
+if (typeof route.query.project === 'string' && route.query.project !== '') {
+  store.filters.project = route.query.project
+  store.filters.page = 1
+}
+
+// URL — source of truth для вкладки (deep-link: ?tab=active&project=…):
+// applyTab вызывается и при mount, и на каждый переход (router.push/replace),
+// поэтому «К задачам»/ссылка «Проект» из таблицы переключают вкладку корректно.
+function applyTab(tab) {
+  if (!isKnownTab(tab)) return
+  activeTab.value = tab
+  if (tab !== 'inbox') {
+    store.setStatuses(defaultStatuses(tab))
+  }
+}
+
 onMounted(() => {
   wsStore.connect(authStore.token)
 
@@ -111,20 +133,23 @@ onMounted(() => {
   const saved = localStorage.getItem('mailbridge_active_tab')
 
   let tab = 'active'
-  const isKnownTab = (k) => k === 'inbox' || k === 'projects' || tabStatuses[k]
   if (tabFromUrl && isKnownTab(tabFromUrl)) {
     tab = tabFromUrl
   } else if (saved && isKnownTab(saved)) {
     tab = saved
   }
 
-  activeTab.value = tab
-  if (tab !== 'inbox') {
-    store.setStatuses(tabStatuses[tab] || ['new', 'in_progress'])
-  }
-
+  applyTab(tab)
   fetchActiveCount()
   inboxStore.fetchUnreadCount()
+})
+
+// Переход по URL (goToTasks/ссылка проекта) — переключаем вкладку;
+// фильтр проекта уже выставлен вызывающим (tasksStore.setFilter) — без дубля.
+watch(() => route.query.tab, (tab) => {
+  if (tab !== undefined && tab !== activeTab.value) {
+    applyTab(tab)
+  }
 })
 
 onUnmounted(() => {
@@ -145,7 +170,9 @@ async function fetchActiveCount() {
 function onTabSelect(key) {
   activeTab.value = key
   localStorage.setItem('mailbridge_active_tab', key)
-  router.replace({ query: { ...route.query, tab: key } })
+  const query = { ...route.query, tab: key }
+  if (key === 'projects' || key === 'inbox') delete query.project
+  router.replace({ query })
   if (key !== 'inbox' && key !== 'projects') {
     store.setStatuses(tabStatuses[key])
   }

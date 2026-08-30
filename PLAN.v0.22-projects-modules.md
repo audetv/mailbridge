@@ -92,14 +92,23 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
-| 12 | `POST /api/tasks` (ручное создание): `project` (из БД, iname), `title`, `body`, `type`, `priority`, `epic_id`; сообщение-ид = `manual-{uuid}` (schema `message_id NOT NULL UNIQUE` не трогаем); валидация project exists и нет archived | 5 | `[ ]` |
-| 13 | WS `task_created` + UI: форма «Новая задача» (modal) в Dashboard/ProjectView → `stores/tasks.js` | 12 | `[ ]` |
-| 14 | **AI промты**: `orchestrator.SetProjects` теперь из `store.ListProjects()` (активные); при создании задачи из письма проект обязан ∈ активных проектов (валидация в `orchestrator.createTaskFromVerdict`) | 3, 4 | `[ ]` |
-| 15 | Fallback-проект при пустом AI-классификаторе: `config.Plane.DefaultProject` → константа `processor.DefaultProject = "Входящие"` + (опц.) конфиг `MAILBRIDGE_DEFAULT_PROJECT` | 14 | `[ ]` |
+| 12 | `POST /api/tasks` (ручное создание): `project` (из БД, iname), `title`, `body`, `type`, `priority`, `epic_id`; сообщение-ид = `manual-{uuid}` (schema `message_id NOT NULL UNIQUE` не трогаем); валидация project exists и нет archived | 5 | `[x]` 507456d (API) + 8cfa62c (Select-object fix) + 47f1f98 (archived → 400 + тест) |
+| 13 | WS `task_created` + UI: форма «Новая задача» (modal) в Dashboard/ProjectView → `stores/tasks.js` | 12 | `[x]` 8c21b1f (WS task_created) + 7dc8b7a/54d5f4b (диалог + epic-поле) — см. решения §7(#11–12) |
+| 13.1 | **BUG 2+3 (FilterBar)**: `@change="onProjectChange($event.value)"` (v5 эмитит `{originalEvent, value}`); опции проекта — из `projectsStore` (активные), не hardcoded; восстановление из store корректно | — | `[ ]` |
+| 13.2 | **BUG 1 (таб-роутинг)**: `watch(() => route.query.tab, …)` в DashboardView — URL = source of truth («К задачам» работает, deep-link работает); `goToTasks` → `router.push({query:{tab:'active', project:'<имя>'}})` + сброс `epic_id`; стабильные slugs табов зафиксированы | 13.1 | `[ ]` |
+| 13.3 | **E2E-infra (Playwright)**: `@playwright/test` в `frontend/`, `playwright.config.js` (baseURL :5173), fixture-seed в `data/` (script `frontend/scripts/seed-dev.mjs` через API); smoke `auth.spec.js` (login + вкладки видимы) | 13.2 | `[ ]` |
+| 13.4 | **E2E-сценарии**: `projects-to-tasks.spec.js` — «Проекты → К задачам → «Активные» активна + filter project (все строки = проект) + селект-заполнен»; «фильтр проект/модуль в задаче-табах меняет список»; «создание из Проектов → задача с привязкой к проекту» (регрессия снятого бага 4); `npx playwright test` зелёный | 13.3 | `[ ]` |
+| 13.5 | **AGENTS.md** (текст подготовим, apply — вручную, protected): §Commands — тестирование (unit + UI-коммит с e2e при касании Filter/Tab/Select/Dialog; `npx playwright test` для UI-степсов) + dev-окружение (8081 dev / 8080 prod — не трогать / 5173 vite-прокси на 8081 / seed для e2e); текст §7(#11) | 13.4 | `[ ]` (B: user-apply) |
+| 14 | **AI промты**: `orchestrator.SetProjects` теперь из `store.ListProjects()` (активные); при создании задачи из письма проект обязан ∈ активных проектов (валидация в `orchestrator.createTaskFromVerdict`) | 3, 4 | `[ ]` (код в tree: `SetProjectsProvider` + `activeProjectNames` + `resolveVerdictProject`, BUILD_OK; тесты + коммит — перед 13.3) |
+| 15 | Fallback-проект при пустом AI-классификаторе: `config.Plane.DefaultProject` → `ai.DefaultProject = "Входящие"` (var, env `MAILBRIDGE_DEFAULT_PROJECT`) + fallback в `processor.go` | 14 | `[ ]` (код в tree: verdicts.go + processor.go; тесты + коммит) |
 | 16 | Тестируем закрытие цикла: письмо (dev) → AI → задача с проектом из правил rules.yml; ручная задача в любом проекте — обе видимы в UI | 12, 14 | `[ ]` (B: dev env) |
 
 Заметки шага:
+- (13.1) Корень бага 2+3 (2026-08-30, баги 2 и 3 от user): PrimeVue 5.0.0 `Select @change` передаёт **объект-событие** `{originalEvent, value}` (`node_modules/primevue/select/index.mjs:941 updateModel: $emit('change',{originalEvent,value})`). `onProjectChange(value)` принимал объект → `setFilter('project', <объект>)` → axios-параметр `[object Object]` → бекенд возвращает НЕотфильтрованный список + placeholder не подставляется; `projectsIdByName(<объект>)` → null → `epicOptions=[]` → «No options available» (баг 3). Реф: соседний epic-`@change="onChange('epic_id', $event.value)"` immune — образец. Тест: `vi.mock` PrimeVue Select (emit с `{originalEvent, value}`) — regression тест в FilterBar.spec.js.
+- (13.2) Корень бага 1 (2026-08-30): DashboardView читает `route.query.tab` только в `onMounted` (DashboardView.vue:107–128), watch-а НЕТ — `router.replace({tab})` после mount меняет URL, но v-else-блок задачи не монтируется (при этом store fetch ушёл — в devtools видно отфильтрованный GET, UI «застыл»). Fix: `watch(() => route.query.tab, applyTab)` + `applyTab` из `onMounted`-кода (DRY), `goToTasks` сбрасывает `epic_id` (чужой модуль из другого проекта). Решения §7(#9).
+- (13.3–13.4) E2E: Playwright (frontend dev-dep), `baseURL http://localhost:5173`, `storageState` логин из auth.spec.js; реальные проекты из seed-скрипта (не из прод-синхронизации); sценарии 13.4 покрывают баги 1–3 + regression снятого бага 4 (§7(#12)). Acceptance: `npx playwright test` зелёный в headless (CI — Фаза 6). Решения §7(#10).
 - (14) Критическое: промт строится из `o.projects` (оркестратор, строка ~299). После шага источник = БД, не Plane.
+- (15) Код в tree (uncommitted): `ai.DefaultProject` var-константа + `resolveVerdictProject` (валидация вердикта ∈ активных, иначе fallback + slog warning), `processor.go` fallback `ai.DefaultProject` при пустом `classification.Project`; `main.go: SetProjectsProvider` (активные из SQLite) + env override `MAILBRIDGE_DEFAULT_PROJECT`.
 - (16) `(!)` B — требует включённого AI (dev :8081); без dev-окружения отложить как P с причиной и растопить в Фазе 6.
 
 ## 4. ФАЗА 4 — Отчёт + Ответ (закрытие)
@@ -139,7 +148,7 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | # | Шаг | Статус |
 |---|-----|--------|
 | 28 | Рассолить: все `P/B` шаги (16, 21, если были P в Фазе 5); тесты → зелёные | `[ ]` |
-| 29 | `AGENTS.md`: обновить инварианты (plane — removed; новые kinds; «проекты/модули»; auth: admin + agent-юзер). Текст правки подготовим на шаге 28 (apply — вручную, protected). | `[ ]` |
+| 29 | `AGENTS.md`: обновить инварианты v0.22 (plane — removed; новые kinds `report/reply`; проекты/модули; auth admin + agent-юзер; `MAILBRIDGE_LISTEN`). **AGENTS.md-разделы «тестирование» + «dev-окружение» уже на шаге 13.5** (раньше Фазы 6, решение §7(#11)). Текст правки подготовим на шаге 28 (apply — вручную, protected). | `[ ]` |
 | 30 | Docs: `docs/api.md` (новые маршруты), `docs/data-model.md` (таблицы), `docs/ARCHITECTURE.md` (сборка проектов/модулей, срез Plane), `configs/config.example.env` (нет PLANE, нет WEBHOOK_SECRET, есть LISTEN, AGENT_USER/PASS) | `[ ]` |
 | 31 | Обновить root `PLAN.md`: v0.22.0 → архив `archive/PLAN.v0.22-projects-modules.md`; новая активная версия; «Plane: удалён, v0.22.0» | `[ ]` |
 | 32 | PR в main, green CI (Lint + Test), merge | `[ ]` |
@@ -151,6 +160,10 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Вопрос | Решение |
 |---|--------|---------|
+| 9 | Вкладка-цель «К задачам» + deep-link? (2026-08-30) | **Вкладка «Активные»**, переход — по URL (`?tab=active`). **URL = source of truth для таба**: стабильные идентификаторы вкладок, `watch(route.query.tab)` в DashboardView, e2e ходит по URL (deep-link). Фильтры — в store; project в query — информационный (для e2e/ссылок). |
+| 10 | E2E-тесты? (2026-08-30) | **Да, Playwright** (`frontend/`), против живого dev-стека (`make run-dev` :8081 + `npm run dev` :5173), fixture-данные — seed-скрипт в `data/`. Покрывает сценарии «кнопка → смена таба/фильтра → обновление списка», которые моки PrimeVue скрывают (реальные баги 1–3 прошли 39/39 vitest'ов). |
+| 11 | AGENTS.md: правила тестирования + dev-окружение — когда? (2026-08-30) | **Раньше Фазы 6** (шаг 13.5, сразу после e2e): правило «UI-коммит несёт e2e-тест при касании Filter/Tab/Select/Dialog» + §3 порты 8080/8081/5173 + seed — вступает в силу сразу, к релизу уже живая практика. Заменяет шаг 29 (теперь: только инварианты v0.22). |
+| 12 | Баг 4 «задача без привязки к проекту» (2026-08-30) | **Снят пользователем** — ошибка, всё работает. Регресс-покрытие — e2e-сценарий 13.4 (создание из Проектов). |
 | 1 | UI «Эпик» vs «Модуль»? | UI = **Модуль**; API/БД/код = `epics`. Переименование до merge — дёшево. |
 | 2 | Reply = отправка письма? | **Нет.** AI-анализ + verdict + статусы; отправка — отдельно/позже. Базовый мерж `approve→outbound` не делать. |
 | 3 | Удаление проекта с задачами? | **Soft-archive**. Hard — только пустого. |

@@ -57,7 +57,8 @@ onMounted(async () => {
   search.value = store.filters.search || ''
   project.value = store.filters.project || null
   if (project.value) {
-    await loadEpicOptions(projectsIdByName(project.value))
+    const projectId = await projectsIdByName(project.value)
+    await loadEpicOptions(projectId)
   }
 })
 

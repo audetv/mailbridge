@@ -194,10 +194,14 @@ async function openCreateTask(p) {
   } catch { /* без модулей — поле в диалоге пустое */ }
 }
 
-// «К задачам» — вкладка задач с фильтром по этому проекту (шаг 6: ссылка проекта→задачи).
+// «К задачам» — вкладка «Активные» с фильтром по этому проекту (шаг 6: ссылка
+// проекта→задачи). Вкладка переключается самим URL (watch в DashboardView);
+// фильтр — в store (до смены таба, чтобы первый fetch уже был отфильтрован).
 function goToTasks(p) {
+  // модуль от другого проекта — сбрасываем (иначе чужой epic обрезит список)
+  tasksStore.filters.epic_id = ''
   tasksStore.setFilter('project', p.name)
-  router.replace({ query: { ...route.query, tab: 'active' } })
+  router.replace({ query: { ...route.query, tab: 'active', project: p.name } })
 }
 
 const newName = ref('')
