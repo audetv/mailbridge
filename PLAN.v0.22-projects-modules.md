@@ -46,15 +46,19 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 - `reply_log` (вместе с `plane_issue_id`) и `SaveReplyLog/ReplyExists` — **мёртвый код** (нет живых вызователей, проверено) — удаляются в Фазе 5.
 
 ### Comment kinds (расширяемый набор)
+> **Обновлено 2026-08-30 (решение §4):** `ai_verdict` — только история входящих писем (шаги 4–14);
+> mailbridge-AI по комментариям НЕ вызывается (старый шаг 18 снят); `approved` — флаг комментария,
+> а не статус задачи.
+
 | kind | Направление | Назначение |
 |---|---|---|
 | `user_comment` | in/out | обычный комментарий (как сейчас) |
-| `ai_verdict` | in | AI-вердикт |
+| `ai_verdict` | in | AI-вердикт входящего письма (история) |
 | `report` | out | **внутренний отчёт**: что сделано, как, ссылки (commits/патчи) — для своих |
 | `reply` | out | **черновик ответа пользователю**: простой язык, без тех. деталей |
 
-- AI анализирует комментарий (`report`/`reply`) асинхронно (те же retry-политики очереди) и вернёт `ai_verdict` + рекомендацию статуса; **почта наружу НЕ отправляется** (отправка — отдельная будущая фича, пока не реализуем).
-- Базовый механизм «approve → наружу»: статус задачи `awaiting_approval` + `approved` — фантомные до подключения отправки; wiring отправки НЕ делаем (отложить, §9).
+- `approved INT NULL` на `task_comments` — модерационный флаг (admin-only approve, §4-решение 3).
+- **Почта наружу НЕ отправляется** (отдельная будущая фича). Wiring отправки НЕ делаем (§9-1).
 
 ---
 
@@ -115,18 +119,39 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 ## 4. ФАЗА 4 — Отчёт + Ответ (закрытие)
 
+> **Решение 2026-08-30 (user, 4 вопроса закрыты):**
+> 1. **Шаг 18 (AI-анализ комментария) — СНЯТ.** mailbridge-AI ничего не анализирует, не
+>    рекомендует статуса, не дергается по комментариям (user: «Зачем AI-модель ревьюить мой отчёт?
+>    Снять!»). Комментарии создаёт человек/агент, статусы задаёт человек.
+> 2. **`approved` — флаг комментария, НЕ статус задачи.** Это внутренний статус модерации
+>    конкретного действия — отправки ответа пользователю. Статусы задач остаются как есть
+>    (new/backlog/in_progress/completed/closed); «Закрыл задачу» = кнопка, перевод в `completed` (или `closed`).
+> 3. **Approve — сейчас admin-only.** Идеал: роль/permission в будущем RBAC; пока —
+>    упрощение: admin. Реальной отправки нет (заморожено §9-1), нужна статистика — пока её нет.
+> 4. **API не плодим:** расширяем существующий `POST /api/tasks/{id}/reply` полем `kind`
+>    (`user_comment`|`report`|`reply`); новый endpoint только `PATCH /api/comments/{id}/approve`
+>    (admin-only). Запись проектов/модулей API'ем в Фазе 4 НЕ делаем (только после явного запроса).
+>
+> Приоритет Фазы 4 (2026-08-30): **17.1 → 18 → 18.2 → 18.3 → 19** — сначала
+> агент-юзер + два комментария (report/reply) к готовой задаче, approve последним.
+
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
-| 17 | Миграции `task_comments`: колонки `ai_verdict TEXT`, `approved INT NULL` (без изменения существующих); `kind` расширен (валидация в коде, БД без CONSTRAINT) + индекс `idx_task_comments_kind` | 3 | `[ ]` |
-| 18 | AI-анализ комментария: `ai.CommentAnalysis(ctx, comment)`: verdict + рекомендуемый статус (completed / awaiting_approval); асинхронно через очередь (новые типы events: `comment_new` / `comment_reply`); retry на те же backoff | 14 | `[ ]` |
-| 19 | API: `POST /api/tasks/{id}/comments` (add kind), `PUT /api/tasks/{id}` (update status, incl. `completed`/`awaiting_approval`), `PATCH /api/comments/{id}/approve` (approve flag → статус `approved`); статусы: добавить `awaiting_approval`, `approved` в `store/status.go` + `IsActive/IsArchived` | 18 | `[ ]` |
-| 19b | Агент-юзер `hermes`: `auth.go` — 2 юзера: admin (`MAILBRIDGE_AUTH_USER/PASS`, default admin/admin) + **hermes** (логин фиксир. `hermes`, `MAILBRIDGE_AGENT_PASS` обязателен для активации; юзер существует только если пароль задан); login отдаёт username; `extractUserFromToken` уже поддерживает (токен `token-<user>-<date>`); тесты auth (table-driven) | 19 | `[ ]` |
-| 20 | UI: в `TaskDetailView` — две карточки (Отчёт / Ответ пользователю); кнопки «Закрыл задачу», «Утвердил ответ» (approve); статус-бейдж `awaiting_approval`/`approved`; стили по kind/author (агент выделяем) | 19 | `[ ]` |
-| 21 | **Приёмочный прогон**: dev env (login), `inbox/86` → `report` + `reply` + close → видим в UI, статус closed; WS-события приходят | 15, 20 | `[ ]` (B: dev) |
+| 17.1 | Миграция `task_comments`: колонка `approved INT NULL` (дефолт NULL = не утверждён; идемпотентно `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — SQLite без IF NOT EXISTS на ADD: миграция проверяет `PRAGMA table_info`). Колонки `direction`, `kind`, `inbox_item_id`, `verdict_json` — уже в DDL (шаг 3) — не трогаем. Индекс `idx_task_comments_kind` (если нет) | 3 | `[ ]` |
+| 18 | UI: в `TaskDetailView` две секции **Отчёт** и **Ответ пользователю** (вид `CommentList` по `kind`+`direction`); бейдж «Утверждён» на `reply`-комментарии с `approved=1`; стили по kind/author (агент `hermes` визуально выделяется); кнопка «**Закрыл задачу**» = **уже существующие** `WorkflowButtons` (new/in_progress → `closed`, in_progress → `completed` — не пишем новое); кнопка «**Утвердил ответ**» → `PATCH /api/comments/{id}/approve` (только на `kind=reply`, admin-only) | 17.1 | `[ ]` |
+| 18.2 | Агент-юзер `hermes`: `auth.go` — 2 юзера: admin (`MAILBRIDGE_AUTH_USER/PASS`, дефолт admin/admin) + **hermes** (логин фиксированный `hermes`, `MAILBRIDGE_AGENT_PASS` обязательно для активации; юзер существует только если пароль задан); login отдаёт username; `extractUserFromToken` уже поддерживает (токен `token-<user>-<date>`); тесты auth (table-driven) | — | `[ ]` |
+| 18.3 | API-разрешение: `POST /api/tasks/{id}/reply` принимает `kind: user_comment\|report\|reply` (default `user_comment`; валидация; любой аутентичный юзер может писать; `direction` = `out`) | 18.2 | `[ ]` |
+| 19 | `PATCH /api/comments/{id}/approve`: admin-only (не admin — 403), комментарий обязан быть `kind=reply` (иначе 400), `approved 0→1` (повторный approve идемпотентен); WS-событие `comment_approved` → UI бейдж в реальном времени | 18.3 | `[ ]` |
+| 20 | **Приёмочный прогон** (кейс Лидер Спорт #66): dev `:8081` — агент (`hermes`) пишет `report` + `reply` к закрытой задаче → admin login в UI → видит оба комментария с бейджами → «Утвердил ответ» → бейдж появляется; WS-события приходят; approve от имени `hermes` → 403 | 19 | `[ ]` (B: dev) |
 
 Заметки шага:
-- (18) AI-анализ: промт отдельно от входящего; verdict: `{status: "completed"|"in_progress"|"awaiting_approval", reason}`; применяем только `status` + `ai_verdict`; `approved` — руками (человек), не AI.
-- (21) `(!)` B — dev :8081.
+- **(20) `(!)` B** — dev `:8081`.
+- **Отправка email (reply пользователю) — ВНЕ Фазы 4** (заморожено §9-1 до решения по отправке: SMTP/лог, авторизация,
+  повторность). «Утвердил ответ» = только постановка `approved=1`; в логе/БД фиксируется как статистика.
+- **Статус задач не расширяем** `awaiting_approval`/`approved` — такого решения больше нет.
+- **Шаг 21 переночерован:** старый «17+18+19b+20+21» → новые `17.1/18/18.2/18.3/19/20`.
+  Старый 18 (AI-анализ) удалён; старая 19b (agent) → новая 18.2; старый 19 → новые 18.3+19; старый 20 (UI) → новая 18; старый 21 (приёмка) → новая 20.
+- **Plane-ссылка в отчёте** (шаг 7/8) — остаётся; в `reply` Plane-ссылку НЕ показывать (только в `report`).
 
 ## 5. ФАЗА 5 — Срез Plane (последний!)
 
@@ -167,7 +192,7 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | 11 | AGENTS.md: правила тестирования + dev-окружение — когда? (2026-08-30) | **Раньше Фазы 6** (шаг 13.5, сразу после e2e): правило «UI-коммит несёт e2e-тест при касании Filter/Tab/Select/Dialog» + §3 порты 8080/8081/5173 + seed — вступает в силу сразу, к релизу уже живая практика. Заменяет шаг 29 (теперь: только инварианты v0.22). |
 | 12 | Баг 4 «задача без привязки к проекту» (2026-08-30) | **Снят пользователем** — ошибка, всё работает. Регресс-покрытие — e2e-сценарий 13.4 (создание из Проектов). |
 | 1 | UI «Эпик» vs «Модуль»? | UI = **Модуль**; API/БД/код = `epics`. Переименование до merge — дёшево. |
-| 2 | Reply = отправка письма? | **Нет.** AI-анализ + verdict + статусы; отправка — отдельно/позже. Базовый мерж `approve→outbound` не делать. |
+| 2 | Reply = отправка письма? | **Нет.** (2026-08-30 уточнено: AI-анализ по комментам снят, шаг 18 удалён). Reply = черновик-ответ пользователю (комментарий `kind=reply`); отправка — отдельно/позже (§9-1). `approved` — флаг комментария (admin-only), статус задачи НЕ расширяем. |
 | 3 | Удаление проекта с задачами? | **Soft-archive**. Hard — только пустого. |
 | 4 | Имена проектов сида? | Из `configs/rules.yml` секция `# Проекты` (9 названий) + `Входящие`. |
 | 5 | Агент-логин? | Отдельный юзер (env): логин **`hermes`**, `MAILBRIDGE_AGENT_USER/PASS`; **не RBAC** (2 пользователя: admin + hermes). |
@@ -188,7 +213,7 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 | CI | `.github/workflows/ci.yml` | go 1.26, golangci-lint-action v9, green CI обязателен |
 | БД | SQLite (WAL) | `data/` (локально, не в git) |
 | Dev-порт | 8081 (vite-прокси) `make run-dev` | Prod — `MAILBRIDGE_LISTEN` (после шага 25) |
-| Логин | `MAILBRIDGE_AUTH_USER/PASS` (дефолт admin/admin) | `internal/web/auth.go`; агент — `MAILBRIDGE_AGENT_USER=hermes` + `MAILBRIDGE_AGENT_PASS` (шаг 19b) |
+| Логин | `MAILBRIDGE_AUTH_USER/PASS` (дефолт admin/admin) | `internal/web/auth.go`; агент — `MAILBRIDGE_AGENT_USER=hermes` + `MAILBRIDGE_AGENT_PASS` (шаг 18.2) |
 
 **При старте любой сессии:**
 ```sh
@@ -212,11 +237,11 @@ cd frontend && npm run lint   # фронт
 - **`store.Store` — без фейков.** Все тесты на sqlite-инстансе. Новый метод → новый тест на sqlite (table-driven).
 - **`message_id NOT NULL UNIQUE`** в `tasks`. Ручная задача → `manual-{uuid}`. ALTER таблицы под NULL-уникальность — дорого, не надо.
 - **Порт = `cfg.Webhook.Listen`** (пока). Переименование (шаг 25) — обновить Makefile, config.env, config.example.env, документацию.
-- **AI-очереди:** `ai.Queue` сейчас только inbox_items (int64). Комментарий — новый тип events или параллельная очередь. Решаем на шаге 18 (не ломать inbox-поток).
+- **AI-очереди по комментариям — НЕ делаем** (2026-08-30, старый шаг 18 снят) — комментарии создаёт человек/агент без AI.
 - **Гринн-критерий на каждый коммит:** не «просто компилируется», а `make lint && make test` + `npm run lint` (для фронта). CI обязателен.
 - **AGENTS.md protected** — правим по согласованию (шаг 29).
 - **Проект ≠ имя в БД.** Инвариант: `tasks.project` ∈ `projects.name` (валидация в API + AI-проверка). После archive — новые задачи в него НЕ создаются.
-- **WS-события** — добавляем `project_*`, `epic_*`, `task_created`; проверять на шаге 21.
+- **WS-события** — добавляем `project_*`, `epic_*`, `task_created`, `comment_approved` (Фазы 4); проверять на шаге 20 (приёмка Фазы 4).
 
 ## 11. Критерий «всё готово для v0.22.0»
 
