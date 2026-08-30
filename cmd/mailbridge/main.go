@@ -28,6 +28,7 @@ import (
 	"github.com/audetv/mailbridge/internal/plane"
 	"github.com/audetv/mailbridge/internal/processor"
 	"github.com/audetv/mailbridge/internal/sender"
+	"github.com/audetv/mailbridge/internal/store"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 	"github.com/audetv/mailbridge/internal/version"
 	"github.com/audetv/mailbridge/internal/web"
@@ -169,13 +170,29 @@ func main() {
 	if aiClient != nil {
 		orchestrator = ai.NewOrchestrator(aiClient, st)
 	}
+	// Шаг 15: fallback-проект переопределяется через MAILBRIDGE_DEFAULT_PROJECT
+	if d := os.Getenv("MAILBRIDGE_DEFAULT_PROJECT"); d != "" {
+		ai.DefaultProject = d
+	}
 
 	if orchestrator != nil {
-		projectNames := make([]string, 0, len(projectNameMap))
-		for name := range projectNameMap {
-			projectNames = append(projectNames, name)
-		}
-		orchestrator.SetProjects(projectNames)
+		// Фаза 3 шаг 14: проекты для AI берутся из внутренней БД (aktivные), не из Plane.
+		orchestrator.SetProjectsProvider(func(ctx context.Context) ([]string, error) {
+			archived := false
+			projects, err := st.ListProjects(ctx, &store.ProjectFilter{Archived: &archived})
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(projects))
+			for _, p := range projects {
+				if p.Name != "" {
+					names = append(names, p.Name)
+				}
+			}
+			// Fallback-проект всегда доступен для AI, даже если БД пуста.
+			names = append(names, ai.DefaultProject)
+			return names, nil
+		})
 	}
 
 	var aiQueue *ai.Queue

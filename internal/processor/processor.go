@@ -229,7 +229,7 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 
 	project := classification.Project
 	if project == "" {
-		project = p.config.Plane.DefaultProject
+		project = ai.DefaultProject
 	}
 
 	task := &store.Task{
