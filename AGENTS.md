@@ -26,6 +26,20 @@ Mailbridge — сервис управления входящими обраще
 - `cd frontend && npm run preview` — предпросмотр собранного
 - `cd frontend && npm run lint` / `npm run format` — ESLint 9 + Prettier (CI гоняет lint перед сборкой)
 
+### Тестирование
+
+- Unit: `make test` (Go) + `cd frontend && npm test` (vitest) — перед коммитом, который трогает код
+- **E2E (Playwright в `frontend/`)**: обязателен при UI-коммите, касающемся **Filter / Tab / Select / Dialog / роутинга вкладок** — `cd frontend && npx playwright test` (против живого dev-стека: moка PrimeVue скрывают реальные баги)
+- Стек для e2e: `make run-dev` (:8081) + `cd frontend && npm run dev` (:5173); данные — сид
+  `cd frontend && npm run e2e:seed` (идемпотентный: проекты + модуль «Сайт ТРК» + задачи).
+  **После КОПИРОВАНИЯ БД из прод в dev — ОБЯЗАТЕЛЬНО прогнать `e2e:seed` перед e2e.**
+
+### Dev-окружение (порты)
+
+- `:8080` = **ПРОД** mailbridge — НЕ трогать (не kill/restart, не писать в его БД); действия на проде — у пользователя
+- `:8081` = dev-бекенд (`make run-dev`); `:5173` = vite dev (прокси на 8081)
+- Агенту допустимо поднимать/останавливать dev-бекенд для тестов (по необходимости)
+
 ## Repo Map
 
 ```
