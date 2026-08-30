@@ -78,6 +78,18 @@
           />
         </template>
       </Column>
+      <Column header="Задачи" style="width: 110px">
+        <template #body="{ data }">
+          <Button
+            label="К задачам"
+            severity="secondary"
+            text
+            size="small"
+            icon="pi pi-list"
+            @click="goToTasks(data)"
+          />
+        </template>
+      </Column>
       <Column header="Действия" style="width: 320px">
         <template #body="{ data }">
           <div class="row-actions">
@@ -144,6 +156,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -154,13 +167,17 @@ import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Message from 'primevue/message'
 import { useProjectsStore } from '@/stores/projects'
+import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
 import EpicPanel from '@/components/EpicPanel.vue'
 import CreateTaskDialog from '@/components/CreateTaskDialog.vue'
 
 const store = useProjectsStore()
 const epicsStore = useEpicsStore()
+const tasksStore = useTasksStore()
 const toast = useToast()
+const router = useRouter()
+const route = useRoute()
 const epicProject = ref(null)
 
 
@@ -175,6 +192,12 @@ async function openCreateTask(p) {
     const epics = await epicsStore.fetchEpics(p.id)
     createTaskEpics.value = epics.map((e) => ({ value: e.id, label: e.name }))
   } catch { /* без модулей — поле в диалоге пустое */ }
+}
+
+// «К задачам» — вкладка задач с фильтром по этому проекту (шаг 6: ссылка проекта→задачи).
+function goToTasks(p) {
+  tasksStore.setFilter('project', p.name)
+  router.replace({ query: { ...route.query, tab: 'active' } })
 }
 
 const newName = ref('')

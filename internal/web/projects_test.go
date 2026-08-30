@@ -230,6 +230,82 @@ func TestProjectsAPI_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestProjectsAPI_ListProjectTasks(t *testing.T) {
+	ctx := context.Background()
+	pt := newProjectsTest(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(`{"name":"Проект ДляЗадач"}`))
+	pt.h.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	created := pt.decode(w)
+
+	// Задача в нашем проекте + задача в чужом — фильтрация по имени.
+	mkTask := func(subject, project string) *store.Task {
+		return &store.Task{
+			MessageID: "manual-" + subject, Subject: subject,
+			Project: project, Status: "new", FromEmail: "a@b.c",
+		}
+	}
+	if err := pt.s.CreateTask(ctx, mkTask("Задача ДляЗадач", "Проект ДляЗадач")); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := pt.s.CreateTask(ctx, mkTask("Чужая задача", "Иное Проект-99")); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	// GET /api/projects/{id}/tasks — ровно одна задача нашего проекта.
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/projects/5/tasks", nil)
+	req.SetPathValue("id", itoa64(created.ID))
+	pt.h.ListProjectTasks(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var res struct {
+		Tasks []*store.TaskWithUnread `json:"tasks"`
+		Total int64                   `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if res.Total != 1 || len(res.Tasks) != 1 {
+		t.Fatalf("want 1 task, got total=%d len=%d", res.Total, len(res.Tasks))
+	}
+	if res.Tasks[0].Project != "Проект ДляЗадач" || res.Tasks[0].Subject != "Задача ДляЗадач" {
+		t.Fatalf("wrong task: %+v", res.Tasks[0])
+	}
+
+	// project not found → 404
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/projects/999/tasks", nil)
+	req.SetPathValue("id", "999")
+	pt.h.ListProjectTasks(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", w.Code)
+	}
+
+	// нечисловой id → 400
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/projects/abc/tasks", nil)
+	req.SetPathValue("id", "abc")
+	pt.h.ListProjectTasks(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", w.Code)
+	}
+
+	// method not allowed
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/projects/1/tasks", nil)
+	req.SetPathValue("id", "1")
+	pt.h.ListProjectTasks(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", w.Code)
+	}
+}
+
 func itoa64(i int64) string {
 	b := []byte{}
 	for i > 0 {

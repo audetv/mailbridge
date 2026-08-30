@@ -42,7 +42,17 @@
         <Tag :value="data.priority" :severity="prioritySeverity(data.priority)" />
       </template>
     </Column>
-    <Column field="project" header="Проект" style="width: 150px" />
+    <Column field="project" header="Проект" style="width: 150px">
+      <template #body="{ data }">
+        <a
+          v-if="data.project"
+          href="#"
+          class="project-link"
+          @click.prevent="goToProject(data.project)"
+        >{{ data.project }}</a>
+        <span v-else>—</span>
+      </template>
+    </Column>
     <Column field="epic_id" header="Модуль" style="width: 130px">
       <template #body="{ data }">
         <Tag v-if="epicName(data)" :value="epicName(data)" severity="secondary" />
@@ -112,6 +122,14 @@ function onRowClick(event) {
   router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
+// Ссылка «Проект» → задачи этого проекта (фильтр + вкладка «Активные»).
+function goToProject(projectName) {
+  store.setFilter('project', projectName)
+  if (route.query.tab !== 'active') {
+    router.replace({ query: { ...route.query, tab: 'active' } })
+  }
+}
+
 function onPage(event) {
   store.filters.page = event.page + 1
   store.fetchTasks()
@@ -133,6 +151,15 @@ defineExpose({ epicName })
 
 .epic-none {
   opacity: 0.4;
+}
+
+.project-link {
+  color: var(--mb-primary, #2563eb);
+  text-decoration: none;
+}
+
+.project-link:hover {
+  text-decoration: underline;
 }
 
 :deep(.task-unread) {

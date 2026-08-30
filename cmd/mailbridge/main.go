@@ -336,6 +336,7 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/projects/{id}/unarchive", projectHandler.UnarchiveProject)
+	mux.HandleFunc("/api/projects/{id}/tasks", projectHandler.ListProjectTasks) // Фаза 1 шаг 6: ссылка проекта на задачи
 
 	// Epics API (модули)
 	epicHandler := web.NewEpicHandler(st, broker)

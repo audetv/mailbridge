@@ -86,6 +86,50 @@ func (h *ProjectHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projects)
 }
 
+// ListProjectTasks обрабатывает GET /api/projects/{id}/tasks — задачи проекта.
+// Фильтр — точное совпадение t.project = название проекта; пагинация через ?page&per_page.
+// Project not found → 404; нечисловой id → 400.
+func (h *ProjectHandler) ListProjectTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	p, err := h.store.GetProject(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+
+	result, err := h.store.ListTasks(r.Context(), &store.TaskFilter{
+		Project:  p.Name,
+		Page:     page,
+		PerPage:  perPage,
+		Username: extractUserFromToken(r),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result.Tasks == nil {
+		result.Tasks = []*store.TaskWithUnread{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // CreateProject обрабатывает POST /api/projects.
 func (h *ProjectHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

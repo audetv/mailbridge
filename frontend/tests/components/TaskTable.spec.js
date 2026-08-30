@@ -6,7 +6,7 @@ vi.mock('@/api/client', () => ({
   default: { get: vi.fn(), patch: vi.fn(), post: vi.fn() }
 }))
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useRoute: () => ({ params: {}, query: {} })
 }))
 
@@ -52,5 +52,18 @@ describe('TaskTable — колонка «Модуль»', () => {
     const epicCell = (row, i) => row.findAll('td')[i]
     expect(epicCell(rows[0], headerIdx).find('.p-tag').text()).toContain('Строчка')
     expect(epicCell(rows[1], headerIdx).find('.epic-none').text()).toBe('—')
+  })
+
+  it('колонка «Проект» — ссылка; клик фильтрует задачи по проекту (шаг 6)', async () => {
+    const { wrapper, tasks } = await mountTable(pinia)
+    vi.spyOn(tasks, 'setFilter').mockImplementation(() => {})
+    const headerIdx = wrapper.findAll('th').findIndex((th) => th.text() === 'Проект')
+    expect(headerIdx).toBeGreaterThanOrEqual(0)
+    const link = wrapper.findAll('tbody tr')[0].findAll('td')[headerIdx].find('.project-link')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('Лидер Спорт')
+
+    await link.trigger('click')
+    expect(tasks.setFilter).toHaveBeenCalledWith('project', 'Лидер Спорт')
   })
 })
