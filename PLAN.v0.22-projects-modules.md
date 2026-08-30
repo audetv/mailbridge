@@ -160,12 +160,12 @@ tasks.epic_id INT NULL REF epics(id) ON DELETE SET NULL   -- новые зада
 
 | # | Шаг | Завис. | Статус |
 |---|-----|--------|--------|
-| 22 | `config`: удалить `PlanePlaneConfig` (`MAILBRIDGE_PLANE_BASE_URL/API_KEY/DEFAULT_PROJECT`) и их валидацию; обновить `config.example.env`; `config.env` (локально, не коммитится) — убрать | 15 | `[ ]` |
-| 23 | Удалить пакет `internal/plane/` + импорты + `loadProjectMap` в `main.go`; `orchestrator.SetProjects` из БД (закрыть шаг 14, если P) | 14 | `[ ]` |
-| 24 | Удалить health-check «plane» (`main.go`, `server_test.go`), метрики `mailbridge_plane_available` + `SetPlaneAvailable` (internal/metrics + все callers) | 23 | `[ ]` |
-| 25 | **Webhook**: удалить `/webhook` + `internal/webhook/` (Планомерный аудит: секреты/тайм-зона см. §7-В); переименовать `config.HTTP` + `MAILBRIDGE_LISTEN` (было `MAILBRIDGE_WEBHOOK_LISTEN` — фактический HTTP-порт, путаница); `Makefile run/run-dev` обновить; `config.example.env` | 24 | `[ ]` |
-| 26 | Удалить `reply_log` (таблица + `SaveReplyLog/ReplyExists` + `plane_issue_id`); `outbound.go` — функции `EnqueueAcknowledgement/CommentReply/StatusChange` (если мёртвы после шагов 22–25 — удалить; иначе оставить) | 25 | `[ ]` |
-| 27 | **Чистая зелёная финальная**: `make lint && make test && make build`; `npm run lint && npm run build`; grep «plane/PLANE» — 0 совпадений в Go/UI/configs/docs; PR → green CI | 22–26 | `[ ]` |
+| 22 | `config`: удалить `PlanePlaneConfig` (`MAILBRIDGE_PLANE_BASE_URL/API_KEY/DEFAULT_PROJECT`) и их валидацию; обновить `config.example.env`; `config.env` (локально, не коммитится) — убрать | 15 | `[x]` |
+| 23 | Удалить пакет `internal/plane/` + импорты + `loadProjectMap` в `main.go`; `orchestrator.SetProjects` из БД (закрыть шаг 14, если P) | 14 | `[x]` |
+| 24 | Удалить health-check «plane» (`main.go`, `server_test.go`), метрики `mailbridge_plane_available` + `SetPlaneAvailable` (internal/metrics + все callers) | 23 | `[x]` |
+| 25 | **Webhook**: удалить `/webhook` + `internal/webhook/` (Планомерный аудит: секреты/тайм-зона см. §7-В); переименовать `config.HTTP` + `MAILBRIDGE_LISTEN` (было `MAILBRIDGE_WEBHOOK_LISTEN` — фактический HTTP-порт, путаница); `Makefile run/run-dev` обновить; `config.example.env` | 24 | `[x]` |
+| 26 | Удалить `reply_log` (таблица + `SaveReplyLog/ReplyExists` + `plane_issue_id`); `outbound.go` — функции `EnqueueAcknowledgement/CommentReply/StatusChange` (если мёртвы после шагов 22–25 — удалить; иначе оставить) | 25 | `[x]` |
+| 27 | **Чистая зелёная финальная**: `make lint && make test && make build`; `npm run lint && npm run build`; grep «plane/PLANE» — 0 совпадений в Go/UI/configs/docs; PR → green CI | 22–26 | `[x]` |
 
 Заметки шага:
 - (22) `(!)` Путь: `Plane.*` есть на строках 169–174 (`Validate`) и 16, 61, 124–126 (`config/PlaneConfig`).

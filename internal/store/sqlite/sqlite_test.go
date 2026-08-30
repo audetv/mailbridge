@@ -328,22 +328,8 @@ func TestAddAndGetTaskComments(t *testing.T) {
 // }
 
 // ---------------------------------------------------------------------------
-// Existing tests (reply_log, outbox)
+// Existing tests (outbox)
 // ---------------------------------------------------------------------------
-
-func TestReplyLog(t *testing.T) {
-	s, cleanup := setupStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	if err := s.SaveReplyLog(ctx, &store.ReplyLog{MessageID: "r-1", InReplyTo: "o-1", PlaneIssueID: "i-6"}); err != nil {
-		t.Fatalf("SaveReplyLog error: %v", err)
-	}
-	exists, _ := s.ReplyExists(ctx, "r-1")
-	if !exists {
-		t.Error("expected reply to exist")
-	}
-}
 
 func TestOutbox(t *testing.T) {
 	s, cleanup := setupStore(t)

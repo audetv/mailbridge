@@ -15,7 +15,7 @@ Mailbridge — сервис управления входящими обраще
 - `make vet` — go vet
 - `make fmt` — gofmt
 - `make run` — запуск (production, порт из config.env)
-- `make run-dev` — запуск в dev-режиме (порт берётся из `MAILBRIDGE_WEBHOOK_LISTEN`; vite-прокси при dev ждёт 8081 — т.е. в dev-конфиге `LISTEN=:8081`)
+- `make run-dev` — запуск в dev-режиме (порт берётся из `MAILBRIDGE_LISTEN`; vite-прокси при dev ждёт 8081 — т.е. в dev-конфиге `LISTEN=:8081`)
 - `make clean` — очистка артефактов
 - `make tidy` — go mod tidy
 
@@ -55,7 +55,7 @@ internal/
   mailbox/               — IMAP-клиент
   metrics/               — Prometheus-метрики
   parser/                — извлечение полей из текста
-  plane/                 — клиент Plane API (отключён в маппинге задач, но env Plane **required** для валидации конфига — см. ADR-0001; удаление требует правки валидации в config.go)
+  plane/                 — (удалён: срез Plane, v0.22 ФАЗА 5; ADR-0001)
   preprocessor/          — обработка вложений для AI
   processor/             — оркестрация обработки писем
   sender/                — SMTP-отправка
@@ -66,7 +66,7 @@ internal/
   store/                 — интерфейс хранилища
   store/sqlite/          — SQLite-реализация
   web/                   — HTTP-обработчики, API
-  webhook/               — приём webhook'ов
+  webhook/               — приём webhook'ов (удалён: срез Plane, v0.22 ФАЗА 5)
   worker/                — воркеры (inbound, outbound)
 frontend/                — Vue 3 SPA
   src/views/             — страницы
@@ -103,7 +103,7 @@ data/                    — БД и вложения (НЕ коммитить)
 - Образец: `configs/config.example.env` (обновлять при добавлении параметров)
 - Секреты: только через env-переменные `MAILBRIDGE_*` (словарь — `configs/config.example.env`)
 - `data/` — БД и вложения, НЕ коммитить
-- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM`, `MAILBRIDGE_PLANE_BASE_URL/API_KEY`, `MAILBRIDGE_WEBHOOK_SECRET` — без них бинарник не стартует
+- Обязательные для запуска (валидация в `internal/config/config.go`): `MAILBRIDGE_IMAP_SERVER/USER/PASS`, `MAILBRIDGE_SMTP_SERVER/FROM` — без них бинарник не стартует (Plane/webhook-secret сняты в v0.22, ФАЗА 5)
 - `MAILBRIDGE_AUTH_USER/PASS` имеют дефолт `admin/admin` — **всегда** задавать свои в production
 
 ## Docs Index

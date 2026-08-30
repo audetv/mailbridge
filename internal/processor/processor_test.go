@@ -50,21 +50,11 @@ func setupProcessor(t *testing.T) (*processor.MessageProcessor, *sqlite.Store, f
 		map[string]bool{"urgent": true, "high": true, "medium": true, "low": true},
 	)
 
-	cfg := &config.Config{
-		Plane: config.PlaneConfig{
-			DefaultProject: "Входящие",
-		},
-	}
-
-	projectMap := map[string]string{
-		"Входящие": "Входящие",
-		"ТРК":      "ТРК",
-		"Отель":    "Отель",
-	}
+	cfg := &config.Config{}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, projectMap, nil, nil, false, nil, nil)
+	proc := processor.NewMessageProcessor(st, cl, ext, par, cfg, logger, nil, nil, false, nil, nil)
 
 	cleanup := func() {
 		st.Close()

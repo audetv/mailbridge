@@ -49,7 +49,6 @@ type MessageProcessor struct {
 	parser       *parser.FieldParser
 	config       *config.Config
 	logger       *slog.Logger
-	projectMap   map[string]string
 	broker       *web.EventBroker
 	orchestrator *ai.Orchestrator
 	aiEnabled    bool
@@ -65,7 +64,6 @@ func NewMessageProcessor(
 	par *parser.FieldParser,
 	cfg *config.Config,
 	logger *slog.Logger,
-	projectMap map[string]string,
 	broker *web.EventBroker,
 	orchestrator *ai.Orchestrator,
 	aiEnabled bool,
@@ -79,7 +77,6 @@ func NewMessageProcessor(
 		parser:       par,
 		config:       cfg,
 		logger:       logger,
-		projectMap:   projectMap,
 		broker:       broker,
 		orchestrator: orchestrator,
 		aiEnabled:    aiEnabled,

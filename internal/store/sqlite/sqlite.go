@@ -537,21 +537,6 @@ func (s *Store) GetTaskAttachments(ctx context.Context, taskID int64) ([]*store.
 	return attachments, rows.Err()
 }
 
-// SaveReplyLog сохраняет запись об отправленном ответе.
-func (s *Store) SaveReplyLog(ctx context.Context, log *store.ReplyLog) error {
-	query := `INSERT INTO reply_log (message_id, in_reply_to, plane_issue_id) VALUES (?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, log.MessageID, log.InReplyTo, log.PlaneIssueID)
-	return err
-}
-
-// ReplyExists проверяет существование ответа.
-func (s *Store) ReplyExists(ctx context.Context, msgID string) (bool, error) {
-	query := `SELECT COUNT(*) FROM reply_log WHERE message_id = ?`
-	var count int
-	err := s.db.QueryRowContext(ctx, query, msgID).Scan(&count)
-	return count > 0, err
-}
-
 // EnqueueOutbox добавляет письмо в очередь.
 func (s *Store) EnqueueOutbox(ctx context.Context, payload string) error {
 	query := `INSERT INTO outbox (payload) VALUES (?)`

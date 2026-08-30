@@ -10,14 +10,11 @@ import (
 func TestLoad_Defaults(t *testing.T) {
 	// Устанавливаем только обязательные поля
 	envs := map[string]string{
-		"MAILBRIDGE_IMAP_SERVER":    "imap.example.com",
-		"MAILBRIDGE_IMAP_USER":      "user@example.com",
-		"MAILBRIDGE_IMAP_PASS":      "secret",
-		"MAILBRIDGE_SMTP_SERVER":    "smtp.example.com",
-		"MAILBRIDGE_SMTP_FROM":      "support@example.com",
-		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.example.com",
-		"MAILBRIDGE_PLANE_API_KEY":  "plane-key-123",
-		"MAILBRIDGE_WEBHOOK_SECRET": "webhook-secret-456",
+		"MAILBRIDGE_IMAP_SERVER": "imap.example.com",
+		"MAILBRIDGE_IMAP_USER":   "user@example.com",
+		"MAILBRIDGE_IMAP_PASS":   "secret",
+		"MAILBRIDGE_SMTP_SERVER": "smtp.example.com",
+		"MAILBRIDGE_SMTP_FROM":   "support@example.com",
 	}
 	setEnvs(t, envs)
 
@@ -57,9 +54,6 @@ func TestLoad_CustomValues(t *testing.T) {
 		"MAILBRIDGE_SMTP_SERVER":    "smtp.custom.com",
 		"MAILBRIDGE_SMTP_FROM":      "noreply@custom.com",
 		"MAILBRIDGE_SMTP_PORT":      "25",
-		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.custom.com",
-		"MAILBRIDGE_PLANE_API_KEY":  "custom-key",
-		"MAILBRIDGE_WEBHOOK_SECRET": "custom-secret",
 		"MAILBRIDGE_STORAGE_DRIVER": "postgres",
 		"MAILBRIDGE_LOG_LEVEL":      "debug",
 		"MAILBRIDGE_LOG_FORMAT":     "text",
@@ -96,9 +90,6 @@ func TestLoad_AIConfig(t *testing.T) {
 		"MAILBRIDGE_IMAP_PASS":      "secret",
 		"MAILBRIDGE_SMTP_SERVER":    "smtp.example.com",
 		"MAILBRIDGE_SMTP_FROM":      "support@example.com",
-		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.example.com",
-		"MAILBRIDGE_PLANE_API_KEY":  "plane-key-123",
-		"MAILBRIDGE_WEBHOOK_SECRET": "webhook-secret-456",
 		"MAILBRIDGE_AI_ENABLED":     "true",
 		"MAILBRIDGE_AI_MODEL":       "qwen3.8-74k:latest",
 		"MAILBRIDGE_AI_SYSTEM_FILE": "configs/email-assistant-v2.system.txt",
@@ -128,14 +119,11 @@ func TestLoad_AIConfig(t *testing.T) {
 // TestLoad_AIConfig_TemperatureDefault — по умолчанию 0.1 (как в Modelfile).
 func TestLoad_AIConfig_TemperatureDefault(t *testing.T) {
 	envs := map[string]string{
-		"MAILBRIDGE_IMAP_SERVER":    "imap.example.com",
-		"MAILBRIDGE_IMAP_USER":      "user@example.com",
-		"MAILBRIDGE_IMAP_PASS":      "secret",
-		"MAILBRIDGE_SMTP_SERVER":    "smtp.example.com",
-		"MAILBRIDGE_SMTP_FROM":      "support@example.com",
-		"MAILBRIDGE_PLANE_BASE_URL": "https://plane.example.com",
-		"MAILBRIDGE_PLANE_API_KEY":  "plane-key-123",
-		"MAILBRIDGE_WEBHOOK_SECRET": "webhook-secret-456",
+		"MAILBRIDGE_IMAP_SERVER": "imap.example.com",
+		"MAILBRIDGE_IMAP_USER":   "user@example.com",
+		"MAILBRIDGE_IMAP_PASS":   "secret",
+		"MAILBRIDGE_SMTP_SERVER": "smtp.example.com",
+		"MAILBRIDGE_SMTP_FROM":   "support@example.com",
 	}
 	setEnvs(t, envs)
 

@@ -169,15 +169,6 @@ type TaskListResult struct {
 	PerPage int               `json:"per_page"`
 }
 
-// ReplyLog записывает отправленный ответ для предотвращения дубликатов.
-type ReplyLog struct {
-	ID           int64
-	MessageID    string
-	InReplyTo    string
-	PlaneIssueID string
-	SentAt       time.Time
-}
-
 // OutboxItem представляет элемент очереди исходящих писем.
 type OutboxItem struct {
 	ID          int64
@@ -284,10 +275,6 @@ type Store interface {
 
 	// LinkAttachmentToComment связывает вложение с комментарием.
 	LinkAttachmentToComment(ctx context.Context, commentID, attachmentID int64) error
-
-	// Reply Log
-	SaveReplyLog(ctx context.Context, log *ReplyLog) error
-	ReplyExists(ctx context.Context, msgID string) (bool, error)
 
 	// Outbox
 	EnqueueOutbox(ctx context.Context, payload string) error

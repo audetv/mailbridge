@@ -62,15 +62,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id)`,
 
-		`CREATE TABLE IF NOT EXISTS reply_log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			message_id TEXT NOT NULL UNIQUE,
-			in_reply_to TEXT NOT NULL,
-			plane_issue_id TEXT NOT NULL,
-			sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_reply_log_message_id ON reply_log(message_id)`,
-
 		`CREATE TABLE IF NOT EXISTS outbox (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			payload TEXT NOT NULL,
@@ -258,6 +249,11 @@ func (s *Store) distinctTaskProjects(ctx context.Context) ([]string, error) {
 
 // migrateSchema выполняет миграции для обновления существующих таблиц.
 func (s *Store) migrateSchema(ctx context.Context) error {
+	// Срез Plane (v0.22, ФАЗА 5): reply_log больше не используется — аккуратно удаляем
+	// только из существующих БД (таблицы в свежих не создаётся).
+	_, _ = s.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_reply_log_message_id")
+	_, _ = s.db.ExecContext(ctx, "DROP TABLE IF EXISTS reply_log")
+
 	// Добавляем AI-колонки в tasks если их нет
 	aiColumns := map[string]string{
 		"thread_id":       "TEXT NOT NULL DEFAULT ''",

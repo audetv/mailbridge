@@ -12,7 +12,6 @@ import (
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/mailbox"
 	"github.com/audetv/mailbridge/internal/parser"
-	"github.com/audetv/mailbridge/internal/plane"
 	"github.com/audetv/mailbridge/internal/processor"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 	"github.com/audetv/mailbridge/internal/worker"
@@ -47,13 +46,7 @@ func TestInboundWorker_Creation(t *testing.T) {
 		map[string]bool{"high": true},
 	)
 
-	_ = plane.NewClient("https://plane.example.com/test", "key")
-
-	projectNameMap := map[string]string{
-		"Входящие": "INBOX",
-	}
-
-	proc := processor.NewMessageProcessor(st, cl, ext, par, &config.Config{Plane: config.PlaneConfig{DefaultProject: "Входящие"}}, logger, projectNameMap, nil, nil, false, nil, nil)
+	proc := processor.NewMessageProcessor(st, cl, ext, par, &config.Config{}, logger, nil, nil, false, nil, nil)
 
 	w := worker.NewInboundWorker(reader, proc, 30*time.Second, logger)
 

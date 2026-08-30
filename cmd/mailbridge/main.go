@@ -25,14 +25,12 @@ import (
 	"github.com/audetv/mailbridge/internal/mailbox"
 	"github.com/audetv/mailbridge/internal/metrics"
 	"github.com/audetv/mailbridge/internal/parser"
-	"github.com/audetv/mailbridge/internal/plane"
 	"github.com/audetv/mailbridge/internal/processor"
 	"github.com/audetv/mailbridge/internal/sender"
 	"github.com/audetv/mailbridge/internal/store"
 	"github.com/audetv/mailbridge/internal/store/sqlite"
 	"github.com/audetv/mailbridge/internal/version"
 	"github.com/audetv/mailbridge/internal/web"
-	"github.com/audetv/mailbridge/internal/webhook"
 	"github.com/audetv/mailbridge/internal/worker"
 )
 
@@ -112,13 +110,6 @@ func main() {
 	m := metrics.New()
 
 	// ---------------------------------------------------------------------------
-	// Plane Client
-	// ---------------------------------------------------------------------------
-	planeClient := plane.NewClient(cfg.Plane.BaseURL, cfg.Plane.APIKey)
-	projectMap := loadProjectMap(planeClient, logger)
-	logger.Info("projects loaded from Plane", "count", len(projectMap))
-
-	// ---------------------------------------------------------------------------
 	// NLP и классификация
 	// ---------------------------------------------------------------------------
 	rules := classifier.ConvertRules(rulesCfg.Rules)
@@ -143,15 +134,6 @@ func main() {
 	// Extractor и Processor
 	// ---------------------------------------------------------------------------
 	ext := extractor.NewExtractor(attStore)
-
-	// Преобразуем projectMap в map[string]string (имя → идентификатор)
-	projectNameMap := make(map[string]string, len(projectMap))
-	for name, proj := range projectMap {
-		projectNameMap[name] = proj.Identifier
-	}
-	if len(projectNameMap) == 0 {
-		projectNameMap["Входящие"] = "INBOX"
-	}
 
 	// ---------------------------------------------------------------------------
 	// AI Client (если включён в конфиге)
@@ -233,7 +215,7 @@ func main() {
 
 	emailAdapter := adapters.NewEmailAdapter(ext, st, cfg.Attachments.Dir)
 	proc := processor.NewMessageProcessor(
-		st, cl, ext, par, cfg, logger, projectNameMap, broker, orchestrator, cfg.AI.Enabled, emailAdapter, aiQueue,
+		st, cl, ext, par, cfg, logger, broker, orchestrator, cfg.AI.Enabled, emailAdapter, aiQueue,
 	)
 
 	// ---------------------------------------------------------------------------
@@ -277,7 +259,7 @@ func main() {
 	// ---------------------------------------------------------------------------
 	// Health-проверки
 	// ---------------------------------------------------------------------------
-	healthSrv := health.NewServer(cfg.Webhook.Listen)
+	healthSrv := health.NewServer(cfg.HTTP.Listen)
 
 	healthSrv.Register(health.NewNamedCheck("database", func(ctx context.Context) error {
 		return st.Ping(ctx)
@@ -291,16 +273,8 @@ func main() {
 		return nil
 	}))
 
-	healthSrv.Register(health.NewNamedCheck("plane", func(ctx context.Context) error {
-		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		_, err := planeClient.GetProjects(reqCtx)
-		m.SetPlaneAvailable(err == nil)
-		return err
-	}))
-
 	// ---------------------------------------------------------------------------
-	// HTTP-сервер (health + webhook + metrics)
+	// HTTP-сервер (health + metrics + API)
 	// ---------------------------------------------------------------------------
 	mux := http.NewServeMux()
 
@@ -452,10 +426,6 @@ func main() {
 	wsHandler := web.NewWSHandler(broker)
 	mux.Handle("/api/ws", wsHandler)
 
-	// Webhook
-	whHandler := webhook.NewHandler(st, cfg.Webhook.Secret, logger)
-	mux.Handle("/webhook", whHandler)
-
 	// ---------------------------------------------------------------------------
 	// Воркеры
 	// ---------------------------------------------------------------------------
@@ -465,10 +435,10 @@ func main() {
 	// ---------------------------------------------------------------------------
 	// Запуск HTTP
 	// ---------------------------------------------------------------------------
-	httpServer := &http.Server{Addr: cfg.Webhook.Listen, Handler: mux}
+	httpServer := &http.Server{Addr: cfg.HTTP.Listen, Handler: mux}
 
 	go func() {
-		logger.Info("http server listening", "addr", cfg.Webhook.Listen)
+		logger.Info("http server listening", "addr", cfg.HTTP.Listen)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http server error", "error", err)
 		}
@@ -493,7 +463,6 @@ func main() {
 		"imap_connected", imapOk,
 		"imap_addr", fmt.Sprintf("%s:%d", cfg.IMAP.Server, cfg.IMAP.Port),
 		"smtp_addr", fmt.Sprintf("%s:%d", cfg.SMTP.Server, cfg.SMTP.Port),
-		"plane_url", cfg.Plane.BaseURL,
 		"scan_interval", cfg.IMAP.ScanInterval,
 	)
 
@@ -519,24 +488,4 @@ func main() {
 	}
 
 	logger.Info("mailbridge stopped")
-}
-
-// loadProjectMap загружает проекты из Plane и строит карту имя → UUID.
-func loadProjectMap(client *plane.Client, logger *slog.Logger) map[string]*plane.Project {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	projects, err := client.GetProjects(ctx)
-	if err != nil {
-		logger.Warn("failed to load projects from Plane, project mapping disabled", "error", err)
-		return nil
-	}
-
-	projectMap := make(map[string]*plane.Project, len(projects))
-	for i := range projects {
-		projectMap[projects[i].Name] = &projects[i]
-		logger.Debug("mapped project", "name", projects[i].Name, "id", projects[i].ID, "identifier", projects[i].Identifier)
-	}
-
-	return projectMap
 }
