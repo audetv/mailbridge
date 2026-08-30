@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -418,7 +419,52 @@ func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) 
 	return nil
 }
 
-// GetTaskComments возвращает комментарии к задаче.
+// SetTaskCommentApproved ставит/снимает флаг утверждения на комментарии (ФАЗА 4).
+func (s *Store) SetTaskCommentApproved(ctx context.Context, id int64, approved bool) error {
+	v := 0
+	if approved {
+		v = 1
+	}
+	res, err := s.db.ExecContext(ctx, "UPDATE task_comments SET approved = ? WHERE id = ?", v, id)
+	if err != nil {
+		return fmt.Errorf("failed to set approved on comment %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrCommentNotFound
+	}
+	return nil
+}
+
+// GetTaskComment возвращает один комментарий по id (для approve, ФАЗА 4).
+func (s *Store) GetTaskComment(ctx context.Context, id int64) (*store.TaskComment, error) {
+	c := &store.TaskComment{}
+	var inboxItemID sql.NullInt64
+	var verdictJSON sql.NullString
+	var approved sql.NullInt32
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
+		 FROM task_comments WHERE id = ?`, id).
+		Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction, &c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrCommentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get comment %d: %w", id, err)
+	}
+	if inboxItemID.Valid {
+		c.InboxItemID = &inboxItemID.Int64
+	}
+	if verdictJSON.Valid {
+		c.VerdictJSON = verdictJSON.String
+	}
+	if approved.Valid {
+		v := int(approved.Int32)
+		c.Approved = &v
+	}
+	return c, nil
+}
+
+// GetTaskComments возвращает список комментариев задачи.
 func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
 	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`

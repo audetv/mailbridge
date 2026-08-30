@@ -3,6 +3,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -203,6 +204,9 @@ type InboxListResult struct {
 	PerPage int          `json:"per_page"`
 }
 
+// ErrCommentNotFound — комментарий не найден.
+var ErrCommentNotFound = errors.New("comment not found")
+
 // Store определяет интерфейс хранилища данных.
 type Store interface {
 	// Migrate выполняет миграции схемы.
@@ -271,6 +275,8 @@ type Store interface {
 	// Task Comments
 	AddTaskComment(ctx context.Context, comment *TaskComment) error
 	GetTaskComments(ctx context.Context, taskID int64) ([]*TaskComment, error)
+	GetTaskComment(ctx context.Context, id int64) (*TaskComment, error)
+	SetTaskCommentApproved(ctx context.Context, id int64, approved bool) error
 
 	// Task Attachments
 	AddTaskAttachment(ctx context.Context, att *TaskAttachment) error

@@ -12,19 +12,24 @@ import (
 )
 
 // AuthHandler обрабатывает запросы аутентификации.
+// Поддерживает двух пользователей: admin (MAILBRIDGE_AUTH_USER/PASS) и
+// агента (MAILBRIDGE_AGENT_USER, по умолчанию hermes; активен, если задан
+// MAILBRIDGE_AGENT_PASS).
 type AuthHandler struct {
-	username  string
-	password  string
-	jwtSecret []byte
+	users map[string]string // активные пользователи: username -> password
 }
 
 // NewAuthHandler создаёт новый AuthHandler.
 func NewAuthHandler() *AuthHandler {
-	return &AuthHandler{
-		username:  getEnv("MAILBRIDGE_AUTH_USER", "admin"),
-		password:  getEnv("MAILBRIDGE_AUTH_PASS", "admin"),
-		jwtSecret: []byte(getEnv("MAILBRIDGE_AUTH_SECRET", "change-me-in-production")),
+	users := map[string]string{
+		getEnv("MAILBRIDGE_AUTH_USER", "admin"): getEnv("MAILBRIDGE_AUTH_PASS", "admin"),
 	}
+	// Агент-юзер (ФАЗА 4): существует только если задан пароль.
+	agentUser := getEnv("MAILBRIDGE_AGENT_USER", "hermes")
+	if pass, ok := os.LookupEnv("MAILBRIDGE_AGENT_PASS"); ok && pass != "" {
+		users[agentUser] = pass
+	}
+	return &AuthHandler{users: users}
 }
 
 // Login обрабатывает POST /api/auth/login
@@ -44,10 +49,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userOk := subtle.ConstantTimeCompare([]byte(req.Username), []byte(h.username)) == 1
-	passOk := subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.password)) == 1
+	expectedPass, userExists := h.users[req.Username]
+	authorized := userExists && subtle.ConstantTimeCompare([]byte(req.Password), []byte(expectedPass)) == 1
 
-	if !userOk || !passOk {
+	if !authorized {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		if err := json.NewEncoder(w).Encode(map[string]string{"error": "неверный логин или пароль"}); err != nil {

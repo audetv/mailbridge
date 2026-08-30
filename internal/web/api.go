@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,11 +35,16 @@ func deref(s *string) string {
 type TaskHandler struct {
 	store  store.Store
 	broker *EventBroker
+	// adminUser — имя админа (approve только он, ФАЗА 4).
+	adminUser string
 }
 
 // NewTaskHandler создаёт новый TaskHandler.
-func NewTaskHandler(st store.Store, broker *EventBroker) *TaskHandler {
-	return &TaskHandler{store: st, broker: broker}
+func NewTaskHandler(st store.Store, broker *EventBroker, adminUser string) *TaskHandler {
+	if adminUser == "" {
+		adminUser = getEnv("MAILBRIDGE_AUTH_USER", "admin")
+	}
+	return &TaskHandler{store: st, broker: broker, adminUser: adminUser}
 }
 
 // ListInbox обрабатывает GET /api/inbox
@@ -545,9 +551,20 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Body string `json:"body"`
+		// kind: user_comment (по умолчанию) | report | reply (ФАЗА 4)
+		Kind string `json:"kind"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	switch req.Kind {
+	case "":
+		req.Kind = "user_comment"
+	case "user_comment", "report", "reply":
+	default:
+		http.Error(w, `{"error":"invalid kind: expected user_comment|report|reply"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -561,6 +578,7 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 		Author:    username,
 		Body:      req.Body,
 		Direction: "out",
+		Kind:      req.Kind,
 	}
 
 	if err := h.store.AddTaskComment(r.Context(), comment); err != nil {
@@ -570,6 +588,70 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 			log.Printf("encode error: %v", err)
 		}
 		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"comment": comment}); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+}
+
+// ApproveComment обрабатывает PATCH /api/comments/{id}/approve (ФАЗА 4, шаг 19).
+// Только admin (на этапе — пользователь MAILBRIDGE_AUTH_USER), только kind=reply.
+// Idempotent: повторный approve не ошибка. WS: comment_approved.
+func (h *TaskHandler) ApproveComment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	username := extractUserFromToken(r)
+	if username == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if username != h.adminUser {
+		writeError(w, http.StatusForbidden, "approve available only to admin")
+		return
+	}
+
+	comment, err := h.store.GetTaskComment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCommentNotFound) {
+			writeError(w, http.StatusNotFound, "comment not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if comment.Kind != "reply" {
+		writeError(w, http.StatusBadRequest, "only comments with kind=reply can be approved")
+		return
+	}
+
+	one := 1
+	if comment.Approved == nil || *comment.Approved != 1 {
+		if err := h.store.SetTaskCommentApproved(r.Context(), id, true); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		comment.Approved = &one
+	}
+
+	if h.broker != nil {
+		h.broker.Publish(WSEvent{
+			Type:    "comment_approved",
+			TaskID:  comment.TaskID,
+			Message: fmt.Sprintf("Комментарий #%d утверждён", id),
+			Data:    comment,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

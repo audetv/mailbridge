@@ -347,7 +347,7 @@ func main() {
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
-	taskHandler := web.NewTaskHandler(st, broker)
+	taskHandler := web.NewTaskHandler(st, broker, "")
 	// Projects API
 	projectHandler := web.NewProjectHandler(st, broker)
 
@@ -441,6 +441,8 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/tasks/{id}/reply", taskHandler.ReplyTask)
+	// Утверждение ответа пользователю (ФАЗА 4) — только admin
+	mux.HandleFunc("/api/comments/{id}/approve", taskHandler.ApproveComment)
 	// Помечаем задачу прочитанной
 	mux.HandleFunc("/api/tasks/{id}/mark-read", taskHandler.MarkRead)
 	// Вложения

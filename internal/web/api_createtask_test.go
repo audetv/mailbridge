@@ -30,7 +30,7 @@ func newCreateTaskEnv(t *testing.T) *createTaskEnv {
 		t.Fatalf("Migrate: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return &createTaskEnv{h: web.NewTaskHandler(st, web.NewEventBroker()), st: st}
+	return &createTaskEnv{h: web.NewTaskHandler(st, web.NewEventBroker(), "admin"), st: st}
 }
 
 func (e *createTaskEnv) mkProject(t *testing.T, name string) *store.Project {
