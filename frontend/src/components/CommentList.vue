@@ -31,7 +31,8 @@
           </button>
         </span>
       </div>
-      <div class="comment-body">
+      <div v-if="isMd(comment)" class="comment-body md" v-html="renderMarkdown(comment)"></div>
+      <div v-else class="comment-body">
         <template v-for="(seg, i) in linkify(comment.body)" :key="i">
           <a v-if="seg.href" :href="seg.href" target="_blank" rel="noopener">{{ seg.text }}</a>
           <template v-else>{{ seg.text }}</template>
@@ -74,6 +75,29 @@ import apiClient from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { copyComment } from '@/utils/copy-comment'
 import { linkify } from '@/utils/linkify'
+import { renderMd, looksLikeMd } from '@/utils/render-md'
+
+// Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
+// plain-комментарии — прежний текстовый путь с linkify.
+// Кэш по id+body: body меняется редких (новый коммент) — не пересчитываем.
+const mdRenderCache = new Map()
+function isMd(comment) {
+  return looksLikeMd(comment?.body ?? '')
+}
+function renderMarkdown(comment) {
+  const body = comment?.body ?? ''
+  const key = comment?.id ?? -1
+  const cached = mdRenderCache.get(key)
+  if (cached && cached.body === body) return cached.html
+  const html = renderMd(body)
+  mdRenderCache.set(key, { body, html })
+  // простой bound: не копим кэш бесконечно
+  if (mdRenderCache.size > 200) {
+    const first = mdRenderCache.keys().next().value
+    mdRenderCache.delete(first)
+  }
+  return html
+}
 
 const props = defineProps({
   comments: { type: Array, default: () => [] }
@@ -313,6 +337,106 @@ function formatDate(dateStr) {
     color: var(--mb-link, #2563eb);
     text-decoration: underline;
     word-break: break-all;
+  }
+}
+
+/* Шаг 3b: MD-рендер (v-html, sanitize'нутый). Тег-специфичные отступы
+   заменяют ручной pre-wrap; ссылки — те же стили, что в plain. */
+.comment-body.md {
+  white-space: normal;
+
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 0.9em 0 0.4em;
+    color: var(--mb-text);
+  }
+  h1 { font-size: 1.35rem; }
+  h2 { font-size: 1.2rem; border-bottom: 1px solid var(--mb-border); padding-bottom: 0.25em; }
+  h3 { font-size: 1.08rem; }
+  h4, h5, h6 { font-size: 1rem; }
+
+  p { margin: 0.45em 0; }
+
+  ul, ol {
+    margin: 0.45em 0;
+    padding-left: 1.4em;
+  }
+  li { margin: 0.2em 0; }
+  li > ul, li > ol { margin: 0.2em 0; }
+
+  /* GFM task-lists: checkbox в li — прижаты к тексту */
+  li > input[type='checkbox'] {
+    margin: 0 0.4em 0 0;
+    vertical-align: -0.1em;
+    accent-color: var(--mb-primary);
+  }
+  li.task-list-item { list-style: none; margin-left: -1.2em; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--mb-surface-hover, rgba(0, 0, 0, 0.06));
+    border-radius: 0.3em;
+    padding: 0.1em 0.35em;
+  }
+  pre {
+    background: var(--mb-surface-hover, rgba(0, 0, 0, 0.06));
+    border: 1px solid var(--mb-border);
+    border-radius: 0.5em;
+    padding: 0.7em 0.9em;
+    overflow-x: auto;
+    margin: 0.5em 0;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 0.85em;
+    white-space: pre;
+    display: block;
+  }
+
+  blockquote {
+    border-left: 3px solid var(--mb-border);
+    margin: 0.5em 0;
+    padding: 0.1em 0 0.1em 0.9em;
+    color: var(--mb-text-muted);
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--mb-border);
+    margin: 1em 0;
+  }
+
+  table {
+    border-collapse: collapse;
+    margin: 0.5em 0;
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+  th, td {
+    border: 1px solid var(--mb-border);
+    padding: 0.3em 0.6em;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--mb-surface-hover, rgba(0,0,0,0.06)); font-weight: 600; }
+
+  a {
+    color: var(--mb-link, #2563eb);
+    text-decoration: underline;
+    word-break: break-all;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.4em;
   }
 }
 

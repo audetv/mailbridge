@@ -9,7 +9,7 @@
 
 ## Статус (курсор — читать первым)
 
-> **Текущий шаг: 3b (рендер MD в UI — по решению владельца после шага 3) → затем 4** | Дата: 2026-09-13 | Последний закрывающий коммит: step 3 — см. ниже (ветка `feat/v0.23`, один PR → 0.23.0)
+> **Текущий шаг: 4 (SLA-метрики?) — 3b завершён (рендер MD в карточке, коммит в `feat/v0.23`)** | Дата: 2026-09-13 | Один PR ветки → 0.23.0 (по решению владельца: 0+1 отдельно, 2+3+3b одним)
 > Отмечаться здесь при каждом закрытом шаге (правило 9).
 
 ## Правила работы (для агента) — НЕ СКИДЫВАТЬ
@@ -110,7 +110,12 @@ store), e2e 14/14 (3 новых — `tests-e2e/websocket-reconnect.spec.js` че
 5. доки: api.md — без изменений (это UI-фича); AGENTS.md/UI-гид (если есть) — коротко.
 
 **Приёмка:** один клик → clipboard с чистым MD; структура сохранена; цвета/фон — нет.
-**Коммит:** `step 3 (v0.23): UI — copy reply as MD/TXT (paste-friendly)`.
+**Коммит:** `step 3 (v0.23): UI — copy any comment as clean text / verbatim MD (paste-friendly)`.
+
+### [x] Шаг 3b — UI: рендер Markdown в карточке комментария
+
+**Закрыт:** 2026-09-13, коммит в `feat/v0.23`. **Скоп (решение владельца, 2026-09-13):** MD-комментарии — как форматированный HTML; plain-комментарии — как прежде (текст + ссылки), без `v-html`. Что сделано: `frontend/src/utils/render-md.js` — `marked` (GFM, `breaks`) + `DOMPurify` (allowlist: `<script>`/`on*`/`javascript:`/`data:` не проходят; `<input>` только `type=checkbox disabled` для task-lists; `<img>` — http(s)/относительные; хук `afterSanitizeAttributes`: `<a>` только http(s)/mailto + `target="_blank" rel="noopener noreferrer"`; автолинкинг голых URL/`www.` делает сам `marked` с корректным отсечением хвостовой пунктуации); `looksLikeMd(body)` — детектор (11 MD из 191 корпуса), plain-пути не трогаются; `CommentList.vue` — условный рендер: MD → `v-html="renderMarkdown(comment)"` + CSS-тема `.comment-body.md` (заголовки, списки, code, task-lists, ссылки), plain → прежний `linkify` (text-ноды, XSS-поверхности нет). Тесты: `tests/utils/render-md.spec.js` (18: заголовки/жирный/ссылки/task-lists/code/hr/цитаты + XSS: script/onerror/javascript:/input/iframe), `tests/utils/detect-corpus.spec.js` (фикстура `fixtures-corpus.json` — все 191 body: детектор без исключений, MD-отчёты → MD, plain (задача 61) → false), e2e `comment-copy.spec.js` (задача 38: `strong`/`ul`/`li` в DOM; задача 87: plain-комментарий БЕЗ `.md`, ссылки как прежде; задача 49: заголовки `h1-h3`, checkbox'и task-lists, `code`, `hr`, без литеральных `**`/`- [ ]`). Полное CI-состояние: unit 103/103, eslint, e2e 25/25.
+**Коммит:** `step 3b (v0.23): UI — render Markdown in comment card (marked + DOMPurify, plain path untouched)`.
 
 ### [ ] Шаг 4 — UI: Bulk actions (массовые действия)
 
