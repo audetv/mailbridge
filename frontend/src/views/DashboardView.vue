@@ -196,6 +196,14 @@ watch(
         fetchActiveCount()
         toast.add({ severity: 'warn', summary: latest.message, life: 5000 })
         break
+      case 'batch_update': {
+        // Шаг 4 (v0.23): один пакетный WS на bulk-операцию (не N событий).
+        // Данные — список затронутых task ID; перетягиваем список.
+        store.fetchTasks()
+        fetchActiveCount()
+        toast.add({ severity: 'success', summary: latest.message, life: 3000 })
+        break
+      }
       case 'inbox_created':
         inboxStore.fetchItems()
         inboxStore.fetchUnreadCount()

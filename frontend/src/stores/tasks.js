@@ -132,6 +132,20 @@ export const useTasksStore = defineStore('tasks', () => {
     return data
   }
 
+  // Bulk actions (v0.23, шаг 4). PATCH /api/tasks {ids, changes:{status?, project?}}.
+  // Возвращает {count, ...}. Локально применяет изменения к листу (WS-ресинк
+  // подтянет остальное); выбор снимает TaskTable — остаёмся на листе.
+  async function bulkUpdate(ids, changes) {
+    const { data } = await apiClient.patch('/tasks', { ids, changes })
+    const idsSet = new Set(ids)
+    for (const t of tasks.value) {
+      if (!idsSet.has(t.id)) continue
+      if (changes.status) t.status = changes.status
+      if (changes.project) t.project = changes.project
+    }
+    return data
+  }
+
   return {
     tasks,
     total,
@@ -153,6 +167,7 @@ export const useTasksStore = defineStore('tasks', () => {
     setStatuses,
     setEpic,
     fetchInboxCount,
-    fetchTaskInbox
+    fetchTaskInbox,
+    bulkUpdate
   }
 })

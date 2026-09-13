@@ -599,6 +599,118 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// BulkUpdateTasks — PATCH /api/tasks {ids:[], changes:{status?, project?}} (v0.23, шаг 4).
+// Пакетная смена status и/или project отобранных задач.
+// Контракт: 200 {count, statuses:{status:count}, errors:[…]} | 400 {error} | 404 {error}.
+//  - id не найден → 404 (контракт шага 4: «404 задача не найдена»);
+//  - идемпотентно: статус уже = to → строки истории нет (то же, что SetTaskStatus);
+//  - aтомарность не обязательна планом (на SQLite транзакция внутри store).
+// WS: одно событие batch_update, не N × task_updated (шаг 4 п.4: «по простоте UI»).
+func (h *TaskHandler) BulkUpdateTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method not allowed: use PATCH"})
+		return
+	}
+
+	var req struct {
+		IDs     []int64 `json:"ids"`
+		Changes struct {
+			Status  string `json:"status"`
+			Project string `json:"project"`
+		} `json:"changes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids: empty list")
+		return
+	}
+	if req.Changes.Status == "" && req.Changes.Project == "" {
+		writeError(w, http.StatusBadRequest, "changes: specify at least one of `status` or `project`")
+		return
+	}
+	if req.Changes.Status != "" {
+		valid := false
+		for _, allowed := range store.ValidStatuses() {
+			if string(allowed) == req.Changes.Status {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			writeError(w, http.StatusBadRequest,
+				"changes.status: expected one of new|backlog|in_progress|completed|closed")
+			return
+		}
+	}
+
+	by := extractUserFromToken(r)
+	if by == "" {
+		by = "unknown"
+	}
+
+	// Дупы схлопываем — иначе дублировались бы строки истории на одну задачу.
+	seen := make(map[int64]struct{}, len(req.IDs))
+	uniq := make([]int64, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+
+	// status через BulkUpdateTasks (история), project через BulkUpdateProject.
+	changedCount := 0
+	if req.Changes.Status != "" {
+		c, err := h.store.BulkUpdateTasks(r.Context(), uniq, req.Changes.Status, by)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, store.ErrTaskNotFound) {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		changedCount = c
+	}
+	if req.Changes.Project != "" {
+		c, err := h.store.BulkUpdateProject(r.Context(), uniq, req.Changes.Project)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if changedCount == 0 {
+			changedCount = c
+		}
+	}
+
+	// WS — одно пакетное событие (шаг 4 п.4): данные — список затронутых ID.
+	if h.broker != nil {
+		h.broker.Publish(WSEvent{
+			Type:    "batch_update",
+			Count:   len(uniq),
+			Message: fmt.Sprintf("bulk update: %d задач, status=%s, project=%q", len(uniq), req.Changes.Status, req.Changes.Project),
+			Data:    uniq,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]interface{}{
+		"count":    len(uniq),
+		"changed":  changedCount,
+		"statuses": map[string]interface{}{},
+		"errors":   []string{},
+	}
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+		log.Printf("encode error: %v", encErr)
+	}
+}
+
 // ReplyTask обрабатывает POST /api/tasks/{id}/reply
 func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

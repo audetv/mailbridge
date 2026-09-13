@@ -394,11 +394,15 @@ func main() {
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
 	mux.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPost:
 			taskHandler.CreateTask(w, r)
-			return
+		case http.MethodPatch:
+			// Bulk — пакетная смена status/project отобранных задач (v0.23, шаг 4).
+			taskHandler.BulkUpdateTasks(w, r)
+		default:
+			taskHandler.ListTasks(w, r)
 		}
-		taskHandler.ListTasks(w, r)
 	})
 	mux.HandleFunc("/api/tasks/{id}/history", taskHandler.GetTaskStatusHistory)
 	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)

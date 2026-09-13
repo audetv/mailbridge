@@ -284,6 +284,14 @@ type Store interface {
 	// строку в task_status_history (from_status читается из текущего
 	// состояния; при совпадении с текущим строки нет).
 	SetTaskStatus(ctx context.Context, taskID int64, toStatus, by string) error
+	// BulkUpdateTasks — пакетная смена статуса N задач (v0.23, шаг 4).
+	// Поведение по строкам: идентично циклу SetTaskStatus (история from/to/by,
+	// «нет строки при совпадении с текущим»). Атомарно: либо все, либо откат.
+	// Возвращает число затронутых задач (дупы в taskIDs схлопнуты, порядок неважен).
+	BulkUpdateTasks(ctx context.Context, taskIDs []int64, toStatus, by string) (touched int, err error)
+	// BulkUpdateProject — пакетная смена проекта N задач (v0.23, шаг 4, «К проекту X»).
+	// Возвращает число затронутых задач (дупы схлопнуты).
+	BulkUpdateProject(ctx context.Context, taskIDs []int64, project string) (touched int, err error)
 	// GetTaskStatusHistory возвращает хронологию статусов задачи (по at asc).
 	GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*TaskStatusHistory, error)
 

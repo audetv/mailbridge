@@ -448,6 +448,113 @@ func (s *Store) SetTaskStatus(ctx context.Context, taskID int64, toStatus, by st
 	return tx.Commit()
 }
 
+// BulkUpdateTasks — пакетная смена статуса N задач (v0.23, шаг 4).
+// Поведение по строкам идентично циклу SetTaskStatus:
+//   - одна транзакция на все строки (атомарно: либо все, либо ничего);
+//   - при совпадении from == to строки в истории нет;
+//   - dups в taskIDs схлопываются (одна строка истории на задачу, а не N).
+func (s *Store) BulkUpdateTasks(ctx context.Context, taskIDs []int64, toStatus, by string) (int, error) {
+	// Дупы схлопываем: одна строка истории на задачу, а не N.
+	seen := make(map[int64]struct{}, len(taskIDs))
+	uniq := make([]int64, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+
+	// from_status каждого элемента — до UPDATE (как в SetTaskStatus).
+	type rowChange struct {
+		id         int64
+		fromStatus string
+	}
+	changes := make([]rowChange, 0, len(uniq))
+	for _, id := range uniq {
+		var fromStatus string
+		err := s.db.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id = ?`, id).Scan(&fromStatus)
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("task %d: %w", id, store.ErrTaskNotFound)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("failed to read task %d status: %w", id, err)
+		}
+		changes = append(changes, rowChange{id: id, fromStatus: fromStatus})
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, c := range changes {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			toStatus, c.id); err != nil {
+			return 0, fmt.Errorf("failed to update task %d status: %w", c.id, err)
+		}
+		if c.fromStatus == toStatus {
+			continue // совпадение → строки истории нет (как SetTaskStatus)
+		}
+		var fromInterface any
+		if c.fromStatus == "" {
+			fromInterface = nil
+		} else {
+			fromInterface = c.fromStatus
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO task_status_history (task_id, from_status, to_status, by) VALUES (?, ?, ?, ?)`,
+			c.id, fromInterface, toStatus, by); err != nil {
+			return 0, fmt.Errorf("failed to write status history for task %d: %w", c.id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit bulk status update: %w", err)
+	}
+	return len(uniq), nil
+}
+
+// BulkUpdateProject — пакетная смена проекта N задач (v0.23, шаг 4, «К проекту X»).
+// Возвращает число затронутых задач (дупы схлопнуты). История статусов не меняется.
+func (s *Store) BulkUpdateProject(ctx context.Context, taskIDs []int64, project string) (int, error) {
+	seen := make(map[int64]struct{}, len(taskIDs))
+	uniq := make([]int64, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+
+	if len(uniq) == 0 {
+		return 0, nil
+	}
+
+	// Плейсхолдеры: UPDATE tasks SET project = ? WHERE id IN (?,?,...)
+	placeholders := make([]string, len(uniq))
+	args := make([]any, 0, len(uniq)+1)
+	args = append(args, project, time.Now())
+	for i, id := range uniq {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE tasks SET project = ?, updated_at = ? WHERE id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to bulk update project: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read affected rows: %w", err)
+	}
+	return int(affected), nil
+}
+
 // GetTaskStatusHistory возвращает хронологию статусов задачи, отсортированную по at asc.
 func (s *Store) GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*store.TaskStatusHistory, error) {
 	rows, err := s.db.QueryContext(ctx, `
