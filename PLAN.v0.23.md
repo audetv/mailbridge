@@ -9,7 +9,7 @@
 
 ## Статус (курсор — читать первым)
 
-> **Текущий шаг: 2** | Дата: 2026-09-13 | Последний commit: `6b6d8e2` (step 1, PR #20)
+> **Текущий шаг: 3** | Дата: 2026-09-13 | Последний commit: (step 2 — см. ниже)
 > Отмечаться здесь при каждом закрытом шаге (правило 9).
 
 ## Правила работы (для агента) — НЕ СКИДЫВАТЬ
@@ -78,7 +78,10 @@ store), e2e 14/14 (3 новых — `tests-e2e/websocket-reconnect.spec.js` че
 
 ## Этап 2 — v0.23.0 (малые фичи + метрика)
 
-### [ ] Шаг 2 — Миграция `task_status_history` (фундамент всех измерений)
+### [x] Шаг 2 — Миграция `task_status_history` (фундамент всех измерений)
+
+**Закрыт: 2026-09-13, ветка `feat/v0.23` (коммит `step 2 (v0.23): ...`).**
+Что сделано: миграция `task_status_history(id PK, task_id FK CASCADE, from_status NULL, to_status, by, created_at)` + индексы; единственный путь смены статуса — `Store.SetTaskStatus` (транзакция: SELECT for update → UPDATE → INSERT при `from != to`; идемпотентен для `from == to`); API `PATCH /api/tasks/{id}` — `status` только через `SetTaskStatus` (by из JWT); AI-пути (update/complete verдикт) — `by=ai`; `GET /api/tasks/{id}/history` (хронология, `[]` если нет переходов); доки `docs/data-model.md` + `docs/api.md`; юниты: `TestSetTaskStatus_Transitions/IdempotentRepeat/NotFound/UpdateStillAcceptsOthers`; e2e: `task-history-smoke.spec.js` (свой task на каждый прогон, workflow-кнопка → строка в истории `by=admin`, `from_status=new`); 16/16 e2e, 60/60 vitest, go vet/test/build — green.
 
 **Почему сейчас:** без неё не поднять ни SLA, ни «цикл задач», ни отчёт по живым данным (owner-запрос). Одна маленькая миграция открывает всё.
 

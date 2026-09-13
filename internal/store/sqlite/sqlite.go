@@ -402,6 +402,78 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, updates map[string]int
 	return nil
 }
 
+// SetTaskStatus — единственный путь смены статуса задачи:
+// в транзакции читает текущий статус (для истории), обновляет статус
+// и пишет строку в task_status_history. Идемпотентен для «статус не изменился»
+// (строка не пишется, ошибка не возвращается).
+func (s *Store) SetTaskStatus(ctx context.Context, taskID int64, toStatus, by string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Текущий статус: пустая строка — задача не найдена (внешний FK сработал бы
+	// при UPDATE, но проверяем явно ради читаемой ошибки/пустой истории).
+	var fromStatus string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM tasks WHERE id = ?", taskID).Scan(&fromStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("task %d: %w", taskID, store.ErrTaskNotFound)
+		}
+		return fmt.Errorf("failed to read task status: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", toStatus, time.Now(), taskID); err != nil {
+		return fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	// История: строка пишется только при реальном переходе (смена статуса,
+	// включая первый — from_status NULL). Повторный write с тем же статусом
+	// строки не даёт (идемпотентность: batch/bulk не заваливают историю).
+	if fromStatus != toStatus {
+		var fromInterface interface{}
+		if fromStatus == "" {
+			fromInterface = nil
+		} else {
+			fromInterface = fromStatus
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO task_status_history (task_id, from_status, to_status, by) VALUES (?, ?, ?, ?)`,
+			taskID, fromInterface, toStatus, by); err != nil {
+			return fmt.Errorf("failed to write status history: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetTaskStatusHistory возвращает хронологию статусов задачи, отсортированную по at asc.
+func (s *Store) GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*store.TaskStatusHistory, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, task_id, from_status, to_status, by, at
+		FROM task_status_history
+		WHERE task_id = ?
+		ORDER BY at ASC, id ASC`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query status history: %w", err)
+	}
+	defer rows.Close()
+
+	history := make([]*store.TaskStatusHistory, 0, 4)
+	for rows.Next() {
+		var h store.TaskStatusHistory
+		if err := rows.Scan(&h.ID, &h.TaskID, &h.FromStatus, &h.ToStatus, &h.By, &h.At); err != nil {
+			return nil, fmt.Errorf("failed to scan status history: %w", err)
+		}
+		history = append(history, &h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return history, nil
+}
+
 // AddTaskComment добавляет комментарий к задаче.
 func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) error {
 	query := `INSERT INTO task_comments (task_id, author, body, direction, kind, inbox_item_id, verdict_json) 

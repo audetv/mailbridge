@@ -400,6 +400,7 @@ func main() {
 		}
 		taskHandler.ListTasks(w, r)
 	})
+	mux.HandleFunc("/api/tasks/{id}/history", taskHandler.GetTaskStatusHistory)
 	mux.HandleFunc("/api/tasks/{id}/attachments", taskHandler.GetTaskAttachments)
 	mux.HandleFunc("/api/tasks/{id}/attachments/{attId}", taskHandler.UnlinkTaskAttachment)
 	mux.HandleFunc("/api/tasks/{id}/inbox", taskHandler.GetTaskInboxItems)

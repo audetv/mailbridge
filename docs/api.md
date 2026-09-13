@@ -142,6 +142,21 @@ Body — допустимые поля:
 {"project": "Отель", "status": "in_progress", "priority": "high", "type": "bug", "assignee": "Иванов"}
 ```
 
+`status` (статус) — единственный путь смены: атомарно обновляет `tasks.status` и при реальном переходе (`from != to`) пишет строку в `task_status_history` с `by` = имя текущего пользователя (из JWT). → обновлённая `task`.
+
+### `GET /api/tasks/{id}/history` (v0.23)
+
+Хронология переходов статуса задачи: `[]` если переходов ещё не было.
+
+```json
+{"history": [
+  {"id":1,"task_id":370,"from_status":null,"to_status":"in_progress","by":"admin","created_at":"2026-09-13T17:50:00.000Z"},
+  {"id":2,"task_id":370,"from_status":"in_progress","to_status":"completed","by":"ai","created_at":"2026-09-13T18:00:12.000Z"}
+]}
+```
+
+`by` — имя пользователя из JWT либо строка `ai` (AI-вердикт, v0.23). Идентичный повторный `PATCH` (тот же `status`) строку не пишет.
+
 ### `POST /api/tasks/{id}/reply`
 
 Body: `{"body": "Текст ответа", "kind": "user_comment"}` — `kind` опционален: `user_comment` (по умолчанию) | `report` (внутренний отчёт) | `reply` (черновик ответа пользователю). Черновик НЕ отправляется — только в историю задачи (Срез Plane, v0.22.0). → `{"comment": {...}}`

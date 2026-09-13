@@ -449,6 +449,40 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, task)
 }
 
+// GetTaskStatusHistory обрабатывает GET /api/tasks/{id}/history
+// — хронология статусов задачи (v0.23, шаг 2).
+func (h *TaskHandler) GetTaskStatusHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "invalid id"}); err != nil {
+			return
+		}
+		return
+	}
+
+	history, err := h.store.GetTaskStatusHistory(r.Context(), id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); encErr != nil {
+			log.Printf("encode error: %v", encErr)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{"history": history}); encErr != nil {
+		log.Printf("encode error: %v", encErr)
+	}
+}
+
 // GetTask обрабатывает GET /api/tasks/{id}
 func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -513,14 +547,24 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Разрешённые поля для обновления
+	// Разрешённые поля для обновления.
+	// status — отдельно, через SetTaskStatus: единственный путь смены статуса,
+	// атомарно обновляет статус и пишет строку в task_status_history
+	// (v0.23, шаг 2). Обновлять его здесь повторно нельзя — история затеряется.
 	allowedFields := map[string]bool{
-		"project": true, "status": true, "assignee": true,
+		"project": true, "assignee": true,
 		"type": true, "priority": true, "epic_id": true,
 	}
 
 	filtered := make(map[string]interface{})
+	newStatus := ""
 	for k, v := range updates {
+		if k == "status" {
+			if s, ok := v.(string); ok && s != "" {
+				newStatus = s
+			}
+			continue
+		}
 		if allowedFields[k] {
 			filtered[k] = v
 		}
@@ -533,6 +577,19 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			log.Printf("encode error: %v", err)
 		}
 		return
+	}
+
+	// Смена статуса → SetTaskStatus: обновит статус + напишет в историю
+	// (by = текущий пользователь из токена: admin/hermes).
+	if newStatus != "" {
+		if err := h.store.SetTaskStatus(r.Context(), id, newStatus, extractUserFromToken(r)); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				log.Printf("encode error: %v", err)
+			}
+			return
+		}
 	}
 
 	task, _ := h.store.GetTask(r.Context(), id)

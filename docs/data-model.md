@@ -136,6 +136,27 @@ SQLite (WAL-режим), файл `data/mailbridge.db`. Миграции в `int
 | username | TEXT PK (часть) | Кто прочитал |
 | read_at | TIMESTAMP | |
 
+### task_status_history — история статусов задачи (v0.23)
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | INTEGER PK | |
+| task_id | INTEGER FK → tasks(id) ON DELETE CASCADE | |
+| from_status | TEXT NULL | `NULL` при первом записи (задача создана) |
+| to_status | TEXT NOT NULL | new, backlog, in_progress, completed, closed |
+| by | TEXT (NULL-по-умолчанию, 'ai' для AI-путей) | Кто сменил: имя пользователя / 'ai' |
+| created_at | TIMESTAMP | Момент перехода |
+
+Индексы: `task_id`, `created_at`.
+
+**Правило записи:** единственный путь смены статуса — `Store.SetTaskStatus`
+(транзакция: UPDATE tasks.status + INSERT строка при `from != to`).
+Пишут: UI/workflow-кнопки (`PATCH /api/tasks/{id}`, by=имя из JWT),
+AI-вердикты (by='ai'). Создание задачи строки **не** пишет — `from_status`
+первого перехода уже несёт стартовое значение `new`; дублирующий
+(операционный) `new → new` не пишется. Заполнение истории — с v0.23;
+старые переходы не восстанавливаются.
+
 ### Связующие таблицы
 
 - **inbox_attachments** — inbox_item_id ↔ attachment_id
@@ -148,6 +169,8 @@ SQLite (WAL-режим), файл `data/mailbridge.db`. Миграции в `int
 ```
 projects ── epics ──┐
                     ├── tasks ── task_attachments ── attachments
+                    │        │
+                    │        └── task_status_history (v0.23)
 inbox_items ──┬── inbox_attachments ── attachments
               └── task_inbox_items
                                           └── task_comments ── comment_attachments ── attachments

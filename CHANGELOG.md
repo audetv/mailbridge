@@ -1,8 +1,13 @@
 # Changelog
 
-## [Unreleased] (v0.22.1)
+## [Unreleased] (v0.23.0)
 
-### Fixed
+### Added
+- **История статусов задачи (v0.23, шаг 2):** таблица `task_status_history` (task_id, from_status NULL при создании, to_status, by, created_at); единственный путь смены статуса — `Store.SetTaskStatus` (транзакция: UPDATE + строка истории при реальном переходе); пишут UI/workflow-кнопки (`by` из JWT) и AI-вердикты (`by=ai`); `GET /api/tasks/{id}/history` (хронология, `[]` если нет переходов); старые переходы не восстанавливаются
+
+### v0.22.x fixes (hotfix-этап, без промежуточной версии)
+
+#### Fixed
 - Надёжность WebSocket (симптом: «данные приходят не сразу, пришлaл письмо заново»): реконнект с backoff 3с/10с/30с, форс-реконнект при возврате вкладки из фона и из bfcache; после восстановления соединения экраны (Дашборд, Задача, Лента) перетягивают данные БЕЗ F5; индикатор связи = подтверждение сервера (фрейм `connected` после auth), а не просто open сокета
 - Вложения терялись при ручном создании задачи из письма: `POST /api/inbox/{id}/task` (`CreateTaskFromInbox`) и AI update/complete-пути (`completed_by`/`updated_by`) больше не создают задачу без вложений — `CopyInboxAttachmentsToTask` (идемпотентно, `INSERT OR IGNORE`); backfill исторических потерь — `data-fix/v0.22.1-backfill-task-attachments.sql` (запустить на проде при деплое)
 

@@ -198,6 +198,20 @@ type InboxListResult struct {
 // ErrCommentNotFound — комментарий не найден.
 var ErrCommentNotFound = errors.New("comment not found")
 
+// ErrTaskNotFound — задача не найдена.
+var ErrTaskNotFound = errors.New("task not found")
+
+// TaskStatusHistory — строка истории статусов задачи (v0.23, шаг 2).
+// FromStatus — NULL при первом записи (задача только создана).
+type TaskStatusHistory struct {
+	ID         int64     `json:"id"`
+	TaskID     int64     `json:"task_id"`
+	FromStatus *string   `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	By         string    `json:"by"`
+	At         time.Time `json:"at"`
+}
+
 // Store определяет интерфейс хранилища данных.
 type Store interface {
 	// Migrate выполняет миграции схемы.
@@ -265,6 +279,13 @@ type Store interface {
 	GetTaskByMessageID(ctx context.Context, messageID string) (*Task, error)
 	ListTasks(ctx context.Context, filter *TaskFilter) (*TaskListResult, error)
 	UpdateTask(ctx context.Context, id int64, updates map[string]interface{}) error
+	// SetTaskStatus — единственный путь смены статуса задачи:
+	// транзакционно обновляет tasks.status и при реальном переходе пишет
+	// строку в task_status_history (from_status читается из текущего
+	// состояния; при совпадении с текущим строки нет).
+	SetTaskStatus(ctx context.Context, taskID int64, toStatus, by string) error
+	// GetTaskStatusHistory возвращает хронологию статусов задачи (по at asc).
+	GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*TaskStatusHistory, error)
 
 	// Task Comments
 	AddTaskComment(ctx context.Context, comment *TaskComment) error

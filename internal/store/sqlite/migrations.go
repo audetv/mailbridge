@@ -184,6 +184,19 @@ func (s *Store) Migrate(ctx context.Context) error {
 			attachment_id INTEGER NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
 			PRIMARY KEY (comment_id, attachment_id)
 		)`,
+
+		// История статусов задач (v0.23, шаг 2): хронология new→…→closed;
+		// фундамент для SLA/«цикл задач»/отчётов, см. PLAN.v0.23.md.
+		`CREATE TABLE IF NOT EXISTS task_status_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			from_status TEXT,
+			to_status TEXT NOT NULL,
+			by TEXT NOT NULL DEFAULT '',
+			at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_status_history_task_id ON task_status_history(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_status_history_at ON task_status_history(at)`,
 	}
 
 	for _, m := range migrations {
