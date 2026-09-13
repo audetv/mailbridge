@@ -13,7 +13,23 @@
           <span v-if="kindLabel(comment)" class="kind-badge">{{ kindLabel(comment) }}</span>
           <span v-if="isApproved(comment)" class="approved-badge">Утверждён</span>
         </span>
-        <span class="date">{{ formatDate(comment.created_at) }}</span>
+        <span class="date">
+          {{ formatDate(comment.created_at) }}
+          <button type="button" class="copy-btn"
+                  title="Копировать (чистый текст, без символов Markdown)"
+                  :aria-label="'Копировать чистый текст комментария ' + comment.id"
+                  @click="copyBody(comment, 'text')">
+            <i v-if="copyState(comment.id) === 'text'" class="pi pi-check"></i>
+            <i v-else class="pi pi-clipboard"></i>
+          </button>
+          <button type="button" class="copy-btn"
+                  title="Копировать как Markdown (дословно: символы ** ## - сохраняются)"
+                  :aria-label="'Копировать Markdown комментария ' + comment.id"
+                  @click="copyBody(comment, 'md')">
+            <span v-if="copyState(comment.id) === 'md'" class="copy-done">✓ MD</span>
+            <template v-else>MD</template>
+          </button>
+        </span>
       </div>
       <div class="comment-body">{{ comment.body }}</div>
 
@@ -51,6 +67,7 @@ import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import apiClient from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { copyComment } from '@/utils/copy-comment'
 
 const props = defineProps({
   comments: { type: Array, default: () => [] }
@@ -117,6 +134,25 @@ watch(
   },
   { immediate: true }
 )
+
+// Копирование тела комментария (step 3 v0.23):
+// 'text' = чистый текст без MD-символов (по умолчанию), 'md' = дословно.
+const copyStates = ref({}) // { [comment.id]: 'text'|'md'|undefined }
+const copyTimers = {}
+function copyState(commentId) {
+  return copyStates.value[commentId]
+}
+async function copyBody(comment, mode) {
+  const body = comment?.body ?? ''
+  if (!body.trim()) return
+  const { ok } = await copyComment(body, mode)
+  if (!ok) return
+  copyStates.value = { ...copyStates.value, [comment.id]: mode }
+  clearTimeout(copyTimers[comment.id])
+  copyTimers[comment.id] = setTimeout(() => {
+    copyStates.value = { ...copyStates.value, [comment.id]: undefined }
+  }, 2000)
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
@@ -232,6 +268,35 @@ function formatDate(dateStr) {
 .date {
   font-size: 0.9rem;
   color: var(--mb-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--mb-border);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--mb-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copy-btn:hover {
+  border-color: var(--mb-primary);
+  color: var(--mb-primary);
+}
+.copy-btn .pi {
+  font-size: 0.8rem;
+}
+.copy-done {
+  color: #1a7f37;
+  font-weight: 600;
 }
 
 .comment-body {
