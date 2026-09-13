@@ -1,5 +1,5 @@
 <template>
-  <div data-testid="task-table">
+  <div data-testid="task-table" @click.capture="onSelectionZoneClick">
     <DataTable
       :value="store.tasks"
       :loading="store.loading"
@@ -10,7 +10,7 @@
       lazy
       dataKey="id"
       selectionMode="multiple"
-      v-model:selection="selectedTasks"
+      v-model:selection="store.selectedTasks"
       stripedRows
       :rowClass="rowClass"
       @row-click="onRowClick"
@@ -29,8 +29,8 @@
           <label class="bulk-toolbar-label" for="bulk-select-all">
             Выбрать все на странице
           </label>
-          <span v-if="selectedTasks.length" class="bulk-count" data-testid="bulk-count">
-            Выбрано: {{ selectedTasks.length }}
+          <span v-if="allSelectedCount" class="bulk-count" data-testid="bulk-count">
+            Выбрано: {{ allSelectedCount }}
           </span>
         </div>
       </template>
@@ -94,13 +94,13 @@
 
     <!-- Плавающая панель bulk-действий — появляется после >=1 выбранного (шаг 4). -->
     <div
-      v-if="selectedTasks.length"
+      v-if="allSelectedCount"
       class="bulk-panel"
       role="toolbar"
       aria-label="bulk actions"
       data-testid="bulk-panel"
     >
-      <span class="bulk-panel-count">{{ selectedTasks.length }} выбрана</span>
+      <span class="bulk-panel-count">{{ allSelectedCount }} выбрана</span>
 
       <select
         v-model="selectedStatus"
@@ -173,7 +173,7 @@ const route = useRoute()
 const toast = useToast()
 
 // — Bulk actions (шаг 4 v0.23) —
-const selectedTasks = ref([])
+const allSelectedCount = computed(() => store.selectedTasks.length)
 const busy = ref(false)
 const ALL_STATUSES = ['backlog', 'new', 'in_progress', 'completed', 'closed']
 const projectNames = computed(() =>
@@ -183,7 +183,7 @@ const projectNames = computed(() =>
 // Ленивая подгрузка списка проектов — только при первом появлении панели.
 let projectsLoaded = false
 watch(
-  () => selectedTasks.value.length,
+  () => store.selectedTasks.length,
   (n) => {
     if (n && !projectsLoaded) {
       projectsLoaded = true
@@ -196,42 +196,47 @@ watch(
 const allPageSelected = computed(
   () =>
     store.tasks.length > 0 &&
-    store.tasks.every((t) => selectedTasks.value.some((s) => s.id === t.id))
+    store.tasks.every((t) => store.selectedTasks.some((s) => s.id === t.id))
 )
 const somePageSelected = computed(
-  () => store.tasks.some((t) => selectedTasks.value.some((s) => s.id === t.id))
+  () => store.tasks.some((t) => store.selectedTasks.some((s) => s.id === t.id))
 )
 
-function onToggleAllPage() {
-  // ВАЖНО: всегда НОВЫЙ массив — in-place push не меняет identity
-  // selection-пропа, watcher DataTable (d_selectionKeys) не срабатывает,
-  // и row-checkbox'и визуально не закрашиваются (баг отчёта, 2026-09-14).
-  const pageIds = new Set(store.tasks.map((t) => t.id))
-  if (allPageSelected.value) {
-    selectedTasks.value = selectedTasks.value.filter((t) => !pageIds.has(t.id))
-  } else {
-    const have = new Set(selectedTasks.value.map((t) => t.id))
-    const add = store.tasks.filter((t) => !have.has(t.id))
-    selectedTasks.value = [...selectedTasks.value, ...add]
+// Клик в зоне выбора (кол. checkbox idx 0 / ID idx 1): гасим ЕЩЁ В ФАЗЕ
+// ЗАХВАТА на wrapper — событие так не доходит до @click на <tr>, и PrimeVue
+// не переключает selection по строке (в multiple-режиме клик по уже
+// отмеченной строке СБРАСЫВАЛ выбор), не вызывая row-click-навигации.
+// Без этого: «промахнулся по чекбоксу → выбор сломан».
+function onSelectionZoneClick(e) {
+  const cell = e.target?.closest?.('td')
+  if (cell?.parentElement) {
+    const idx = [...cell.parentElement.children].indexOf(cell)
+    if (idx <= 1) e.stopPropagation()
   }
 }
 
+function onToggleAllPage() {
+  // Вынесено в store (всегда новый массив — PrimeVue отслеживает identity,
+  // in-place push не срабатывает на d_selectionKeys — баг отчёта 2026-09-14).
+  store.togglePageSelection(store.tasks)
+}
+
 function onClearSelection() {
-  selectedTasks.value = []
+  store.clearSelection()
 }
 
 async function applyBulk(changes) {
-  if (selectedTasks.value.length === 0 || busy.value) return
+  if (allSelectedCount.value === 0 || busy.value) return
   busy.value = true
   try {
-    const ids = selectedTasks.value.map((t) => t.id)
+    const ids = store.selectedTasks.map((t) => t.id)
     const res = await store.bulkUpdate(ids, changes)
     toast.add({
       severity: 'success',
       summary: `Готово: ${res.count} ${res.count === 1 ? 'задача' : 'задач'}`,
       life: 3000,
     })
-    selectedTasks.value = []
+    store.clearSelection()
     selectedStatus.value = ''
     selectedProject.value = ''
     // остаёмся на листе — не перескакиваем на детальку (правило UX шага 4)
@@ -308,6 +313,17 @@ function rowClass(task) {
 }
 
 function onRowClick(event) {
+  // Гард (UX-фикс, v0.23): клики в зоне выбора НЕ ведут в задачу.
+  // idx 0 — колонка checkbox, idx 1 — ID.
+  // Остальные ячейки открывают задачу как обычно (Gmail-паттерн: клик по
+  // строке = открыть; клик в зоне выбора = выбрать).
+  if (event.originalEvent) {
+    const cell = event.originalEvent.target?.closest('td')
+    if (cell) {
+      const idx = [...cell.parentElement.children].indexOf(cell)
+      if (idx <= 1) return
+    }
+  }
   router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
@@ -428,5 +444,15 @@ defineExpose({ epicName })
   color: var(--mb-muted);
   cursor: pointer;
   margin-left: auto;
+}
+
+/* UX-фикс (v0.23): клик по чекбоксу строки — зона hit-target минимум 28px.
+   Без этого приходится «мастерски попадать» в 16px, а мимо — открывается
+   задача (теперь гард onRowClick не навигирует, но боль остаётся). */
+:deep(.p-datatable-tbody td .p-checkbox-label) {
+  padding: 0.6rem 0.75rem;
+  min-height: 28px;
+  box-sizing: border-box;
+  cursor: pointer;
 }
 </style>

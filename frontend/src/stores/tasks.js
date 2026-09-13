@@ -7,6 +7,10 @@ export const useTasksStore = defineStore('tasks', () => {
   const tasks = ref([])
   const total = ref(0)
   const loading = ref(false)
+  // Выбранные задачи (bulk actions, шаг 4): ОБЪЕКТЫ из tasks (PrimeVue v5
+  // isSelected — по reference). Живёт в store, а не в TaskTable — чтобы
+  // навигация «выделил → заглянул в задачу → назад» не сбрасывала выбор.
+  const selectedTasks = ref([])
   const inboxCount = ref(0)
   const currentTask = ref(null)
   const currentComments = ref([])
@@ -36,6 +40,15 @@ export const useTasksStore = defineStore('tasks', () => {
       })
       tasks.value = data.tasks
       total.value = data.total
+      // Bulk-выбор живёт в store: после refetch (новые объекты) привязываем
+      // по ID обратно к свежим references, иначе «назад из задачи» ломает
+      // выбор (PrimeVue isSelected — по ссылке).
+      if (selectedTasks.value.length) {
+        const fresh = new Map(data.tasks.map((t) => [t.id, t]))
+        selectedTasks.value = selectedTasks.value.map(
+          (sel) => fresh.get(sel.id) || sel
+        )
+      }
     } finally {
       loading.value = false
     }
@@ -134,7 +147,7 @@ export const useTasksStore = defineStore('tasks', () => {
 
   // Bulk actions (v0.23, шаг 4). PATCH /api/tasks {ids, changes:{status?, project?}}.
   // Возвращает {count, ...}. Локально применяет изменения к листу (WS-ресинк
-  // подтянет остальное); выбор снимает TaskTable — остаёмся на листе.
+  // подтянет остальное). Выбор — в store (переживает навигацию TaskDetail).
   async function bulkUpdate(ids, changes) {
     const { data } = await apiClient.patch('/tasks', { ids, changes })
     const idsSet = new Set(ids)
@@ -144,6 +157,29 @@ export const useTasksStore = defineStore('tasks', () => {
       if (changes.project) t.project = changes.project
     }
     return data
+  }
+
+  // — Bulk-выбор в store (шаг 4 v0.23) —
+  function clearSelection() {
+    selectedTasks.value = []
+  }
+
+  // Toggle «выбрать весь список, который передали (текущая страница)».
+  // Всегда присваиваем НОВЫЙ массив — PrimeVue отслеживает identity.
+  function togglePageSelection(pageTasks) {
+    const pageIds = new Set(pageTasks.map((t) => t.id))
+    const allPage =
+      pageTasks.length > 0 &&
+      pageTasks.every((t) => selectedTasks.value.some((s) => s.id === t.id))
+    if (allPage) {
+      selectedTasks.value = selectedTasks.value.filter((t) => !pageIds.has(t.id))
+    } else {
+      const have = new Set(selectedTasks.value.map((t) => t.id))
+      selectedTasks.value = [
+        ...selectedTasks.value,
+        ...pageTasks.filter((t) => !have.has(t.id))
+      ]
+    }
   }
 
   return {
@@ -168,6 +204,9 @@ export const useTasksStore = defineStore('tasks', () => {
     setEpic,
     fetchInboxCount,
     fetchTaskInbox,
-    bulkUpdate
+    bulkUpdate,
+    selectedTasks,
+    clearSelection,
+    togglePageSelection
   }
 })
