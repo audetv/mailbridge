@@ -281,6 +281,13 @@ func (h *TaskHandler) CreateTaskFromInbox(w http.ResponseWriter, r *http.Request
 		log.Printf("failed to link task to inbox: %v", err)
 	}
 
+	// Вложения входящего достают в задачу (идемпотентно)
+	if n, err := h.store.CopyInboxAttachmentsToTask(r.Context(), task.ID, item.ID); err != nil {
+		log.Printf("failed to copy inbox attachments to task: %v", err)
+	} else if n > 0 {
+		log.Printf("copied %d attachment(s) from inbox item %d to task %d", n, item.ID, task.ID)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"task": task}); err != nil {

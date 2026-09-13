@@ -50,6 +50,19 @@ func (s *Store) LinkAttachmentToTask(ctx context.Context, taskID, attachmentID i
 	return err
 }
 
+// CopyInboxAttachmentsToTask переносит все вложения входящего в задачу
+// (идемпотентно: уже связанные не дублируются).
+func (s *Store) CopyInboxAttachmentsToTask(ctx context.Context, taskID, inboxItemID int64) (int, error) {
+	query := `INSERT OR IGNORE INTO task_attachments (task_id, attachment_id)
+		SELECT ?, attachment_id FROM inbox_attachments WHERE inbox_item_id = ?`
+	res, err := s.db.ExecContext(ctx, query, taskID, inboxItemID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
 // UnlinkAttachmentFromTask отвязывает вложение от задачи.
 func (s *Store) UnlinkAttachmentFromTask(ctx context.Context, taskID, attachmentID int64) error {
 	query := `DELETE FROM task_attachments WHERE task_id = ? AND attachment_id = ?`
