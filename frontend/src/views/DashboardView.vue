@@ -204,6 +204,16 @@ watch(
       case 'connected':
         toast.add({ severity: 'success', summary: latest.message, life: 2000 })
         break
+      case 'resync': {
+        // Шаг 0 (v0.22.1): переподключились — события за время разрыва
+        // могут быть потеряны → перетягиваем данные всех вкладок. БЕЗ F5.
+        store.fetchTasks()
+        fetchActiveCount()
+        inboxStore.fetchItems()
+        inboxStore.fetchUnreadCount()
+        toast.add({ severity: 'info', summary: latest.message, life: 3000 })
+        break
+      }
       case 'project_created':
       case 'project_updated':
       case 'project_archived':
