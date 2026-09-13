@@ -25,10 +25,14 @@ test.describe('copy buttons on comments (step 3)', () => {
     await page.goto(TASK_URL)
     await page.locator('.comment-body').first().waitFor({ state: 'visible', timeout: 10_000 })
 
-    // Снимаем "сырое" тело из DOM (white-space: pre-wrap сохраняет \n)
-    const raw = await page.locator('.comment-body').first().evaluate((el) => el.innerText)
+    // Каноническое тело — из API (DOM после linkify уже содержит <a>),
+    // авторизация теста — на origin приложения, Cookie доступен evaluate.
+    const raw = await page.evaluate(async () => {
+      const d = await (await fetch('/api/tasks/38')).json()
+      return d.comments[0].body
+    })
 
-    const mdBtn = page.locator('.comment').first().locator('.copy-btn', { hasText: /^MD$/ })
+    const mdBtn = page.locator('.comment').first().locator('.copy-btn').nth(1)
     await mdBtn.click()
 
     const clip = await page.evaluate(async () => navigator.clipboard.readText())
@@ -63,5 +67,42 @@ test.describe('copy buttons on comments (step 3)', () => {
     await expect(mdBtn).toHaveText('✓ MD', { timeout: 2_000 })
     await page.waitForTimeout(2300)
     await expect(mdBtn).toHaveText('MD')
+  })
+})
+
+// ---- auto-linking (v0.23): голые URL в теле комментария — кликабельны,
+// target="_blank" rel="noopener" (новое окно). Задача #87 — реальный URL.
+test.describe('auto-linking in plain-text comments', () => {
+  const LINK_URL = '/tasks/87'
+  const EXPECTED_HREF = 'https://kushniras.ru/seo/lider-sport.ru/tz/TZ_lider-sport__SEO_GEO-1.html'
+
+  test('bare https URL in comment body renders as <a target=_blank rel=noopener>', async ({ page }) => {
+    await page.goto(LINK_URL)
+    const a = page.locator('.comment-body a[href$="TZ_lider-sport__SEO_GEO-1.html"]')
+    await a.first().waitFor({ state: 'visible', timeout: 10_000 })
+    await expect(a.first()).toHaveAttribute('target', '_blank')
+    await expect(a.first()).toHaveAttribute('rel', 'noopener')
+    await expect(a.first()).toHaveText(EXPECTED_HREF)
+    // обычный текст рядом остался как текст (не ссылка)
+    await expect(a.first().locator('..')).toContainText('Ссылка на ТЗ')
+  })
+
+  test('clicking the link does NOT navigate the app away (target=_blank)', async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read'])
+    await page.goto(LINK_URL)
+    const a = page.locator('.comment-body a[href$="TZ_lider-sport__SEO_GEO-1.html"]').first()
+    await a.waitFor({ state: 'visible', timeout: 10_000 })
+
+    // Не переходи по ней: проверим, что в контексте появятся новые вкладки
+    const newPagePromise = page.context().waitForEvent('page').catch(() => null)
+    await a.click()
+    const newPage = await newPagePromise
+
+    // App остаётся на той же странице
+    expect(page.url()).toContain(LINK_URL)
+    // Новая вкладка открыта (target=_blank)
+    if (newPage) {
+      await newPage.close()
+    }
   })
 })

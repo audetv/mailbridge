@@ -31,7 +31,12 @@
           </button>
         </span>
       </div>
-      <div class="comment-body">{{ comment.body }}</div>
+      <div class="comment-body">
+        <template v-for="(seg, i) in linkify(comment.body)" :key="i">
+          <a v-if="seg.href" :href="seg.href" target="_blank" rel="noopener">{{ seg.text }}</a>
+          <template v-else>{{ seg.text }}</template>
+        </template>
+      </div>
 
       <!-- Утверждение ответа (admin-only, ФАЗА 4) -->
       <div v-if="canApprove(comment)" class="comment-actions">
@@ -68,6 +73,7 @@ import { useRoute } from 'vue-router'
 import apiClient from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { copyComment } from '@/utils/copy-comment'
+import { linkify } from '@/utils/linkify'
 
 const props = defineProps({
   comments: { type: Array, default: () => [] }
@@ -302,6 +308,12 @@ function formatDate(dateStr) {
 .comment-body {
   font-size: 1rem;
   white-space: pre-wrap;
+
+  a {
+    color: var(--mb-link, #2563eb);
+    text-decoration: underline;
+    word-break: break-all;
+  }
 }
 
 .comment-attachments {
