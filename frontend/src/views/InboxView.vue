@@ -68,6 +68,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useInboxStore } from '@/stores/inbox'
+import { useWebSocket } from '@/stores/websocket'
 import apiClient from '@/api/client'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -79,6 +80,7 @@ import Select from 'primevue/select'
 const router = useRouter()
 const toast = useToast()
 const store = useInboxStore()
+const wsStore = useWebSocket()
 
 const statusFilter = ref(null)
 
@@ -90,6 +92,14 @@ const statusOptions = [
 
 onMounted(() => {
   store.fetchItems()
+})
+
+// WS resync (шаг 0, v0.22.1): переподключение — за время разрыва могли
+// приходить письма, которых лента не видела → перетянуть БЕЗ F5.
+wsStore.onEvent((event) => {
+  if (event?.type !== 'resync') return
+  store.fetchItems()
+  store.fetchUnreadCount()
 })
 
 function onFilterChange() {

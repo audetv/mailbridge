@@ -1,12 +1,31 @@
+// WebSocket-стор: соединение + auth + события для UI.
+// Надёжность (step 0, v0.22.1):
+// - onerror + onclose → реконнект с backoff 3с/10с/30с (cap), без лавины;
+// - visibilitychange/pageshow → если вкладка видимая, а соединения нет —
+//   форс-реконнект (в замороженном табе Chrome таймеры троттлятся —
+//   событие могло «проскочить», а таймер сработать в вакууме);
+// - при повторном open — событие `resync`: views перетягивают данные
+//   (за первое соединение при mount всё и так подгружается);
+// - refcount на connect/disconnect: переход Dashboard → Inbox не убивает
+//   соединение, которое нужен другой consumer.
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
+
+// Backoff: 3с → 10с → 30с, дальше cap (без лавины при долгом down)
+const RECONNECT_DELAYS = [3000, 10000, 30000]
 
 export const useWebSocket = defineStore('websocket', () => {
   const connected = ref(false)
   const events = ref([])
+  const listeners = new Set()
+
   let ws = null
   let reconnectTimer = null
-  const listeners = new Set()
+  let refCount = 0
+  let delayIdx = 0
+  let everConnected = false
+  // token последнего connect() — при реконнекте передаём его снова
+  let authToken = ''
 
   function emit(event) {
     events.value.push(event)
@@ -21,41 +40,114 @@ export const useWebSocket = defineStore('websocket', () => {
     }
   }
 
-  function connect(token) {
-    if (ws) return
+  function resetTimer() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+  }
+
+  function scheduleReconnect(delay) {
+    if (reconnectTimer || refCount === 0) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      if (refCount > 0) ensureSocket()
+    }, delay)
+  }
+
+  function ensureSocket() {
+    if (ws || reconnectTimer) return
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${location.host}/api/ws`
     ws = new WebSocket(url)
 
     ws.onopen = () => {
-      connected.value = true
-      ws.send(JSON.stringify({ type: 'auth', token }))
+      if (authToken) ws.send(JSON.stringify({ type: 'auth', token: authToken }))
+      // Индикатор загорится после ПОДТВЕРЖДЕНИЯ сервера (фрейм connected
+      // после auth) — «связь есть» ≠ «сокет открыт». Первый раз при mount
+      // всё и так подгружено (fetch в onMounted) → resync только при
+      // ПОВТОРНОМ подключении: за разрыв могли прийти события, которых
+      // UI не видел.
+      if (everConnected) {
+        emit({ type: 'resync', message: 'Переподключено — данные обновлены' })
+      }
+      everConnected = true
+      delayIdx = 0
     }
 
     ws.onclose = () => {
       connected.value = false
       ws = null
-      reconnectTimer = setTimeout(() => connect(token), 3000)
+      // backoff растёт с каждой неудачной попыткой; после успешного open
+      // обнуляется (delayIdx = 0 в onopen)
+      scheduleReconnect(RECONNECT_DELAYS[Math.min(delayIdx, RECONNECT_DELAYS.length - 1)])
+      delayIdx = Math.min(delayIdx + 1, RECONNECT_DELAYS.length - 1)
+    }
+
+    ws.onerror = (e) => {
+      // Без он-хендлера ошибка молча пропадала. Браузер обычно сам «догаляет»
+      // сокетом (onclose → реконнект идёт оттуда); close() здесь — страховка
+      // на случай «застрявшего» onClose (close идемпотентен).
+      console.warn('ws error', e)
+      if (ws) ws.close()
     }
 
     ws.onmessage = (e) => {
-      const event = JSON.parse(e.data)
+      let event
+      try {
+        event = JSON.parse(e.data)
+      } catch {
+        return
+      }
+      if (event?.type === 'connected') {
+        // Сервер подтвердил auth: соединение рабочее.
+        connected.value = true
+      }
       emit(event)
     }
   }
 
-  function disconnect() {
-    if (reconnectTimer) clearTimeout(reconnectTimer)
-    if (ws) {
-      ws.close()
-      ws = null
-    }
+  function killSocket() {
+    resetTimer()
     connected.value = false
+    // everConnected НЕ сбрасываем здесь: «было разрывное подключение»
+    // решается на верхнем уровне (teardown сбрасывает, реконнект — нет).
+    if (ws) {
+      // onclose сработает сам, он идемпотентен
+      const sock = ws
+      ws = null
+      sock.close()
+    }
+    delayIdx = 0
+  }
+
+  // Полный снос состояния: первое успешное соединение после «с нуля»
+  // не считается реконнектом — resync не нужен.
+  function teardown() {
+    killSocket()
+    everConnected = false
+  }
+
+  function connect(token) {
+    refCount += 1
+    authToken = token
+    // Consumer вернулся (или первый) — немедленный старт, без ожидания
+    // pending-таймера от прошлой неудачной попытки.
+    resetTimer()
+    ensureSocket()
+  }
+
+  // disconnect() — «этот consumer больше не слушает». Сокет закрывается
+  // только когда последний consumer отпустил (refCount → 0).
+  function disconnect() {
+    if (refCount > 0) refCount -= 1
+    if (refCount > 0) return
+    teardown()
   }
 
   function markAsRead(taskId) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === 1 /* OPEN */) {
       ws.send(JSON.stringify({ type: 'mark_read', taskId }))
     }
   }
@@ -66,5 +158,31 @@ export const useWebSocket = defineStore('websocket', () => {
     return () => listeners.delete(fn)
   }
 
-  return { connected, events, connect, disconnect, markAsRead, onEvent }
+  // ── Надёжность: возврат из фоновой вкладки ─────────────────────────────
+  // Вкладка была заморожена/скрыта (throttled-таймеры, потерянное событие)
+  // → при видимости форсим реконнект, если соединения нет/оно не открыто.
+  function handleVisible() {
+    if (document.visibilityState !== 'visible') return
+    if (refCount === 0) return
+    if (ws && ws.readyState === 1 /* OPEN */) return
+    // Pending-таймер сбрасываем: во фоновом табе браузер троттлил
+    // setTimeout (30с+), и «реконнект уже в работе» — может и не быть.
+    // everConnected НЕ трогаем: был разрыв → при open emit resync.
+    killSocket()
+    ensureSocket()
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => handleVisible())
+    // bfcache-возврат: сокет мёртв, таймеры «в вакууме» — чистый старт.
+    // everConnected НЕ сбрасываем: были события, которые UI мог не получить
+    // → resync при open (аналогично handleVisible).
+    window.addEventListener('pageshow', (e) => {
+      if (!e?.persisted) return
+      killSocket()
+      if (refCount > 0) ensureSocket()
+    })
+  }
+
+  return { connected, events, connect, disconnect, markAsRead, onEvent, handleVisible }
 })

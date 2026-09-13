@@ -264,6 +264,19 @@ wsStore.onEvent((event) => {
   store.applyCommentApproved(event)
 })
 
+// WS resync (шаг 0, v0.22.1): переподключение — данные могли «отстать» за
+// время разрыва → перетягиваем задачу, связанные письма и вложения (БЕЗ F5).
+wsStore.onEvent((event) => {
+  if (event?.type !== 'resync') return
+  store.fetchTask(route.params.id)
+  store.fetchTaskInbox(route.params.id).then((items) => {
+    inboxItems.value = items
+  })
+  fetchTaskAttachments(route.params.id).then((atts) => {
+    taskAttachments.value = atts
+  })
+})
+
 watch(() => store.currentTask, () => {
   syncFields()
   loadEpics()
