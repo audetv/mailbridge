@@ -134,3 +134,63 @@ func TestGetAttachmentsByComment(t *testing.T) {
 		t.Errorf("Filename = %s", atts[0].Filename)
 	}
 }
+
+func TestCopyInboxAttachmentsToTask(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Задача
+	task := &store.Task{MessageID: "m-copy", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Status: "new"}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	// Входящий
+	item := &store.InboxItem{Source: "email", SourceID: "s-copy", Status: "unread"}
+	if err := s.CreateInboxItem(ctx, item); err != nil {
+		t.Fatalf("CreateInboxItem error: %v", err)
+	}
+
+	// Два вложения на входящем
+	for _, h := range []string{"h-a", "h-b"} {
+		a := &store.Attachment{Hash: h, Filename: h + ".png", ContentType: "image/png", Size: 10, StoragePath: h + ".png"}
+		if err := s.CreateAttachment(ctx, a); err != nil {
+			t.Fatalf("CreateAttachment error: %v", err)
+		}
+		if err := s.LinkAttachmentToInbox(ctx, item.ID, a.ID); err != nil {
+			t.Fatalf("LinkAttachmentToInbox error: %v", err)
+		}
+	}
+
+	// Первый прогон: 2 новые связи
+	n, err := s.CopyInboxAttachmentsToTask(ctx, task.ID, item.ID)
+	if err != nil {
+		t.Fatalf("CopyInboxAttachmentsToTask error: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("first copy = %d new links, want 2", n)
+	}
+
+	got, err := s.GetAttachmentsByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetAttachmentsByTask error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("task has %d attachments, want 2", len(got))
+	}
+
+	// Второй прогон: идемпотентно, 0 новых
+	n, err = s.CopyInboxAttachmentsToTask(ctx, task.ID, item.ID)
+	if err != nil {
+		t.Fatalf("second copy error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("second copy = %d new links, want 0 (idempotency)", n)
+	}
+
+	got, _ = s.GetAttachmentsByTask(ctx, task.ID)
+	if len(got) != 2 {
+		t.Errorf("after second copy task has %d attachments, want 2 (no dupes)", len(got))
+	}
+}

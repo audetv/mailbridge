@@ -70,6 +70,14 @@ Mailbridge — сервис для трансформации входящих e
 - `task_attachments` — задача ↔ вложение
 - `comment_attachments` — комментарий ↔ вложение
 
+Наследование вложений (v0.22.1): при создании задачи из входящего
+(вручную — `POST /api/inbox/{id}/task`, или AI create) вложения письма
+переносятся в задачу через `CopyInboxAttachmentsToTask` (идемпотентно,
+`INSERT OR IGNORE` по `(task_id, attachment_id)`); AI update/complete-пути
+до-копируют вложения входящих, к которым задача привязалась через
+`completed_by`/`updated_by`. Исторические потери (v0.22.0 и ранее)
+восстанавливает backfill: `data-fix/v0.22.1-backfill-task-attachments.sql`.
+
 ### task_inbox_items — связь задач с лентой
 
 Многие-ко-многим. Одна задача может ссылаться на несколько входящих, одно входящее может породить несколько задач.

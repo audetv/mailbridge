@@ -230,6 +230,9 @@ type Store interface {
 	UnlinkAttachmentFromTask(ctx context.Context, taskID, attachmentID int64) error
 	GetAttachmentsByInbox(ctx context.Context, inboxItemID int64) ([]*Attachment, error)
 	GetAttachmentsByTask(ctx context.Context, taskID int64) ([]*Attachment, error)
+	// CopyInboxAttachmentsToTask переносит вложения входящего в задачу
+	// (идемпотентно). Возвращает число новых связей.
+	CopyInboxAttachmentsToTask(ctx context.Context, taskID, inboxItemID int64) (int, error)
 
 	// GetAttachmentsByComment возвращает вложения комментария.
 	GetAttachmentsByComment(ctx context.Context, commentID int64) ([]*Attachment, error)

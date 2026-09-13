@@ -52,6 +52,20 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 	return nil
 }
 
+// copyInboxAttachmentsToTask — общая функция: переносит вложения входящего
+// в задачу (идемпотентно, дубли по hash/filename невозможны: связь — по ID
+// вложения, INSERT OR IGNORE).
+func (o *Orchestrator) copyInboxAttachmentsToTask(ctx context.Context, taskID, inboxItemID int64) {
+	if inboxItemID <= 0 {
+		return
+	}
+	if n, err := o.store.CopyInboxAttachmentsToTask(ctx, taskID, inboxItemID); err != nil {
+		log.Printf("[AI] failed to copy inbox attachments to task %d: %v", taskID, err)
+	} else if n > 0 {
+		log.Printf("[AI] copied %d attachment(s) from inbox item %d to task %d", n, inboxItemID, taskID)
+	}
+}
+
 // createTaskFromVerdict создаёт новую задачу.
 func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, verdict Verdict, inboxItemID int64, verdictIndex int) error {
 	// Уникальный MessageID для каждой задачи из одного письма
@@ -84,17 +98,8 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		return err
 	}
 
-	// Наследуем вложения из входящего
-	if inboxItemID > 0 {
-		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
-		if err == nil {
-			for _, att := range inboxAtts {
-				if err := o.store.LinkAttachmentToTask(ctx, task.ID, att.ID); err != nil {
-					log.Printf("[AI] failed to link attachment to task: %v", err)
-				}
-			}
-		}
-	}
+	// Вложения входящего достают в задачу (общий хелпер, идемпотентно)
+	o.copyInboxAttachmentsToTask(ctx, task.ID, inboxItemID)
 
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, task.ID, inboxItemID, "created_from"); err != nil {
@@ -172,6 +177,9 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 		}
 	}
 
+	// Вложения входящего достают в задаu (update-путь)
+	o.copyInboxAttachmentsToTask(ctx, int64(taskID), inboxItemID)
+
 	// Связь с входящим
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "updated_by"); err != nil {
@@ -248,6 +256,9 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 		}
 	}
 
+	// Вложения входящего достают в задаu (complete-путь)
+	o.copyInboxAttachmentsToTask(ctx, int64(taskID), inboxItemID)
+
 	// Связь с входящим
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, int64(taskID), inboxItemID, "completed_by"); err != nil {
@@ -312,17 +323,8 @@ func (o *Orchestrator) createCompletedTaskFromVerdict(ctx context.Context, email
 		return err
 	}
 
-	// Наследуем вложения из входящего
-	if inboxItemID > 0 {
-		inboxAtts, err := o.store.GetAttachmentsByInbox(ctx, inboxItemID)
-		if err == nil {
-			for _, att := range inboxAtts {
-				if err := o.store.LinkAttachmentToTask(ctx, task.ID, att.ID); err != nil {
-					log.Printf("[AI] failed to link attachment to task: %v", err)
-				}
-			}
-		}
-	}
+	// Вложения входящего достают в задачу (общий хелпер, идемпотентно)
+	o.copyInboxAttachmentsToTask(ctx, task.ID, inboxItemID)
 
 	if inboxItemID > 0 {
 		if err := o.store.LinkTaskToInboxItem(ctx, task.ID, inboxItemID, "created_from"); err != nil {
