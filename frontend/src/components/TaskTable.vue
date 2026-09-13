@@ -203,14 +203,16 @@ const somePageSelected = computed(
 )
 
 function onToggleAllPage() {
+  // ВАЖНО: всегда НОВЫЙ массив — in-place push не меняет identity
+  // selection-пропа, watcher DataTable (d_selectionKeys) не срабатывает,
+  // и row-checkbox'и визуально не закрашиваются (баг отчёта, 2026-09-14).
+  const pageIds = new Set(store.tasks.map((t) => t.id))
   if (allPageSelected.value) {
-    const pageIds = new Set(store.tasks.map((t) => t.id))
     selectedTasks.value = selectedTasks.value.filter((t) => !pageIds.has(t.id))
   } else {
     const have = new Set(selectedTasks.value.map((t) => t.id))
-    for (const t of store.tasks) {
-      if (!have.has(t.id)) selectedTasks.value.push(t)
-    }
+    const add = store.tasks.filter((t) => !have.has(t.id))
+    selectedTasks.value = [...selectedTasks.value, ...add]
   }
 }
 
