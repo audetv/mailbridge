@@ -39,3 +39,9 @@ coverage.html
 # Playwright (при прогоне из корня)
 test-results/
 playwright-report/
+
+# Философские документы — вне публичного git (контейнер /home/audetv/work/mailbridge)
+docs/ontology*.md
+docs/ROADMAP.md
+docs/positioning.md
+docs/archive/
