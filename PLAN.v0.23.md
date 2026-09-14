@@ -9,7 +9,7 @@
 
 ## Статус (курсор — читать первым)
 
-> **Текущий шаг: 2** | Дата: 2026-09-13 | Последний commit: `6b6d8e2` (step 1, PR #20)
+> **Текущий шаг: 5 (DISCUSS) — шаг 4 (bulk actions) завершён (коммит в `feat/v0.23`)** | Дата: 2026-09-14 | Один PR ветки → 0.23.0 (по решению владельца: 0+1 отдельно, 2+3+3b+4 одним)
 > Отмечаться здесь при каждом закрытом шаге (правило 9).
 
 ## Правила работы (для агента) — НЕ СКИДЫВАТЬ
@@ -78,7 +78,10 @@ store), e2e 14/14 (3 новых — `tests-e2e/websocket-reconnect.spec.js` че
 
 ## Этап 2 — v0.23.0 (малые фичи + метрика)
 
-### [ ] Шаг 2 — Миграция `task_status_history` (фундамент всех измерений)
+### [x] Шаг 2 — Миграция `task_status_history` (фундамент всех измерений)
+
+**Закрыт: 2026-09-13, ветка `feat/v0.23` (коммит `step 2 (v0.23): ...`).**
+Что сделано: миграция `task_status_history(id PK, task_id FK CASCADE, from_status NULL, to_status, by, created_at)` + индексы; единственный путь смены статуса — `Store.SetTaskStatus` (транзакция: SELECT for update → UPDATE → INSERT при `from != to`; идемпотентен для `from == to`); API `PATCH /api/tasks/{id}` — `status` только через `SetTaskStatus` (by из JWT); AI-пути (update/complete verдикт) — `by=ai`; `GET /api/tasks/{id}/history` (хронология, `[]` если нет переходов); доки `docs/data-model.md` + `docs/api.md`; юниты: `TestSetTaskStatus_Transitions/IdempotentRepeat/NotFound/UpdateStillAcceptsOthers`; e2e: `task-history-smoke.spec.js` (свой task на каждый прогон, workflow-кнопка → строка в истории `by=admin`, `from_status=new`); 16/16 e2e, 60/60 vitest, go vet/test/build — green.
 
 **Почему сейчас:** без неё не поднять ни SLA, ни «цикл задач», ни отчёт по живым данным (owner-запрос). Одна маленькая миграция открывает всё.
 
@@ -92,7 +95,10 @@ store), e2e 14/14 (3 новых — `tests-e2e/websocket-reconnect.spec.js` че
 **Приёмка:** смена статуса из UI оставляет строку в `task_status_history`; API отдаёт хронологию; `by` — юзер (admin/hermes/system).
 **Коммит:** `step 2 (v0.23): task_status_history — migration + SetTaskStatus + GET history`.
 
-### [ ] Шаг 3 — UI: «Копировать ответ как MD/TXT»
+### [x] Шаг 3 — UI: «Копировать ответ как MD/TXT»
+
+**Закрыт:** 2026-09-13, коммит в `feat/v0.23` (одна ветка, один PR → 0.23.0). **Скоп расширен по решению владельца (2026-09-13):** не только `kind=reply` — кнопка копирования у **любого** комментария (reply/report/user_comment/ai_verdict); по факту 180 комментариев, HTML-обёрток нет (2 шт), основной путь — plain text, часть тел — вставленный MD. Что сделано: `frontend/src/utils/copy-comment.js` — `copyComment(body, 'text'|'md')`: 'text' (по умолчанию) = снятые MD-символы (`**`/`##`/`` ` ``) + сохранённые переносы; 'md' = дословно; `CommentList.vue` — 2 кнопки на каждый комментарий (clipboard-иконка + чип «MD»), фидбек «✓» 2 с; тесты: `tests/utils/copy-comment.spec.js` (виест) + `tests-e2e/comment-copy.spec.js` (задача 38: MD-кнопка кладёт тело дословно, чистая — без `**`/`##`, переносы на месте, фидбек). **Доп. улучшение (решение владельца, 2026-09-13): автолинкинг** — голые URL в теле комментария рендерятся кликабельными `<a target="_blank" rel="noopener">` (новая вкладка), без `v-html` (XSS-чисто), text-сегмент — как есть; `frontend/src/utils/linkify.js` + `tests/utils/linkify.spec.js` + e2e на задаче 87 (реальный URL, вкл. клик → новая вкладка, app остаётся). **Отложено (по решению владельца):** шаг 3b — рендер Маркдаун в карточке (отдельный коммит после 3).
+**Коммит:** `step 3 (v0.23): UI — copy any comment as clean text / verbatim MD (paste-friendly)`.
 
 **Запрос владельца:** сейчас невозможно скопировать текст ответа в письмо. Нужна кнопка (и выбор MD/TXT); MD близок, но Outlook — не чистый MD; **сохранять структуру, ГНЕ без фона/цветов** (зелёный фон «под спойлерами» и т.п.).
 
@@ -104,9 +110,18 @@ store), e2e 14/14 (3 новых — `tests-e2e/websocket-reconnect.spec.js` че
 5. доки: api.md — без изменений (это UI-фича); AGENTS.md/UI-гид (если есть) — коротко.
 
 **Приёмка:** один клик → clipboard с чистым MD; структура сохранена; цвета/фон — нет.
-**Коммит:** `step 3 (v0.23): UI — copy reply as MD/TXT (paste-friendly)`.
+**Коммит:** `step 3 (v0.23): UI — copy any comment as clean text / verbatim MD (paste-friendly)`.
 
-### [ ] Шаг 4 — UI: Bulk actions (массовые действия)
+### [x] Шаг 3b — UI: рендер Markdown в карточке комментария
+
+**Закрыт:** 2026-09-13, коммит в `feat/v0.23`. **Скоп (решение владельца, 2026-09-13):** MD-комментарии — как форматированный HTML; plain-комментарии — как прежде (текст + ссылки), без `v-html`. Что сделано: `frontend/src/utils/render-md.js` — `marked` (GFM, `breaks`) + `DOMPurify` (allowlist: `<script>`/`on*`/`javascript:`/`data:` не проходят; `<input>` только `type=checkbox disabled` для task-lists; `<img>` — http(s)/относительные; хук `afterSanitizeAttributes`: `<a>` только http(s)/mailto + `target="_blank" rel="noopener noreferrer"`; автолинкинг голых URL/`www.` делает сам `marked` с корректным отсечением хвостовой пунктуации); `looksLikeMd(body)` — детектор (11 MD из 191 корпуса), plain-пути не трогаются; `CommentList.vue` — условный рендер: MD → `v-html="renderMarkdown(comment)"` + CSS-тема `.comment-body.md` (заголовки, списки, code, task-lists, ссылки), plain → прежний `linkify` (text-ноды, XSS-поверхности нет). Тесты: `tests/utils/render-md.spec.js` (18: заголовки/жирный/ссылки/task-lists/code/hr/цитаты + XSS: script/onerror/javascript:/input/iframe), `tests/utils/detect-corpus.spec.js` (фикстура `fixtures-corpus.json` — все 191 body: детектор без исключений, MD-отчёты → MD, plain (задача 61) → false), e2e `comment-copy.spec.js` (задача 38: `strong`/`ul`/`li` в DOM; задача 87: plain-комментарий БЕЗ `.md`, ссылки как прежде; задача 49: заголовки `h1-h3`, checkbox'и task-lists, `code`, `hr`, без литеральных `**`/`- [ ]`). Полное CI-состояние: unit 103/103, eslint, e2e 25/25.
+**Коммит:** `step 3b (v0.23): UI — render Markdown in comment card (marked + DOMPurify, plain path untouched)`.
+
+### [x] Шаг 4 — UI: Bulk actions (массовые действия)
+
+**Закрыт:** 2026-09-14, коммит в `feat/v0.23` (одна ветка, один PR → 0.23.0). **Скоп (по плану + запрос владельца):** checkbox per-row + «выбрать все на странице», плавающая панель после >=1 выбранного (`К статусу…` select 5 статусов + `К проекту…` select существующих проектов, обе с «Применить»), bulk-запрос одним `PATCH`, **остаться на листе** после bulk (не прыжок на детальку). Что сделано: **backend** — `Store.BulkUpdateTasks(ids, changes)` (status → тот же `SetTaskStatus` со строкой историей `by=юзер`, project отдельным update) в `store.go`/`sqlite.go`; `PATCH /api/tasks` handler в `api.go` (`{ids:[int], changes:{status?,project?}}` → 400 если пустые/неизвестный статус/проект, 200 `{count, changed, statuses, errors}` — **не атомарно**, SQLite-транзакция внутри store, дубли ID дедуплятся); WS — **одно** событие `batch_update` (`{type, count, message}`) на всю операцию, не N × task_updated; **frontend** — `TaskTable.vue`: `selectionMode="multiple"` + `<Column selectionMode>` (первая колонка) + lazy-страничка сохранена; toolbar в header («Выбрать все на странице» + счётчик выбранного); плавающая `bulk-panel` (появляется при >=1) с двумя select + Применить + «Снять выбор»; `store.bulkUpdate(ids, changes)` применяет результат локально (status/project в строках) + WS-ресинк подтянет; «К проекту…» лениво подгружает список проектов (только при первом открытии панели, `archived=false`); toast success/error; `onRowClick` не меняется — bulk-панель НЕ трогает роутинг (правило UX «остаться на листе»); **тесты:** `internal/web/bulk_tasks_test.go` (248 строк: 200 status, 200 project, mixed, empty ids→400, unknown status→400, unknown project→404, дедуп ID, несуществующий id не ошибка), `internal/store/sqlite/bulk_tasks_test.go`; e2e `tests-e2e/bulk-actions.spec.js` (2 задачи → выбрать обе → «К В работе» → Применить → PATCH 200 `count:2`, чекбоксы сброшены, страница та же, `task_status_history` `new→in_progress by=admin` на обеих); юнит `tests/components/TaskTable.spec.js` (2, с Toast-плагином, колонки на месте); полное CI-состояние: **go build/vet/test — green**, **vitest 103/103**, **eslint OK**, **e2e 26/26**. **UX-фиксы row-чекбоксов (2026-09-14, запрос владельца «мастерская точность»):** commit `eb78878` — (1) hit-target 28px (CSS `:deep(.p-checkbox-label)`), (2) клик в зоне выбора (checkbox/ID) НЕ гасит selection и не ведёт в задачу (capture-фазовый гард `onSelectionZoneClick` + гард в `onRowClick`), (3) `selectedTasks` вынесен в Pinia `stores/tasks.js` — переживает навигацию в задачу и обратно (rebind по ID после refetch). Клик по строке (кроме зоны выбора) = открыть задачу, **выбор НЕ меняется** — корректная Gmail-логика (commit `eb78878` v2): выбор только через чекбокс / «выбрать все»; PrimeVue multiple сам добавлял/снимал selection при row-click (DataTable.vue:796-855), аннулируется snapshot+restore в `onRowClick` (nextTick). «Снял чекбокс → зашёл → выбрался / зашёл → снялся» — исправлено.
+**Доки:** `docs/api.md` — раздел `PATCH /api/tasks` (bulk) + контракт WS `batch_update`.
+**Коммит:** `step 4 (v0.23): UI + API — bulk actions (checkbox selection + status/project batch)`.
 
 **Запрос владельца:** «не хватает массового выделения задач/входящих и применения действия» — сценарий «логи арендатора → в backlog» (145 задач в backlog — это следствие). Плюс «нажатая на Backlog, почти всегда — назад кнопка к другой задаче» → UX: после bulk-действия **остаться на листе** (не прыгать/не закрывать, если не просили).
 

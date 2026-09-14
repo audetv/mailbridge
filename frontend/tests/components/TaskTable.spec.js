@@ -13,6 +13,8 @@ vi.mock('vue-router', () => ({
 import TaskTable from '@/components/TaskTable.vue'
 import { useEpicsStore } from '@/stores/epics'
 import { useTasksStore } from '@/stores/tasks'
+import ToastService from 'primevue/toastservice'
+import PrimeVue from 'primevue/config'
 
 async function mountTable(pinia) {
   const tasks = useTasksStore(pinia)
@@ -21,7 +23,11 @@ async function mountTable(pinia) {
     { id: 2, epic_id: null, project: 'Лидер Спорт', status: 'new', unread_comments: 0, created_at: '2026-08-29T11:00:00Z' }
   ]
   tasks.total = 2
-  const wrapper = mount(TaskTable, { global: { plugins: [pinia] } })
+  const wrapper = mount(TaskTable, {
+    global: {
+      plugins: [pinia, ToastService, [PrimeVue, {}]]
+    }
+  })
   await flushPromises()
   return { wrapper, tasks, epics: useEpicsStore(pinia) }
 }

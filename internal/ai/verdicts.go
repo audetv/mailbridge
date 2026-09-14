@@ -122,8 +122,18 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 	}
 
 	if len(updates) > 0 {
-		if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
-			return err
+		// status — отдельным вызовом SetTaskStatus: пишет и строку истории
+		// (v0.23, шаг 2; единый путь смены статуса во всех слоях).
+		if status, ok := updates["status"].(string); ok {
+			delete(updates, "status")
+			if err := o.store.SetTaskStatus(ctx, int64(taskID), status, "ai"); err != nil {
+				return err
+			}
+		}
+		if len(updates) > 0 {
+			if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -199,10 +209,8 @@ func int64Ptr(v int64) *int64 {
 
 // completeTaskFromVerdict завершает задачу.
 func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
-	updates := map[string]interface{}{
-		"status": "completed",
-	}
-	if err := o.store.UpdateTask(ctx, int64(taskID), updates); err != nil {
+	// status → SetTaskStatus: строка в task_status_history (by=ai) + статус.
+	if err := o.store.SetTaskStatus(ctx, int64(taskID), "completed", "ai"); err != nil {
 		return err
 	}
 

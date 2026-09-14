@@ -15,6 +15,8 @@ type WSEvent struct {
 	Username string `json:"username,omitempty"`
 	Message  string `json:"message,omitempty"`
 	Data     any    `json:"data,omitempty"`
+	// Count — размер пакета для пакетных событий (batch_update, v0.23 шаг 4).
+	Count int `json:"count,omitempty"`
 }
 
 // WSMessage представляет входящее сообщение от клиента.
