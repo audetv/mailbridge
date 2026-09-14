@@ -6,6 +6,9 @@
 //   событие могло «проскочить», а таймер сработать в вакууме);
 // - при повторном open — событие `resync`: views перетягивают данные
 //   (за первое соединение при mount всё и так подгружается);
+// - `off()`-обёртка подписки: view обязан отписаться в onUnmounted, иначе
+//   убитый Vue-компонент продолжает ловить события (resync → 3 GET-а в
+//   консоль на каждый реконнект, URL-заглушки и т.п.);
 // - refcount на connect/disconnect: переход Dashboard → Inbox не убивает
 //   соединение, которое нужен другой consumer.
 import { ref } from 'vue'
@@ -26,16 +29,22 @@ export const useWebSocket = defineStore('websocket', () => {
   let everConnected = false
   // token последнего connect() — при реконнекте передаём его снова
   let authToken = ''
+  // Счётчик неудачных подключений подряд — для диагностического warn без spam.
+  let deadConns = 0
 
   function emit(event) {
     events.value.push(event)
     // Ограничиваем историю
     if (events.value.length > 100) events.value.shift()
-    for (const fn of listeners) {
+    for (const [fn, label] of listeners) {
       try {
         fn(event)
       } catch (e) {
-        console.error('ws listener error', e)
+        // console.error здесь создавал бы собственный шум в консоли — warn.
+        console.warn('ws listener error', label, e)
+        // Сломанный listener (исключительно из-за его бага) отписываем,
+        // чтобы не бросать исключения на каждом событии.
+        listeners.delete([fn, label])
       }
     }
   }
@@ -60,10 +69,26 @@ export const useWebSocket = defineStore('websocket', () => {
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${location.host}/api/ws`
-    ws = new WebSocket(url)
+    // Хендлеры привязаны к конкретному экземпляру (sock) и проверяют
+    // «я ещё актуален» (ws === sock): killSocket() может сработать ПОСРЕДИ
+    // handshake (размонтирование view/возврат вкладки) — но браузер всё
+    // равно может сfireить onopen/один из событий на брошенном сокете.
+    // Без этого — «Cannot read properties of null (reading 'send')» в
+    // onopen и ложные resync.
+    const sock = new WebSocket(url)
+    ws = sock
 
-    ws.onopen = () => {
-      if (authToken) ws.send(JSON.stringify({ type: 'auth', token: authToken }))
+    sock.onopen = () => {
+      if (ws !== sock) return // брошенный экземпляр — молча игнорируем
+      if (authToken) sock.send(JSON.stringify({ type: 'auth', token: authToken }))
+      if (deadConns >= 3) {
+        // «После N ИСТИННЫХ неудач — предупреждение» (нормальные close-и не
+        // считаются — см. onclose). Видно в консоли, без spam.
+        console.warn(
+          `ws: ${deadConns} неудачных подключений подряд — соединение нестабильно`
+        )
+      }
+      deadConns = 0
       // Индикатор загорится после ПОДТВЕРЖДЕНИЯ сервера (фрейм connected
       // после auth) — «связь есть» ≠ «сокет открыт». Первый раз при mount
       // всё и так подгружено (fetch в onMounted) → resync только при
@@ -76,24 +101,30 @@ export const useWebSocket = defineStore('websocket', () => {
       delayIdx = 0
     }
 
-    ws.onclose = () => {
+    sock.onclose = () => {
+      // Нормальное закрытие (killSocket: ws уже не sock) — это НЕ неудача:
+      // consumer ушёл/вкладку переключили, реконнект не планируем.
+      if (ws !== sock) return
       connected.value = false
       ws = null
+      deadConns += 1
       // backoff растёт с каждой неудачной попыткой; после успешного open
       // обнуляется (delayIdx = 0 в onopen)
       scheduleReconnect(RECONNECT_DELAYS[Math.min(delayIdx, RECONNECT_DELAYS.length - 1)])
       delayIdx = Math.min(delayIdx + 1, RECONNECT_DELAYS.length - 1)
     }
 
-    ws.onerror = (e) => {
+    sock.onerror = (e) => {
+      if (ws !== sock) return
       // Без он-хендлера ошибка молча пропадала. Браузер обычно сам «догаляет»
       // сокетом (onclose → реконнект идёт оттуда); close() здесь — страховка
       // на случай «застрявшего» onClose (close идемпотентен).
       console.warn('ws error', e)
-      if (ws) ws.close()
+      if (ws === sock) sock.close()
     }
 
-    ws.onmessage = (e) => {
+    sock.onmessage = (e) => {
+      if (ws !== sock) return
       let event
       try {
         event = JSON.parse(e.data)
@@ -152,10 +183,15 @@ export const useWebSocket = defineStore('websocket', () => {
     }
   }
 
-  // Подписка на WS-события (view'ы). Возвращает функцию отписки.
-  function onEvent(fn) {
-    listeners.add(fn)
-    return () => listeners.delete(fn)
+  // Подписка на WS-события (view'ы). label — что это за подписчик
+  // (для диагностического warn в emit; без него — имя функции).
+  // Возвращает функцию отписки: ОБЯЗАН быть вызвана в onUnmounted —
+  // живой стор живёт дольше компонента, и «забытая» подписка будет
+  // дёргать мёртвый view на каждом resync.
+  function onEvent(fn, label) {
+    const pair = [fn, label || (fn && fn.name) || 'listener']
+    listeners.add(pair)
+    return () => listeners.delete(pair)
   }
 
   // ── Надёжность: возврат из фоновой вкладки ─────────────────────────────

@@ -210,4 +210,55 @@ describe('stores/websocket — надёжность (шаг 0, v0.22.1)', () => 
     expect(store.events.some((e) => e.type === 'resync')).toBe(false)
     store.disconnect()
   })
+
+  it('onEvent: off() отписывает; сломанный listener отписывается сам (без повторных исключений)', async () => {
+    const store = makeStore()
+    store.connect('tok')
+    MSocket.instances[0]._open()
+
+    const seen = []
+    const off = store.onEvent((e) => seen.push(e.type), 'test:ok')
+    store.onEvent(() => {
+      throw new Error('listener bug')
+    }, 'test:bad')
+
+    // Разрыв → handleVisible форсит реконнект → повторный open → resync.
+    MSocket.instances[0]._close()
+    store.handleVisible()
+    MSocket.instances[1]._open()
+
+    expect(store.events.filter((e) => e.type === 'resync')).toHaveLength(1)
+    // Живой listener получил resync; сломанный — пойман и отписан warn'ом.
+    expect(seen).toContain('resync')
+    expect(console.warn).toHaveBeenCalledWith(
+      'ws listener error',
+      'test:bad',
+      expect.any(Error)
+    )
+
+    // off() отписывает следующего живого подписчика
+    off()
+    const before = seen.length
+    MSocket.instances[1]._close()
+    store.handleVisible()
+    MSocket.instances[2]._open()
+    expect(seen.length).toBe(before)
+    store.disconnect()
+  })
+
+  it('late onopen убитого сокета — молча игнорируется (гонка close-во-время-handshake)', () => {
+    const store = makeStore()
+    store.connect('tok')
+    const dead = MSocket.instances[0]
+    // Соединение ещё в handshake; consumer размонтировался → teardown:
+    // ws = null, close(). В реальном браузере close() на CONNECTING-сокате
+    // игнорируется, и onopen всё равно «доедет» — в старом коде это
+    // было «Cannot read properties of null (reading 'send')».
+    store.disconnect()
+    expect(store.connected).toBe(false)
+    expect(() => dead.onopen()).not.toThrow()
+    // И никаких ложных resync/connected от мёртвого экземпляра.
+    expect(store.events.some((e) => e.type === 'resync')).toBe(false)
+    expect(store.connected).toBe(false)
+  })
 })
