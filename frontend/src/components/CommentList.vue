@@ -86,8 +86,11 @@
         <span v-else class="approved-note">Ответ утверждён</span>
       </div>
 
-      <!-- Вложения комментария -->
-      <div v-if="commentAttachments[comment.id]?.length > 0" class="comment-attachments">
+      <!-- Вложения комментария.
+           AI-вердикт (author='ai', kind='ai_verdict') — ВСЕГДА только саммари:
+           вложения из письма туда не выносим (решение владельца, 15.09).
+           У legacy AI-саммари (author='user') вложения ОСТАЮТcя. -->
+      <div v-if="showAttachments(comment) && commentAttachments[comment.id]?.length > 0" class="comment-attachments">
         <div v-for="att in commentAttachments[comment.id]" :key="att.id" class="comment-attachment-item">
           <i class="pi pi-paperclip" />
           <a
@@ -199,6 +202,15 @@ function subjectOf(comment) {
 // спойлера НЕ имеет (решение 14.09: там только саммари).
 function showOriginal(comment) {
   return comment?.author === 'user' && Boolean(inboxItemOf(comment))
+}
+// AI-вердикт = только саммари: вложения в нём не показываем.
+// «AI» = новый ai_verdict (author='ai') — legacy-саммари (author='user') НЕ в счёт:
+// там вложения остаются (это комментарий с письмом, не чистый вердикт).
+function isAiVerdictComment(comment) {
+  return comment?.author === 'ai' || comment?.kind === 'ai_verdict'
+}
+function showAttachments(comment) {
+  return !isAiVerdictComment(comment)
 }
 function originalBody(comment) {
   const item = inboxItemOf(comment)

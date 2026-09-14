@@ -12,6 +12,11 @@ vi.mock('@/stores/auth', () => ({
   }))
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ params: { id: '5' } }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() })
+}))
+
 import apiClient from '@/api/client'
 import CommentList from '@/components/CommentList.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -233,5 +238,39 @@ describe('CommentList (шаг 5 v0.23 — AI-вердикт = только са�
     const wrapper = mountList([legacy], [])
     expect(wrapper.find('.author').text()).toContain('автор письма')
     expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
+  })
+
+  // Финальный фикс (15.09): вложения УБИРАЮТСЯ ТОЛЬКО из AI-вердикта.
+  const ATTS = [{ id: 1, filename: 'фото.png', storage_path: 't5/a1' }]
+
+  it('AI-вердикт: вложения НЕ показываются даже если у коммента есть файлы', async () => {
+    const getMock = vi.mocked(apiClient.get)
+    getMock.mockReset()  // сброс mockResolvedValue из beforeEach
+    getMock.mockImplementation((url) =>
+      String(url).includes('/comments/50/attachments')
+        ? Promise.resolve({ data: ATTS })
+        : Promise.resolve({ data: [] }))
+    const wrapper = mountList([VERDICT_COMMENT], [INBOX_ITEM])
+    await flushPromises()
+    expect(getMock).toHaveBeenCalledWith(expect.stringContaining('/comments/50/attachments'))
+    expect(wrapper.find('.comment-attachments').exists()).toBe(false)
+    expect(wrapper.find('.comment-attachment-item').exists()).toBe(false)
+  })
+
+  it('legacy AI-саммари (author="user"): вложения ОСТАЮТСЯ', async () => {
+    const getMock = vi.mocked(apiClient.get)
+    getMock.mockReset()
+    getMock.mockImplementation((url) =>
+      String(url).includes('/comments/54/attachments')
+        ? Promise.resolve({ data: ATTS })
+        : Promise.resolve({ data: [] }))
+    const legacy = {
+      ...COMMENT, id: 54, author: 'user', direction: 'in',
+      inbox_item_id: 128, body: 'Клиент уточнил, что нужен новый документ.'
+    }
+    const wrapper = mountList([legacy], [INBOX_ITEM])
+    await flushPromises()
+    expect(wrapper.find('.comment-attachments').exists()).toBe(true)
+    expect(wrapper.find('.comment-attachment-item a').text()).toBe('фото.png')
   })
 })
