@@ -45,9 +45,28 @@
         </template>
       </div>
 
-      <!-- v0.23 шаг 5 (решение владельца 14.09, задача 378): AI-вердикт = ТОЛЬКО
-           саммари. Письмо уже показана сверху (карточка «Оригинальное письмо») —
-           detail с телом письма и вложения в AI-комментарий НЕ дублируем. -->
+      <!-- v0.23 шаг 5 (решение владельца 14.09, задача 378):
+           detail «Оригинал письма» — ТОЛЬКО в комментарии-саммари (author='user',
+           legacy AI-саммари письма) — там, где письмо смотрят.
+           Из AI-ответа (ai_verdict) detail УБРАН: вердикт = только саммари,
+           письмо и так стоит выше в потоке. -->
+      <details
+        v-if="showOriginal(comment)"
+        class="comment-original"
+      >
+        <summary>
+          Оригинал письма&ensp;
+          <span class="comment-original-meta">
+            {{ senderOf(comment) }} · {{ subjectOf(comment) }}
+          </span>
+        </summary>
+        <!-- Полное письмо (body_text из inbox_items по inbox_item_id).
+             «Новая часть» видна и в карточке «Оригинальное письмо» сверху —
+             здесь же — весь текст письма, как было ранее. -->
+        <div class="comment-original-body">
+          {{ originalBody(comment) }}
+        </div>
+      </details>
 
       <!-- Утверждение ответа (admin-only, ФАЗА 4) -->
       <div v-if="canApprove(comment)" class="comment-actions">
@@ -164,6 +183,19 @@ function senderOf(comment) {
   const addr = (item.from_contact || item.from_email || '').trim()
   if (name && addr) return `${name} (${addr})`
   return name || addr || ''
+}
+function subjectOf(comment) {
+  const item = inboxItemOf(comment)
+  return item?.subject ? `«${item.subject}»` : ''
+}
+// Detail письма показываем ТОЛЬКО в саммари-комментарии (author='user',
+// есть inbox_item_id) — там, где смотрят письмо. AI-вердикт (ai_verdict)
+// спойлера НЕ имеет (решение 14.09: там только саммари).
+function showOriginal(comment) {
+  return comment?.author === 'user' && Boolean(inboxItemOf(comment))
+}
+function originalBody(comment) {
+  return inboxItemOf(comment)?.body_text || inboxItemOf(comment)?.body_html || ''
 }
 
 // Кнопка «Утвердить ответ»: admin + kind=reply.
@@ -480,6 +512,26 @@ function formatDate(dateStr) {
     height: auto;
     border-radius: 0.4em;
   }
+}
+.comment-original {
+  margin-top: 0.5rem;
+  border: 1px solid var(--mb-border, rgba(0,0,0,0.12));
+  border-radius: 0.4em;
+}
+.comment-original summary {
+  cursor: pointer;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--mb-muted, #555);
+}
+.comment-original-meta {
+  color: var(--mb-muted, #777);
+}
+.comment-original-body {
+  padding: 0.4rem 0.6rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
 }
 .comment-attachments {
   margin-top: 0.5rem;

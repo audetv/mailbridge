@@ -214,8 +214,10 @@ describe('CommentList (шаг 5 v0.23 — AI-вердикт = только са�
     expect(wrapper.find('.author').text()).toContain('Целищева Виктория')
     expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
     expect(wrapper.find('.ai-summary-badge').text()).toBe('AI-саммари')
-    // legacy-вердикт тоже без дубля письма
-    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    // саммари-комментарий (author='user') НОСИТ detail письма — там его смотрят
+    expect(wrapper.find('.comment-original').exists()).toBe(true)
+    expect(wrapper.find('.comment-original-body').text()).toContain('сообщите сроки')
+    expect(wrapper.find('summary').text()).toContain('Целищева Виктория')
   })
 
   it('legacy author="user" БЕЗ inboxItem → «автор письма», без краха', () => {
