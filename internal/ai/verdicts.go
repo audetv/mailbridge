@@ -2,12 +2,23 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
 )
+
+// pickQuote (step 5 v0.23): quote в updates.quote имеет приоритет,
+// иначе — верхнеуровневый verdict.quote.
+func pickQuote(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
 
 // ApplyVerdicts применяет решения LLM к БД.
 func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.ExtractedEmail, response *LLMResponse, inboxItemID int64) error {
@@ -26,14 +37,14 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 
 		case "update":
 			if verdict.TaskID != nil && verdict.Updates != nil {
-				if err := o.updateTaskFromVerdict(ctx, *verdict.TaskID, verdict, inboxItemID); err != nil {
+				if err := o.updateTaskFromVerdict(ctx, email, *verdict.TaskID, verdict, inboxItemID); err != nil {
 					return fmt.Errorf("failed to update task: %w", err)
 				}
 			}
 
 		case "completed":
 			if verdict.TaskID != nil {
-				if err := o.completeTaskFromVerdict(ctx, *verdict.TaskID, verdict, inboxItemID); err != nil {
+				if err := o.completeTaskFromVerdict(ctx, email, *verdict.TaskID, verdict, inboxItemID); err != nil {
 					return fmt.Errorf("failed to complete task: %w", err)
 				}
 			} else {
@@ -111,7 +122,7 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 }
 
 // updateTaskFromVerdict обновляет существующую задачу.
-func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
+func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, taskID int, verdict Verdict, inboxItemID int64) error {
 	updates := make(map[string]interface{})
 
 	if verdict.Updates.Priority != "" {
@@ -140,15 +151,18 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, taskID int, ve
 	var userComment *store.TaskComment
 	var aiComment *store.TaskComment
 
-	// Пользовательский комментарий
+	// Пользовательский комментарий (step 5 v0.23: автор = реальный отправитель
+	// письма из From; quote/фрагмент — в verdict_json, а не в body, чтобы
+	// копирование MD/TXT давало чистый текст без дублей).
 	if verdict.Updates.AddComment != "" {
 		userComment = &store.TaskComment{
 			TaskID:      int64(taskID),
-			Author:      "user",
+			Author:      senderLabel(email),
 			Body:        verdict.Updates.AddComment,
 			Direction:   "in",
 			Kind:        "user_comment",
 			InboxItemID: int64Ptr(inboxItemID),
+			VerdictJSON: commentQuoteJSON(pickQuote(verdict.Updates.Quote, verdict.Quote)),
 		}
 		if err := o.store.AddTaskComment(ctx, userComment); err != nil {
 			return err
@@ -207,8 +221,24 @@ func int64Ptr(v int64) *int64 {
 	return &v
 }
 
+// commentQuoteJSON (step 5 v0.23): сериализует «затронутый фрагмент» письма
+// (quote от LLM) в verdict_json комментария-саммари. Тело комментария
+// (body) остаётся чистым саммари — копирование MD/TXT не дублирует цитату.
+// Пустая цитата → "" (нет поля в JSON, фронт рендерить не будет).
+func commentQuoteJSON(quote string) string {
+	q := strings.TrimSpace(quote)
+	if q == "" {
+		return ""
+	}
+	data, err := json.Marshal(map[string]string{"quote": q})
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // completeTaskFromVerdict завершает задачу.
-func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, verdict Verdict, inboxItemID int64) error {
+func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, email *extractor.ExtractedEmail, taskID int, verdict Verdict, inboxItemID int64) error {
 	// status → SetTaskStatus: строка в task_status_history (by=ai) + статус.
 	if err := o.store.SetTaskStatus(ctx, int64(taskID), "completed", "ai"); err != nil {
 		return err
@@ -217,15 +247,16 @@ func (o *Orchestrator) completeTaskFromVerdict(ctx context.Context, taskID int, 
 	var userComment *store.TaskComment
 	var aiComment *store.TaskComment
 
-	// Пользовательский комментарий
+	// Пользовательский комментарий (step 5 v0.23: автор = реальный отправитель).
 	if verdict.Comment != "" {
 		userComment = &store.TaskComment{
 			TaskID:      int64(taskID),
-			Author:      "user",
+			Author:      senderLabel(email),
 			Body:        verdict.Comment,
 			Direction:   "in",
 			Kind:        "user_comment",
 			InboxItemID: int64Ptr(inboxItemID),
+			VerdictJSON: commentQuoteJSON(verdict.Quote),
 		}
 		if err := o.store.AddTaskComment(ctx, userComment); err != nil {
 			return err

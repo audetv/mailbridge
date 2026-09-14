@@ -8,8 +8,11 @@
       :class="[comment.direction, comment.kind]"
     >
       <div class="comment-header">
-        <span class="author">{{ comment.author }}</span>
+        <span class="author" :title="isLegacyAIUser(comment) ? 'AI-саммари письма' : undefined">
+          {{ isLegacyAIUser(comment) ? legacyAIAuthor(comment) : comment.author }}
+        </span>
         <span class="comment-badges">
+          <span v-if="isLegacyAIUser(comment)" class="kind-badge ai-summary-badge">AI-саммари</span>
           <span v-if="kindLabel(comment)" class="kind-badge">{{ kindLabel(comment) }}</span>
           <span v-if="isApproved(comment)" class="approved-badge">Утверждён</span>
         </span>
@@ -31,6 +34,9 @@
           </button>
         </span>
       </div>
+
+      <!-- Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
+           plain-комментарии — прежний текстовый путь с linkify. -->
       <div v-if="isMd(comment)" class="comment-body md" v-html="renderMarkdown(comment)"></div>
       <div v-else class="comment-body">
         <template v-for="(seg, i) in linkify(comment.body)" :key="i">
@@ -38,6 +44,34 @@
           <template v-else>{{ seg.text }}</template>
         </template>
       </div>
+
+      <!-- v0.23 шаг 5 (решение владельца 14.09, задача 378):
+           detail «Оригинал письма» — ТОЛЬКО в комментарии-саммари (author='user',
+           legacy AI-саммари письма) — там, где письмо смотрят.
+           Из AI-ответа (ai_verdict) detail УБРАН: вердикт = только саммари,
+           письмо и так стоит выше в потоке. -->
+      <details
+        v-if="showOriginal(comment)"
+        class="comment-original"
+      >
+        <summary>
+          Оригинал письма&ensp;
+          <span class="comment-original-meta">
+            {{ senderOf(comment) }} · {{ subjectOf(comment) }}
+          </span>
+        </summary>
+        <!-- Спойлер = ТОЛЬКО новая часть письма (diff с предыдущим письмом треда
+              + отсечение подписи/«Просьба при ответе»). Вся история — в ленте Inbox.
+              (решение владельца, 15.09, задача 378: «простыня» у Маргариты = её
+              клиент приписывает историю; спойлер показывает только ответ). -->
+        <div class="comment-original-body">
+          {{ originalBody(comment) }}
+          <div class="comment-original-foot">
+            Вся переписка — в ленте:
+            <router-link :to="'/inbox/' + (inboxItemOf(comment) && inboxItemOf(comment).id)">Открыть в Inbox</router-link>
+          </div>
+        </div>
+      </details>
 
       <!-- Утверждение ответа (admin-only, ФАЗА 4) -->
       <div v-if="canApprove(comment)" class="comment-actions">
@@ -52,8 +86,11 @@
         <span v-else class="approved-note">Ответ утверждён</span>
       </div>
 
-      <!-- Вложения комментария -->
-      <div v-if="commentAttachments[comment.id]?.length > 0" class="comment-attachments">
+      <!-- Вложения комментария.
+           AI-вердикт (author='ai', kind='ai_verdict') — ВСЕГДА только саммари:
+           вложения из письма туда не выносим (решение владельца, 15.09).
+           У legacy AI-саммари (author='user') вложения ОСТАЮТcя. -->
+      <div v-if="showAttachments(comment) && commentAttachments[comment.id]?.length > 0" class="comment-attachments">
         <div v-for="att in commentAttachments[comment.id]" :key="att.id" class="comment-attachment-item">
           <i class="pi pi-paperclip" />
           <a
@@ -76,6 +113,7 @@ import { useAuthStore } from '@/stores/auth'
 import { copyComment } from '@/utils/copy-comment'
 import { linkify } from '@/utils/linkify'
 import { renderMd, looksLikeMd } from '@/utils/render-md'
+import { newMessagePartOf } from '@/utils/new-message-part'
 
 // Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
 // plain-комментарии — прежний текстовый путь с linkify.
@@ -100,7 +138,10 @@ function renderMarkdown(comment) {
 }
 
 const props = defineProps({
-  comments: { type: Array, default: () => [] }
+  comments: { type: Array, default: () => [] },
+  // Шаг 5 v0.23: inbox-элементы задачи — источник «Оригинал письма»
+  // (отправитель + текст) по comment.inbox_item_id. Пусто → секции нет.
+  inboxItems: { type: Array, default: () => [] }
 })
 
 const route = useRoute()
@@ -122,6 +163,65 @@ const KIND_LABELS = {
 }
 function kindLabel(comment) {
   return KIND_LABELS[comment?.kind] || ''
+}
+
+// Шаг 5 v0.23 (решение #1): legacy-комментарии — AI саммари письма под именем
+// «user» (83 строки до фикса в verdicts.go, не мигрируем). Сигны: author
+// «user» (+ direction in — все реальные user-комменты direction=out, проверено
+// по БД). Показываем реального отправителя (из inboxItems по inbox_item_id)
+// + бейдж «AI-саммари».
+function isLegacyAIUser(comment) {
+  return comment?.author === 'user'
+}
+function legacyAIAuthor(comment) {
+  const s = senderOf(comment)
+  return s || 'автор письма'
+}
+
+// «Оригинал письма»: источник по comment.inbox_item_id (используется legacy-автором).
+function inboxItemOf(comment) {
+  const id = comment?.inbox_item_id
+  if (!id) return null
+  return props.inboxItems.find((i) => i?.id === id) || null
+}
+// Подпись оригинала: реальный отправитель письма (не «user»).
+function senderOf(comment) {
+  const item = inboxItemOf(comment)
+  if (!item) return ''
+  const name = (item.from_name || '').trim()
+  const addr = (item.from_contact || item.from_email || '').trim()
+  if (name && addr) return `${name} (${addr})`
+  return name || addr || ''
+}
+function subjectOf(comment) {
+  const item = inboxItemOf(comment)
+  return item?.subject ? `«${item.subject}»` : ''
+}
+// Detail письма показываем ТОЛЬКО в саммари-комментарии (author='user',
+// есть inbox_item_id) — там, где смотрят письмо. AI-вердикт (ai_verdict)
+// спойлера НЕ имеет (решение 14.09: там только саммари).
+function showOriginal(comment) {
+  return comment?.author === 'user' && Boolean(inboxItemOf(comment))
+}
+// AI-вердикт = только саммари: вложения в нём не показываем.
+// «AI» = новый ai_verdict (author='ai') — legacy-саммари (author='user') НЕ в счёт:
+// там вложения остаются (это комментарий с письмом, не чистый вердикт).
+function isAiVerdictComment(comment) {
+  return comment?.author === 'ai' || comment?.kind === 'ai_verdict'
+}
+function showAttachments(comment) {
+  return !isAiVerdictComment(comment)
+}
+function originalBody(comment) {
+  const item = inboxItemOf(comment)
+  if (!item) return ''
+  const body = item.body_text || item.body_html || ''
+  if (!body) return ''
+  // предыдущее письмо треда (по порядку inboxItems) — для diff
+  const list = props.inboxItems
+  const idx = list.indexOf(item)
+  const prev = idx > 0 ? list[idx - 1]?.body_text || '' : ''
+  return newMessagePartOf(body, prev)
 }
 
 // Кнопка «Утвердить ответ»: admin + kind=reply.
@@ -439,7 +539,26 @@ function formatDate(dateStr) {
     border-radius: 0.4em;
   }
 }
-
+.comment-original {
+  margin-top: 0.5rem;
+  border: 1px solid var(--mb-border, rgba(0,0,0,0.12));
+  border-radius: 0.4em;
+}
+.comment-original summary {
+  cursor: pointer;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--mb-muted, #555);
+}
+.comment-original-meta {
+  color: var(--mb-muted, #777);
+}
+.comment-original-body {
+  padding: 0.4rem 0.6rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
+}
 .comment-attachments {
   margin-top: 0.5rem;
   display: flex;

@@ -406,7 +406,8 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
       "task_id": 42,
       "updates": {
         "priority": "urgent",
-        "add_comment": "Комментарий",
+        "add_comment": "Комментарий — саммари сути, без копирования длинных фрагментов письма",
+        "quote": "Дословная цитата из письма (1–3 строки) — тот фрагмент, к которому относится этот вердикт",
         "change_status": "in_progress"
       }
     },
@@ -421,7 +422,8 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
         "type": "support",
         "source_email_id": "message-id из заголовка"
       },
-      "comment": "Дополнительный комментарий (опционально)"
+      "comment": "Дополнительный комментарий (опционально)",
+      "quote": "Дословная цитата из письма (1–3 строки) — фрагмент с подтверждением/решением"
     },
     {
       "action": "none",
@@ -429,6 +431,11 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
     }
   ]
 }
+
+ПРАВИЛО ДЛЯ quote:
+- quote — дословные 1–3 строки из ТЕКУЩЕГО письма (НЕ перефраз), к которым относится вердикт.
+- В add_comment/comment/summary пиши саммари своими словами, не копируя в него письмо целиком —
+  дословный фрагмент отдаёт отдельное поле quote. Если фрагмент выделить нельзя — quote = "".
 
 ПРИМЕР для completed с task_id = null (Пересланное письмо о выполненной работе):
 {
