@@ -732,8 +732,8 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 		Kind string `json:"kind"`
 		// Шаг 5 v0.23: связь с письмом-ответом (inbox_item) и quote-фрагмент
 		// (в verdict_json) — для ручных комментариев по конкретному письму.
-		InboxItemID  int64  `json:"inbox_item_id"`
-		VerdictJSON  string `json:"verdict_json"`
+		InboxItemID int64  `json:"inbox_item_id"`
+		VerdictJSON string `json:"verdict_json"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)

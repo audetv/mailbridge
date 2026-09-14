@@ -71,26 +71,26 @@ func setupUpdateStep5(t *testing.T, st *sqlite.Store, email *extractor.Extracted
 	}
 
 	if err := st.CreateThread(ctx, &store.Thread{
-		ThreadID:   email.MessageID,
-		Source:     "email",
-		Subject:    email.Subject,
+		ThreadID:     email.MessageID,
+		Source:       "email",
+		Subject:      email.Subject,
 		Participants: `["vika@example.com"]`,
-		Summary:    "Резюме цепочки",
+		Summary:      "Резюме цепочки",
 	}); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
 	task := &store.Task{
-		MessageID:  email.MessageID,
-		Subject:    "Согласовать сроки",
-		BodyText:   "Согласовать сроки с клиентом",
-		FromEmail:  email.From,
-		FromName:   extractNameFromEmail(t, email.From),
-		Project:    "Отель",
-		Type:       "task",
-		Priority:   "medium",
-		Status:     "in_progress",
-		ThreadID:   email.MessageID,
+		MessageID: email.MessageID,
+		Subject:   "Согласовать сроки",
+		BodyText:  "Согласовать сроки с клиентом",
+		FromEmail: email.From,
+		FromName:  extractNameFromEmail(t, email.From),
+		Project:   "Отель",
+		Type:      "task",
+		Priority:  "medium",
+		Status:    "in_progress",
+		ThreadID:  email.MessageID,
 	}
 	if err := st.CreateTask(ctx, task); err != nil {
 		t.Fatalf("CreateTask: %v", err)
