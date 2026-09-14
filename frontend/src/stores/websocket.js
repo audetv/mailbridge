@@ -69,18 +69,26 @@ export const useWebSocket = defineStore('websocket', () => {
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${location.host}/api/ws`
-    ws = new WebSocket(url)
+    // Хендлеры привязаны к конкретному экземпляру (sock) и проверяют
+    // «я ещё актуален» (ws === sock): killSocket() может сработать ПОСРЕДИ
+    // handshake (размонтирование view/возврат вкладки) — но браузер всё
+    // равно может сfireить onopen/один из событий на брошенном сокете.
+    // Без этого — «Cannot read properties of null (reading 'send')» в
+    // onopen и ложные resync.
+    const sock = new WebSocket(url)
+    ws = sock
 
-    ws.onopen = () => {
-      if (authToken) ws.send(JSON.stringify({ type: 'auth', token: authToken }))
+    sock.onopen = () => {
+      if (ws !== sock) return // брошенный экземпляр — молча игнорируем
+      if (authToken) sock.send(JSON.stringify({ type: 'auth', token: authToken }))
       if (deadConns >= 3) {
-        // «После N неудач — предупреждение»: видно в консоли, что соединение
-        // нестабильно, без spam от каждого close.
+        // «После N ИСТИННЫХ неудач — предупреждение» (нормальные close-и не
+        // считаются — см. onclose). Видно в консоли, без spam.
         console.warn(
           `ws: ${deadConns} неудачных подключений подряд — соединение нестабильно`
         )
-        deadConns = 0
       }
+      deadConns = 0
       // Индикатор загорится после ПОДТВЕРЖДЕНИЯ сервера (фрейм connected
       // после auth) — «связь есть» ≠ «сокет открыт». Первый раз при mount
       // всё и так подгружено (fetch в onMounted) → resync только при
@@ -93,7 +101,10 @@ export const useWebSocket = defineStore('websocket', () => {
       delayIdx = 0
     }
 
-    ws.onclose = () => {
+    sock.onclose = () => {
+      // Нормальное закрытие (killSocket: ws уже не sock) — это НЕ неудача:
+      // consumer ушёл/вкладку переключили, реконнект не планируем.
+      if (ws !== sock) return
       connected.value = false
       ws = null
       deadConns += 1
@@ -103,15 +114,17 @@ export const useWebSocket = defineStore('websocket', () => {
       delayIdx = Math.min(delayIdx + 1, RECONNECT_DELAYS.length - 1)
     }
 
-    ws.onerror = (e) => {
+    sock.onerror = (e) => {
+      if (ws !== sock) return
       // Без он-хендлера ошибка молча пропадала. Браузер обычно сам «догаляет»
       // сокетом (onclose → реконнект идёт оттуда); close() здесь — страховка
       // на случай «застрявшего» onClose (close идемпотентен).
       console.warn('ws error', e)
-      if (ws) ws.close()
+      if (ws === sock) sock.close()
     }
 
-    ws.onmessage = (e) => {
+    sock.onmessage = (e) => {
+      if (ws !== sock) return
       let event
       try {
         event = JSON.parse(e.data)

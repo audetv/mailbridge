@@ -245,4 +245,20 @@ describe('stores/websocket — надёжность (шаг 0, v0.22.1)', () => 
     expect(seen.length).toBe(before)
     store.disconnect()
   })
+
+  it('late onopen убитого сокета — молча игнорируется (гонка close-во-время-handshake)', () => {
+    const store = makeStore()
+    store.connect('tok')
+    const dead = MSocket.instances[0]
+    // Соединение ещё в handshake; consumer размонтировался → teardown:
+    // ws = null, close(). В реальном браузере close() на CONNECTING-сокате
+    // игнорируется, и onopen всё равно «доедет» — в старом коде это
+    // было «Cannot read properties of null (reading 'send')».
+    store.disconnect()
+    expect(store.connected).toBe(false)
+    expect(() => dead.onopen()).not.toThrow()
+    // И никаких ложных resync/connected от мёртвого экземпляра.
+    expect(store.events.some((e) => e.type === 'resync')).toBe(false)
+    expect(store.connected).toBe(false)
+  })
 })
