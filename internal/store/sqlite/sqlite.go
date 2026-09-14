@@ -487,7 +487,7 @@ func (s *Store) BulkUpdateTasks(ctx context.Context, taskIDs []int64, toStatus, 
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, c := range changes {
 		if _, err := tx.ExecContext(ctx,

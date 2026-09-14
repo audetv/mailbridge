@@ -602,9 +602,10 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 // BulkUpdateTasks — PATCH /api/tasks {ids:[], changes:{status?, project?}} (v0.23, шаг 4).
 // Пакетная смена status и/или project отобранных задач.
 // Контракт: 200 {count, statuses:{status:count}, errors:[…]} | 400 {error} | 404 {error}.
-//  - id не найден → 404 (контракт шага 4: «404 задача не найдена»);
-//  - идемпотентно: статус уже = to → строки истории нет (то же, что SetTaskStatus);
-//  - aтомарность не обязательна планом (на SQLite транзакция внутри store).
+//   - id не найден → 404 (контракт шага 4: «404 задача не найдена»);
+//   - идемпотентно: статус уже = to → строки истории нет (то же, что SetTaskStatus);
+//   - aтомарность не обязательна планом (на SQLite транзакция внутри store).
+//
 // WS: одно событие batch_update, не N × task_updated (шаг 4 п.4: «по простоте UI»).
 func (h *TaskHandler) BulkUpdateTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
