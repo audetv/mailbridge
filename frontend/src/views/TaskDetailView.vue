@@ -202,6 +202,9 @@ const epic = ref(null)
 const inboxItems = ref([])
 const taskAttachments = ref([])
 const expanded = ref(false)
+// WS-подписки — отписаться в onUnmounted (store живёт дольше компонента).
+let unsubscribeCommentApproved = null
+let unsubscribeResync = null
 
 const epicOptions = computed(() =>
   epicsStore.epics.map((e) => ({ label: e.name, value: e.id }))
@@ -245,6 +248,26 @@ const typeOptions = [
 
 onMounted(async () => {
   wsStore.connect(authStore.token)
+  unsubscribeCommentApproved = wsStore.onEvent((event) => {
+    // WS-событие comment_approved — бейдж «Утверждён» без перезагрузки.
+    if (event?.type !== 'comment_approved') return
+    if (event.taskId != null && Number(event.taskId) !== Number(route.params.id)) return
+    store.applyCommentApproved(event)
+  }, 'TaskDetailView:approved')
+
+  unsubscribeResync = wsStore.onEvent((event) => {
+    // WS resync (шаг 0, v0.22.1): переподключение — данные могли «отстать»
+    // за время разрыва → перетягиваем задачу, письма и вложения (БЕЗ F5).
+    if (event?.type !== 'resync') return
+    store.fetchTask(route.params.id)
+    store.fetchTaskInbox(route.params.id).then((items) => {
+      inboxItems.value = items
+    })
+    fetchTaskAttachments(route.params.id).then((atts) => {
+      taskAttachments.value = atts
+    })
+  }, 'TaskDetailView:resync')
+
   await store.fetchTask(route.params.id)
   syncFields()
   await loadEpics()
@@ -255,26 +278,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   wsStore.disconnect()
-})
-
-// WS-событие comment_approved — бейдж «Утверждён» без перезагрузки (ФАЗА 4).
-wsStore.onEvent((event) => {
-  if (event?.type !== 'comment_approved') return
-  if (event.taskId != null && Number(event.taskId) !== Number(route.params.id)) return
-  store.applyCommentApproved(event)
-})
-
-// WS resync (шаг 0, v0.22.1): переподключение — данные могли «отстать» за
-// время разрыва → перетягиваем задачу, связанные письма и вложения (БЕЗ F5).
-wsStore.onEvent((event) => {
-  if (event?.type !== 'resync') return
-  store.fetchTask(route.params.id)
-  store.fetchTaskInbox(route.params.id).then((items) => {
-    inboxItems.value = items
-  })
-  fetchTaskAttachments(route.params.id).then((atts) => {
-    taskAttachments.value = atts
-  })
+  unsubscribeCommentApproved?.()
+  unsubscribeResync?.()
 })
 
 watch(() => store.currentTask, () => {

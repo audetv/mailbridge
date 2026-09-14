@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useInboxStore } from '@/stores/inbox'
@@ -90,16 +90,24 @@ const statusOptions = [
   { label: 'Архив', value: 'archived' }
 ]
 
+let unsubscribeResync = null
+
 onMounted(() => {
   store.fetchItems()
+  // WS resync (шаг 0, v0.22.1): переподключение — за время разрыва могли
+  // приходить письма, которых лента не видела → перетянуть БЕЗ F5.
+  // Подписка в onMounted (а не в модуле), отписка в onUnmounted — иначе
+  // мёртвый view будет дёргать fetchItems на каждом реконнекте.
+  unsubscribeResync = wsStore.onEvent((event) => {
+    if (event?.type !== 'resync') return
+    store.fetchItems()
+    store.fetchUnreadCount()
+  }, 'InboxView:resync')
 })
 
-// WS resync (шаг 0, v0.22.1): переподключение — за время разрыва могли
-// приходить письма, которых лента не видела → перетянуть БЕЗ F5.
-wsStore.onEvent((event) => {
-  if (event?.type !== 'resync') return
-  store.fetchItems()
-  store.fetchUnreadCount()
+onUnmounted(() => {
+  unsubscribeResync?.()
+  unsubscribeResync = null
 })
 
 function onFilterChange() {
