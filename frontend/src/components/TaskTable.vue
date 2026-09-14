@@ -154,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
@@ -315,8 +315,7 @@ function rowClass(task) {
 function onRowClick(event) {
   // Гард (UX-фикс, v0.23): клики в зоне выбора НЕ ведут в задачу.
   // idx 0 — колонка checkbox, idx 1 — ID.
-  // Остальные ячейки открывают задачу как обычно (Gmail-паттерн: клик по
-  // строке = открыть; клик в зоне выбора = выбрать).
+  // Остальные ячейки открывают задачу как обычно (клик по строке = открыть).
   if (event.originalEvent) {
     const cell = event.originalEvent.target?.closest('td')
     if (cell) {
@@ -324,6 +323,15 @@ function onRowClick(event) {
       if (idx <= 1) return
     }
   }
+  // Gmail-логика (v0.23): клик по строке = ТОЛЬКО открыть задачу,
+  // выбор не трогаем. PrimeVue multiple сам «дозначивает»/«снимает»
+  // selection при row-click (DataTable.vue:796-855) — аннулируем
+  // изменение (snapshot identity → restore на nextTick: PrimeVue
+  // эммитит новый массив, если что-то поменял).
+  const before = store.selectedTasks
+  nextTick(() => {
+    if (store.selectedTasks !== before) store.selectedTasks = before
+  })
   router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
