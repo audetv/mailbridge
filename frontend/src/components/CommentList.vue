@@ -60,11 +60,16 @@
             {{ senderOf(comment) }} · {{ subjectOf(comment) }}
           </span>
         </summary>
-        <!-- Полное письмо (body_text из inbox_items по inbox_item_id).
-             «Новая часть» видна и в карточке «Оригинальное письмо» сверху —
-             здесь же — весь текст письма, как было ранее. -->
+        <!-- Спойлер = ТОЛЬКО новая часть письма (diff с предыдущим письмом треда
+              + отсечение подписи/«Просьба при ответе»). Вся история — в ленте Inbox.
+              (решение владельца, 15.09, задача 378: «простыня» у Маргариты = её
+              клиент приписывает историю; спойлер показывает только ответ). -->
         <div class="comment-original-body">
           {{ originalBody(comment) }}
+          <div class="comment-original-foot">
+            Вся переписка — в ленте:
+            <router-link :to="'/inbox/' + (inboxItemOf(comment) && inboxItemOf(comment).id)">Открыть в Inbox</router-link>
+          </div>
         </div>
       </details>
 
@@ -105,6 +110,7 @@ import { useAuthStore } from '@/stores/auth'
 import { copyComment } from '@/utils/copy-comment'
 import { linkify } from '@/utils/linkify'
 import { renderMd, looksLikeMd } from '@/utils/render-md'
+import { newMessagePartOf } from '@/utils/new-message-part'
 
 // Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
 // plain-комментарии — прежний текстовый путь с linkify.
@@ -195,7 +201,15 @@ function showOriginal(comment) {
   return comment?.author === 'user' && Boolean(inboxItemOf(comment))
 }
 function originalBody(comment) {
-  return inboxItemOf(comment)?.body_text || inboxItemOf(comment)?.body_html || ''
+  const item = inboxItemOf(comment)
+  if (!item) return ''
+  const body = item.body_text || item.body_html || ''
+  if (!body) return ''
+  // предыдущее письмо треда (по порядку inboxItems) — для diff
+  const list = props.inboxItems
+  const idx = list.indexOf(item)
+  const prev = idx > 0 ? list[idx - 1]?.body_text || '' : ''
+  return newMessagePartOf(body, prev)
 }
 
 // Кнопка «Утвердить ответ»: admin + kind=reply.

@@ -59,7 +59,10 @@ function mountList(comments, inboxItems) {
     props: { comments: list, inboxItems: (inboxItems || []).map(i => ({ ...i })) },
     global: {
       plugins: [pinia],
-      stubs: { 'vue-router': true }
+      stubs: {
+        'vue-router': true,
+        RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' }
+      }
     }
   })
   return wrapper
@@ -214,9 +217,14 @@ describe('CommentList (шаг 5 v0.23 — AI-вердикт = только са�
     expect(wrapper.find('.author').text()).toContain('Целищева Виктория')
     expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
     expect(wrapper.find('.ai-summary-badge').text()).toBe('AI-саммари')
-    // саммари-комментарий (author='user') НОСИТ detail письма — там его смотрят
+    // саммари-комментарий (author='user') НОСИТ detail письма — ТОЛЬКО новая часть
+    // (спойлер: «то, что написали в этом сообщении»; вся история — по ссылке в Inbox)
     expect(wrapper.find('.comment-original').exists()).toBe(true)
-    expect(wrapper.find('.comment-original-body').text()).toContain('сообщите сроки')
+    const body = wrapper.find('.comment-original-body')
+    expect(body.text()).toContain('сообщите сроки, когда ждать ответ')
+    expect(body.text()).toContain('Вся переписка — в ленте')
+    // router-link → <a href="/inbox/128"> (стабб в mountList)
+    expect(body.find('a[href="/inbox/128"]').exists()).toBe(true)
     expect(wrapper.find('summary').text()).toContain('Целищева Виктория')
   })
 
