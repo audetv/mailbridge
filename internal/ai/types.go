@@ -32,6 +32,7 @@ type NewTaskData struct {
 type TaskUpdates struct {
 	Priority     string `json:"priority,omitempty"`
 	AddComment   string `json:"add_comment,omitempty"`
+	Quote        string `json:"quote,omitempty"` // (step 5 v0.23) дословная цитата 1–2 строк из письма — «затронутый фрагмент»
 	ChangeStatus string `json:"change_status,omitempty"`
 }
 
@@ -42,8 +43,11 @@ type Verdict struct {
 	Task      *NewTaskData `json:"task,omitempty"`
 	Updates   *TaskUpdates `json:"updates,omitempty"`
 	Comment   string       `json:"comment,omitempty"`
-	Summary   string       `json:"summary,omitempty"`
-	ImageNote string       `json:"image_note,omitempty"`
+	// (step 5 v0.23) Дословная цитата 1–2 строк из письма, к которой относится
+	// вердикт (для completed — к comment). Опциональное поле.
+	Quote   string `json:"quote,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	ImageNote string `json:"image_note,omitempty"`
 }
 
 // LLMResponse — ответ модели.

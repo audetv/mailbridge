@@ -8,8 +8,11 @@
       :class="[comment.direction, comment.kind]"
     >
       <div class="comment-header">
-        <span class="author">{{ comment.author }}</span>
+        <span class="author" :title="isLegacyAIUser(comment) ? 'AI-саммари письма' : undefined">
+          {{ isLegacyAIUser(comment) ? legacyAIAuthor(comment) : comment.author }}
+        </span>
         <span class="comment-badges">
+          <span v-if="isLegacyAIUser(comment)" class="kind-badge ai-summary-badge">AI-саммари</span>
           <span v-if="kindLabel(comment)" class="kind-badge">{{ kindLabel(comment) }}</span>
           <span v-if="isApproved(comment)" class="approved-badge">Утверждён</span>
         </span>
@@ -31,6 +34,9 @@
           </button>
         </span>
       </div>
+
+      <!-- Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
+           plain-комментарии — прежний текстовый путь с linkify. -->
       <div v-if="isMd(comment)" class="comment-body md" v-html="renderMarkdown(comment)"></div>
       <div v-else class="comment-body">
         <template v-for="(seg, i) in linkify(comment.body)" :key="i">
@@ -38,6 +44,10 @@
           <template v-else>{{ seg.text }}</template>
         </template>
       </div>
+
+      <!-- v0.23 шаг 5 (решение владельца 14.09, задача 378): AI-вердикт = ТОЛЬКО
+           саммари. Письмо уже показана сверху (карточка «Оригинальное письмо») —
+           detail с телом письма и вложения в AI-комментарий НЕ дублируем. -->
 
       <!-- Утверждение ответа (admin-only, ФАЗА 4) -->
       <div v-if="canApprove(comment)" class="comment-actions">
@@ -100,7 +110,10 @@ function renderMarkdown(comment) {
 }
 
 const props = defineProps({
-  comments: { type: Array, default: () => [] }
+  comments: { type: Array, default: () => [] },
+  // Шаг 5 v0.23: inbox-элементы задачи — источник «Оригинал письма»
+  // (отправитель + текст) по comment.inbox_item_id. Пусто → секции нет.
+  inboxItems: { type: Array, default: () => [] }
 })
 
 const route = useRoute()
@@ -122,6 +135,35 @@ const KIND_LABELS = {
 }
 function kindLabel(comment) {
   return KIND_LABELS[comment?.kind] || ''
+}
+
+// Шаг 5 v0.23 (решение #1): legacy-комментарии — AI саммари письма под именем
+// «user» (83 строки до фикса в verdicts.go, не мигрируем). Сигны: author
+// «user» (+ direction in — все реальные user-комменты direction=out, проверено
+// по БД). Показываем реального отправителя (из inboxItems по inbox_item_id)
+// + бейдж «AI-саммари».
+function isLegacyAIUser(comment) {
+  return comment?.author === 'user'
+}
+function legacyAIAuthor(comment) {
+  const s = senderOf(comment)
+  return s || 'автор письма'
+}
+
+// «Оригинал письма»: источник по comment.inbox_item_id (используется legacy-автором).
+function inboxItemOf(comment) {
+  const id = comment?.inbox_item_id
+  if (!id) return null
+  return props.inboxItems.find((i) => i?.id === id) || null
+}
+// Подпись оригинала: реальный отправитель письма (не «user»).
+function senderOf(comment) {
+  const item = inboxItemOf(comment)
+  if (!item) return ''
+  const name = (item.from_name || '').trim()
+  const addr = (item.from_contact || item.from_email || '').trim()
+  if (name && addr) return `${name} (${addr})`
+  return name || addr || ''
 }
 
 // Кнопка «Утвердить ответ»: admin + kind=reply.
@@ -439,7 +481,6 @@ function formatDate(dateStr) {
     border-radius: 0.4em;
   }
 }
-
 .comment-attachments {
   margin-top: 0.5rem;
   display: flex;

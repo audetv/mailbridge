@@ -51,12 +51,12 @@ function mockAttachments() {
   vi.mocked(apiClient.get).mockResolvedValue({ data: [] })
 }
 
-function mountList(comments) {
+function mountList(comments, inboxItems) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const list = (comments || [fresh(REPLY), fresh(REPORT), fresh(COMMENT)]).map(c => ({ ...c }))
   const wrapper = mount(CommentList, {
-    props: { comments: list },
+    props: { comments: list, inboxItems: (inboxItems || []).map(i => ({ ...i })) },
     global: {
       plugins: [pinia],
       stubs: { 'vue-router': true }
@@ -141,5 +141,87 @@ describe('CommentList (ФАЗА 4 — бейджи + approve)', () => {
     expect(alert).toHaveBeenCalledWith('approve available only to admin')
     expect(wrapper.find('.approved-badge').exists()).toBe(false)
     delete window.alert
+  })
+})
+
+
+// Шаг 5 v0.23 (решение владельца 14.09, задача 378): AI-вердикт = ТОЛЬКО
+// саммари-текст комментария. Письмо показывается СВЕРХУ в карточке
+// «Оригинальное письмо» (уже новая часть, см. new-message-part.spec.js) —
+// дубль письма/цитаты/вложений ВНУТРИ AI-комментария убран.
+describe('CommentList (шаг 5 v0.23 — AI-вердикт = только саммари)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(useAuthStore).mockReturnValue({ user: { username: 'admin' } })
+    mockAttachments()
+  })
+
+  const INBOX_ITEM = {
+    id: 128,
+    from_name: 'Целищева Виктория',
+    from_contact: 'vcel@example.com',
+    subject: 'Сроки',
+    body_text: 'Алексей, сообщите сроки, когда ждать ответ. Ждём до конца недели.\nВика'
+  }
+  const VERDICT_COMMENT = {
+    ...COMMENT,
+    id: 50,
+    author: 'ai',
+    kind: 'ai_verdict',
+    inbox_item_id: 128,
+    verdict_json: JSON.stringify({ quote: 'сообщите сроки, когда ждать ответ' }),
+    body: 'Задача обновлена: клиент уточнила, что нужен новый документ для сайта.'
+  }
+
+  it('AI-вердикт: виден ТОЛЬКО саммари-текст, без quote-цитаты и без detail письма', () => {
+    const wrapper = mountList([VERDICT_COMMENT], [INBOX_ITEM])
+    expect(wrapper.find('.comment-body').text()).toContain('Задача обновлена: клиент уточнила')
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    expect(wrapper.find('details').exists()).toBe(false)
+  })
+
+  it('AI-вердикт с verdict_json и inbox_item: без дубля письма (quote из verdict не выносится)', () => {
+    const wrapper = mountList([VERDICT_COMMENT], [INBOX_ITEM])
+    // даже при наличии quote в verdict_json и inbox_item в comment-блоке письма нет
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('сообщите сроки, когда ждать ответ')
+  })
+
+  it('AI-вердикт без inbox_item (пусто inboxItems): UI не ломается, только текст', () => {
+    const wrapper = mountList([VERDICT_COMMENT], [])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    expect(wrapper.find('.comment-body').exists()).toBe(true)
+  })
+
+  // Решение #1 (2026-09-14): legacy-комментарии старого AI-пайплайна писались
+  // под author='user' (83 строки). Не мигрируем: UI выводит реального
+  // отправителя из inbox_item_id + бейдж «AI-саммари».
+  it('legacy author="user": показывает реального отправителя + бейдж AI-саммари', () => {
+    const legacy = {
+      ...COMMENT,
+      id: 52,
+      author: 'user',
+      direction: 'in',
+      inbox_item_id: 128,
+      verdict_json: undefined,
+      body: 'Клиент уточнил сроки по правкам сайта.'
+    }
+    const wrapper = mountList([legacy], [INBOX_ITEM])
+    expect(wrapper.find('.author').text()).not.toContain('user')
+    expect(wrapper.find('.author').text()).toContain('Целищева Виктория')
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
+    expect(wrapper.find('.ai-summary-badge').text()).toBe('AI-саммари')
+    // legacy-вердикт тоже без дубля письма
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+  })
+
+  it('legacy author="user" БЕЗ inboxItem → «автор письма», без краха', () => {
+    const legacy = { ...COMMENT, id: 53, author: 'user', inbox_item_id: undefined, body: 'Саммари.' }
+    const wrapper = mountList([legacy], [])
+    expect(wrapper.find('.author').text()).toContain('автор письма')
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
   })
 })

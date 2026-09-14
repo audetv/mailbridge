@@ -730,6 +730,10 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 		// kind: user_comment (по умолчанию) | report | reply (ФАЗА 4)
 		Kind string `json:"kind"`
+		// Шаг 5 v0.23: связь с письмом-ответом (inbox_item) и quote-фрагмент
+		// (в verdict_json) — для ручных комментариев по конкретному письму.
+		InboxItemID  int64  `json:"inbox_item_id"`
+		VerdictJSON  string `json:"verdict_json"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -757,6 +761,11 @@ func (h *TaskHandler) ReplyTask(w http.ResponseWriter, r *http.Request) {
 		Direction: "out",
 		Kind:      req.Kind,
 	}
+	// Шаг 5 v0.23: inbox_item_id=0 не храним (0 → NULL); verdict_json — строка.
+	if req.InboxItemID > 0 {
+		comment.InboxItemID = &req.InboxItemID
+	}
+	comment.VerdictJSON = req.VerdictJSON
 
 	if err := h.store.AddTaskComment(r.Context(), comment); err != nil {
 		w.Header().Set("Content-Type", "application/json")

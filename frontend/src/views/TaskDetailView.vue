@@ -94,7 +94,7 @@
         <Card>
           <template #title>Комментарии</template>
           <template #content>
-            <CommentList :comments="store.currentComments" />
+            <comment-list :comments="store.currentComments" :inbox-items="inboxItems" />
             <div class="reply-section">
               <ReplyForm :taskId="store.currentTask.id" @sent="onReplySent" />
             </div>
@@ -183,6 +183,7 @@ import ReplyForm from '@/components/ReplyForm.vue'
 import { useWebSocket } from '@/stores/websocket'
 import { useAuthStore } from '@/stores/auth'
 import WorkflowButtons from '@/components/WorkflowButtons.vue'
+import { newMessagePartOf } from '@/utils/new-message-part'
 
 const route = useRoute()
 const router = useRouter()
@@ -350,8 +351,29 @@ async function unlinkAttachment(attId) {
   }
 }
 
+// Превью письма (v0.23 шаг 5, решение владельца 14.09, задача 378):
+// показываем ТОЛЬКО НОВУЮ ЧАСТЬ письма («новое сообщение» — diff с предыдущим
+// письмом треда; diff нет/пустой → всё письмо срезанное по первой подписи).
+// Для писем с «историей переписки» (24k+ знаков «простыни») превью = несколько
+// строк; полная цепочка — по «Показать полностью» (escapeHtml(body_html/body_text)).
+const previewCache = new Map()
+function previewTextOf(item) {
+  if (!item) return ''
+  const key = item.id
+  const cached = previewCache.get(key)
+  if (cached) return cached
+  const list = inboxItems.value
+  const idx = list.indexOf(item)
+  const prev = idx > 0 ? list[idx - 1]?.body_text || '' : ''
+  const text = newMessagePartOf(item.body_text, prev)
+  previewCache.set(key, text)
+  if (previewCache.size > 100) previewCache.delete(previewCache.keys().next().value)
+  return text
+}
+
 function previewHtml(item) {
-  const html = item.body_html || escapeHtml(item.body_text)
+  const text = previewTextOf(item)
+  const html = text ? escapeHtml(text) : (item.body_html || escapeHtml(item.body_text))
   if (html.length > 5000) {
     return html.slice(0, 5000) + '...'
   }
