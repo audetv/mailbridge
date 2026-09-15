@@ -83,24 +83,30 @@ type TaskInboxItem struct {
 
 // Task представляет задачу в helpdesk.
 type Task struct {
-	ID            int64     `json:"id"`
-	MessageID     string    `json:"message_id"`
-	Subject       string    `json:"subject"`
-	BodyText      string    `json:"body_text"`
-	BodyHTML      string    `json:"body_html"`
-	FromEmail     string    `json:"from_email"`
-	FromName      string    `json:"from_name"`
-	Project       string    `json:"project"`
-	Type          string    `json:"type"`
-	Priority      string    `json:"priority"`
-	Status        string    `json:"status"`
-	Assignee      string    `json:"assignee"`
-	ThreadID      string    `json:"thread_id"`
-	SourceEmailID string    `json:"source_email_id"`
-	AIVerdict     string    `json:"ai_verdict"`
-	EpicID        *int64    `json:"epic_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            int64  `json:"id"`
+	MessageID     string `json:"message_id"`
+	Subject       string `json:"subject"`
+	BodyText      string `json:"body_text"`
+	BodyHTML      string `json:"body_html"`
+	FromEmail     string `json:"from_email"`
+	FromName      string `json:"from_name"`
+	Project       string `json:"project"`
+	Type          string `json:"type"`
+	Priority      string `json:"priority"`
+	Status        string `json:"status"`
+	Assignee      string `json:"assignee"`
+	ThreadID      string `json:"thread_id"`
+	SourceEmailID string `json:"source_email_id"`
+	AIVerdict     string `json:"ai_verdict"`
+	EpicID        *int64 `json:"epic_id"`
+	// v0.24, шаг 6 (Персоны): роли — контекст связи, не свойство персоны.
+	// RequestorID — кто обратился (task.requestor → person); nil = не привязана.
+	// AssigneeID — кто выполняет (task.assignee → person); nil = не назначен.
+	// Legacy-текст Assignee/FromEmail остаётся до конца шага (совместимость).
+	RequestorID *PersonID `json:"requestor_id,omitempty"`
+	AssigneeID  *PersonID `json:"assignee_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Thread представляет цепочку входящих.
@@ -134,6 +140,10 @@ type TaskComment struct {
 	VerdictJSON string    `json:"verdict_json,omitempty"`
 	Approved    *int      `json:"approved,omitempty"` // NULL = не утверждён; 0/1 — модерация ответа (ФАЗА 4)
 	CreatedAt   time.Time `json:"created_at"`
+
+	// v0.24, шаг 6 (Персоны): кто подтверждал/решал (comment.author → person); nil = не привязан.
+	// Legacy-текст Author остаётся до конца шага (совместимость).
+	AuthorPersonID *PersonID `json:"author_person_id,omitempty"`
 }
 
 // TaskAttachment представляет вложение задачи.
@@ -159,6 +169,12 @@ type TaskFilter struct {
 	Username string
 	Page     int
 	PerPage  int
+
+	// v0.24, шаг 6 (Персоны): фильтры по ролям (контекст связи).
+	// RequestorID/AssigneeID задаются по person UUID;
+	// legacy-текст Assignee по-прежнему работает (по email — совмещение).
+	RequestorID *PersonID `json:"requestor_id,omitempty"`
+	AssigneeID  *PersonID `json:"assignee_id,omitempty"`
 }
 
 // TaskListResult содержит результат запроса списка задач.
@@ -294,6 +310,42 @@ type Store interface {
 	BulkUpdateProject(ctx context.Context, taskIDs []int64, project string) (touched int, err error)
 	// GetTaskStatusHistory возвращает хронологию статусов задачи (по at asc).
 	GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*TaskStatusHistory, error)
+	// SetTaskPersonRoles привязывает/отвязывает роли задачи (v0.24, шаг 6):
+	// requestor/assignee по person UUID; nil — сохранить текущее, &"" (пустой ID) — отвязать.
+	// Ручное назначение имеет приоритет над авто (правило решения 6).
+	SetTaskPersonRoles(ctx context.Context, taskID int64, requestorID, assigneeID *PersonID) error
+
+	// Persons (v0.24, шаг 6) — справочник действующих лиц.
+	// CreatePerson создаёт персону; ID должен быть задан приложением (UUID).
+	CreatePerson(ctx context.Context, p *Person) error
+	GetPerson(ctx context.Context, id PersonID) (*Person, error)
+	ListPersons(ctx context.Context, filter *PersonFilter) (*PersonListResult, error)
+	UpdatePerson(ctx context.Context, p *Person) error // name/org/is_internal/confirmed/archived
+	// FindPersonByEmail — fast-path: (kind=email, value, case-fold) → персона; nil, nil если нет.
+	FindPersonByEmail(ctx context.Context, email string) (*Person, error)
+	// EnsurePersonByEmail создаёт (confirmed=false) или возвращает персону по email:
+	// авто-создание при первом контакте (решение 7); идемпотентно (UNIQUE(kind,value)).
+	EnsurePersonByEmail(ctx context.Context, email string) (*Person, error)
+
+	// Identities
+	AddPersonIdentity(ctx context.Context, ident *PersonIdentity) (*PersonIdentity, error)
+	ListIdentities(ctx context.Context, personID PersonID) ([]*PersonIdentity, error)
+	RemovePersonIdentity(ctx context.Context, id PersonID) error // unlink (без удаления записи)
+	// FindIdentity — natural key (kind, value); email с case-fold; nil, nil если нет.
+	FindIdentity(ctx context.Context, kind, value string) (*PersonIdentity, error)
+
+	// Suggestions / отрицательное знание (решения 4–5).
+	// SuggestMatch — предложение: идентичность вида identityKind/identityValue
+	// может принадлежать персонам, похожим по имени (fuzzy); учитывает match_rejections.
+	SuggestMatch(ctx context.Context, identityKind, identityValue, name string) ([]*Person, error)
+	// AcceptMatch — привязать идентичность к персоне (provenance='suggested').
+	AcceptMatch(ctx context.Context, identityID PersonID, personID PersonID) error
+	// RejectMatch — записать match_rejections (не повторять предложение).
+	RejectMatch(ctx context.Context, identityID, personID PersonID) error
+
+	// MergePersons — слияние персон (duplicates): идентичности sourceIdentities
+	// переносятся к targetID, ссылки tasks/comments переключаются; source — archived.
+	MergePersons(ctx context.Context, sourceID, targetID PersonID) error
 
 	// Task Comments
 	AddTaskComment(ctx context.Context, comment *TaskComment) error

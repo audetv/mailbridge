@@ -213,6 +213,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("project seed failed: %w", err)
 	}
 
+	// v0.24, шаг 6 (Персоны): схема + backfill из текущих данных (решение 9).
+	if err := s.migratePersons(ctx); err != nil {
+		return fmt.Errorf("persons migration failed: %w", err)
+	}
+	if err := s.backfillPersons(ctx); err != nil {
+		return fmt.Errorf("persons backfill failed: %w", err)
+	}
+
 	return nil
 }
 
