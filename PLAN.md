@@ -82,10 +82,27 @@ v0.22.0: проекты/модули, срез Plane, outbound SMTP, темы, o
 ### [ ] Шаг 6-F — хотфикс: чистота `person_identities` + разбор RFC822-отправителя (баг шага 6) — РЕЖИМ A
 **Добавлен 2026-09-15 после теста владельца на dev. Статус: решения зафиксированы (владелец подтвердил), исполнение — новая сессия.**
 
+**СТАРТ (новый агент, без анализа — порядок зафиксирован, отклонения НЕЛЬЗЯ):**
+```
+1. read_file PLAN.md → этот шаг (6-F). Всё уже решено — только исполнять.
+2. НЕ поднимать dev (8081/5173) до п.5 включительно — до-фикс backfill регенерирует ломаные персоны (инцидент 2026-09-15, см. проблему п.4).
+3. TDD по scope п.1–3,5 (сначала тесты красные):
+   - internal/extractor/ — parseFromHeader (name, email, display) + тесты edge-cases;
+   - internal/store/sqlite/persons.go — жёсткий email-контракт + EnsurePersonFromIncoming (авто-имя, эвристика «машина») + тесты;
+   - internal/processor — вызов EnsurePersonFromIncoming(name, email).
+4. make lint && make test (go) + cd frontend && npm run lint && npm run build && npm test.
+5. go build -o /tmp/mailbridge-dev ./cmd/mailbridge → в dev: sqlite3 data/mailbridge.db "DROP TABLE person_identities; DROP TABLE persons;" → поднять dev (/tmp/mailbridge-dev, :8081) → проверить: identity = чистые email, name заполнен, no-reply → org='машина' (в prod persons ещё нет — это нормальный backfill-сценарий).
+6. cd frontend && npm run e2e:seed → npx playwright test persons.spec.js (+ новые test G/H из п.7).
+7. CHANGELOG п.8 → commit → PR hotfix/6-f-clean-identity → CI → merge (правила CONTRIBUTING + skill mailbridge-dev; помнить: make lint НЕ включает vitest).
+8. Отметить шаг [x] + квитанцию, курсор → шаг 7.
+```
+**Инцидент-память (читай перед стартом):** dev-БД = копия prod + ломаные персоны — это ОЖИДАЕМОЕ состояние, не баг копирования; чиним кодом, а БД — DROP persons/identities + рестарт исправленным бинарником (п.5).
+
 **Проблема (найдена в owner-тесте, подтверждено по prod-БД):**
 1. `inbox_items.from_contact` — ВСЕ строки вида `Имя <email` **без закрывающей `>`** (prod: 53 distinct из вида, 0 с `>`): `strings.Trim(decoded, "<> ")` в `extractor.go:152` (cutset режет обе скобки с обоих концов).
 2. `EnsurePersonByEmail`-family (`sqlite/persons.go:396`, `normalizeEmail` 219) принимает ВХОД как email, но получает сырой RFC822-хедер `имя <email@x.ru` → identity value = мусор → нарушает `UNIQUE(kind,value)`-натурный ключ, ломает `SuggestMatch`/`primary_email`/label-формулу; dev-БД: 32 из 45 identity = отрывки, 36 безымянных персон.
 3. **Исправляется НЕ в `inbox_items.from_contact`/`tasks.assignee` (legacy — остаётся как есть; решение владельца 2026-09-15: в dev-разгаре старые записи не чиним, главное — новые)** — только путь persons.
+4. **Инцидент 2026-09-15 (важен для понимания):** после пересадки копии prod в dev, dev был поднят **на старом (до-фикс) бинарнике** — авто-backfill при старте (таблиц persons не было) **снова создал 36 ломаных персон** (created_at 20:23) из тех же отрывков (`tasks.from_email`, `assignee`, `comments.author`). Служебный вывод: **БД — расходный материал, чиним сначала КОД**, dev поднимать только исправленным бинарником, иначе backfill регенерирует мусор.
 
 **Решения (владелица, 2026-09-15):**
 1. **Чиним сейчас, отдельным хотфикс-шагом (стратегия (a))** — до выхода на шаг 7, чтобы шаг 7 строился на чистом фундаменте.
@@ -104,11 +121,7 @@ v0.22.0: проекты/модули, срез Plane, outbound SMTP, темы, o
    - **Эвристика машина/но-репл:** локаль email по `no-reply|noreply|auto( no)?|postfix|mailer|bot|donotreply|mailer-daemon|abuse|spamtraps?(list|)?@` (regex) + имя «машина» в org — помечаем `persons.org` = «машина» (не имя); UI-бейдж «машина» (optional, low-pri).
    - `FindPersonByEmail` + `SuggestMatch` (если есть) — не должны падать на identity-виде.
 3. **Processor:** `processor.go:252/313` — `EnsurePersonByEmail(email.From)` → **`EnsurePersonFromIncoming(name, email)`** (в `processor.go` `email.FromName` уже есть после шага 1; использовать его).
-4. **Dev-БД — пересадка на копию prod** (решение владельца 2026-09-15):
-   - `cd ~/apps/mailbridge && sqlite3 data/mailbridge.db "PRAGMA wal_checkpoint(TRUNCATE);"`
-   - Копировать `data/mailbridge.db` + `data/mailbridge.db-wal` + `data/mailbridge.db-shm` → `site/mailbridge/data/` (overwrite).
-   - После: `cd site/mailbridge/frontend && npm run e2e:seed` (правило AGENTS.md §3) — seed test persons.
-   - Старые identity в dev (мусор от текущего dev-БД) — **удаляются** при пересадке (новая копия prod — там persons нет).
+4. **Dev-БД — УПРАЩЁНО (решение владельца 2026-09-15, «пропустить этот шаг»):** пересадка как отдельный шаг **отменяется — БД больше НЕ КОПИРУЕМ**. Текущее состояние dev-БД уже годится: это копия prod (507 inbox) + авто-backfill (36 ломаных персон). Порядок: **сначала фикс кода** (п. 1–3, 5) + тесты → сборка бинарника → **сброс персон в dev** (`sqlite3 data/mailbridge.db "DROP TABLE person_identities; DROP TABLE persons;"`) → рестарт dev (исправленным бинарником) → backfill перезапустится (идемпотентно) → **проверяем**: все identity = чистые email, `name` автозаполнен, no-reply → `org='машина'`. ТОЛЬКО потом `npm run e2e:seed` + e2e. **Правило: dev НЕ поднимать до готовности фикса — любой старт до-фикс бинарника регенерирует ломаные персоны.**
 5. **Идемпотентное one-off** (обязательный, но на новой копии — no-op): в код добавить (по решению владельца: миграция в code, не SQL-скрипт): при `EnsurePersonFromIncoming` — если identity по email уже есть но value не чистый email → переименовать identity value → чистый email (idempotent, идемпотентный). Это страховка на случай prod-деплой с уже существующей БД с мусором (например, если владелец закинет v0.24.0 на прод).
 6. **UI** — low-pri, не блокирует: бейдж «машина» в `PersonsView` + `TaskTable` (org=`«машина»` → иконка ⚙️); name авто — уже отображается (label).
 7. **TDD:** unit-тесты:
