@@ -21,6 +21,28 @@
       showClear
       class="epic-select"
     />
+    <!-- Персоны (v0.24, шаг 6): фильтры «Заказчик»/«Исполнитель» по персонам
+         (UUID); legacy-поле assignee (email) — отдельно, без фильтра здесь. -->
+    <Select
+      v-model="requestor"
+      :options="personOptions"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Заказчик (персона)"
+      @change="onChange('requestor_id', $event.value)"
+      showClear
+      class="person-select"
+    />
+    <Select
+      v-model="assigneePerson"
+      :options="personOptions"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Исполнитель (персона)"
+      @change="onChange('assignee_id', $event.value)"
+      showClear
+      class="person-select"
+    />
   </div>
 </template>
 
@@ -29,18 +51,30 @@ import { ref, computed, onMounted } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
 import { useProjectsStore } from '@/stores/projects'
+import { usePersonsStore } from '@/stores/persons'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 
 const store = useTasksStore()
 const epicsStore = useEpicsStore()
 const projectsStore = useProjectsStore()
+const personsStore = usePersonsStore()
 
 const search = ref('')
 const project = ref(null)
 const epic = ref(null)
+const requestor = ref(null)
+const assigneePerson = ref(null)
 
 const epicOptions = ref([])
+
+// Персона-опции (v0.24, шаг 6): имя → org → email (для «в процессе узнавания»).
+const personOptions = computed(() =>
+  personsStore.list.map((p) => ({
+    label: p.name || p.org || p.primary_email || 'персона',
+    value: p.id
+  }))
+)
 
 // Опции «Проект» — из store (активные, archived=false), не хардкод:
 // проекты создаются/переименовываются/архивируются в рантайме,
@@ -53,9 +87,15 @@ onMounted(async () => {
   if (projectsStore.projects.length === 0) {
     await projectsStore.fetchProjects({ archived: 'false' })
   }
+  // Персоны (v0.24, шаг 6) — для фильтров Заказчик/Исполнитель.
+  if (personsStore.list.length === 0) {
+    await personsStore.fetchPersons().catch(() => {})
+  }
   // Восстанавливаем фильтры из store при возврате со страницы задачи
   search.value = store.filters.search || ''
   project.value = store.filters.project || null
+  requestor.value = store.filters.requestor_id || null
+  assigneePerson.value = store.filters.assignee_id || null
   if (project.value) {
     const projectId = await projectsIdByName(project.value)
     await loadEpicOptions(projectId)
@@ -126,5 +166,9 @@ defineExpose({ onProjectChange, onChange, epicOptions })
 
 .epic-select {
   width: 220px;
+}
+
+.person-select {
+  width: 200px;
 }
 </style>

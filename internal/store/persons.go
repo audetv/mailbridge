@@ -41,6 +41,12 @@ type Person struct {
 	// Archived = «вместо удаления»: закрытые задачи не теряют ссылку.
 	Archived bool `json:"archived"`
 
+	// PrimaryEmail — главная email-идентичность (исполнимость
+	// списка/карточки, не свойство персоны; omitempty: может отсутствовать).
+	// Канон §7.7.1: персона без имени — «в процессе узнавания», email
+	// — единственный отображаемый факт.
+	PrimaryEmail string `json:"primary_email,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

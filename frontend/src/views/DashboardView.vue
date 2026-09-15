@@ -22,6 +22,7 @@
       <TabBar :tabs="tabItems" :activeTab="activeTab" @select="onTabSelect" />
       <InboxView v-if="activeTab === 'inbox'" />
       <ProjectsView v-else-if="activeTab === 'projects'" />
+      <PersonsView v-else-if="activeTab === 'persons'" />
       <template v-else>
         <div class="tasks-toolbar">
           <Button
@@ -64,6 +65,7 @@ import TaskTable from '@/components/TaskTable.vue'
 import TabBar from '@/components/TabBar.vue'
 import InboxView from '@/views/InboxView.vue'
 import ProjectsView from '@/views/ProjectsView.vue'
+import PersonsView from '@/views/PersonsView.vue'
 import CreateTaskDialog from '@/components/CreateTaskDialog.vue'
 
 const themeStore = useThemeStore()
@@ -94,7 +96,8 @@ const tabItems = computed(() => [
   { key: 'backlog', label: 'Бэклог', count: 0 },
   { key: 'completed', label: 'Выполненные', count: 0 },
   { key: 'closed', label: 'Закрытые', count: 0 },
-  { key: 'projects', label: 'Проекты', count: 0 }
+  { key: 'projects', label: 'Проекты', count: 0 },
+  { key: 'persons', label: 'Персоны', count: 0 }
 ])
 
 const tabStatuses = {
@@ -104,7 +107,7 @@ const tabStatuses = {
   closed: ['closed']
 }
 
-const isKnownTab = (k) => k === 'inbox' || k === 'projects' || !!tabStatuses[k]
+const isKnownTab = (k) => k === 'inbox' || k === 'projects' || k === 'persons' || !!tabStatuses[k]
 const defaultStatuses = (tab) => tabStatuses[tab] || ['new', 'in_progress']
 
 // URL — source of truth: deep-link «?project=…» переживает reload.
@@ -112,6 +115,12 @@ const defaultStatuses = (tab) => tabStatuses[tab] || ['new', 'in_progress']
 // сразу покажет выбранный проект.
 if (typeof route.query.project === 'string' && route.query.project !== '') {
   store.filters.project = route.query.project
+  store.filters.page = 1
+}
+// Deep-link «?requestor_id=…» (кадр «К задачам» из Персон, шаг 6) — фильтр
+// заказчика переживает reload.
+if (typeof route.query.requestor_id === 'string' && route.query.requestor_id !== '') {
+  store.filters.requestor_id = route.query.requestor_id
   store.filters.page = 1
 }
 

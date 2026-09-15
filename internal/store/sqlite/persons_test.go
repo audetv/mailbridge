@@ -45,6 +45,38 @@ func TestPersons_Crud(t *testing.T) {
 	if err != nil || res.Total != 1 {
 		t.Fatalf("ListPersons: total=%v err=%v", res, err)
 	}
+	if len(res.Persons) != 1 || res.Persons[0].ID != p.ID {
+		t.Fatalf("ListPersons rows: %+v", res.Persons)
+	}
+}
+
+// Персона без имени («в процессе узнавания»): в списке виден её email,
+// поиск находит её по email (канон §7.7.1).
+func TestPersons_ListPrimaryEmailAndSearchByIdentity(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	p, err := s.EnsurePersonByEmail(ctx, "Гусев Алексей <agusev@gcconsulting.ru>")
+	if err != nil || p == nil {
+		t.Fatalf("EnsurePersonByEmail: %v / %v", err, p)
+	}
+	res, err := s.ListPersons(ctx, &store.PersonFilter{Page: 1, PerPage: 10})
+	if err != nil || res.Total != 1 {
+		t.Fatalf("ListPersons: %v / %v", res, err)
+	}
+	if len(res.Persons) != 1 || res.Persons[0].PrimaryEmail == "" {
+		t.Fatalf("expected primary_email in list row, got %+v", res.Persons)
+	}
+	// Поиск по фрагменту email-идентичности.
+	res, err = s.ListPersons(ctx, &store.PersonFilter{Search: "gcconsulting"})
+	if err != nil || res.Total != 1 {
+		t.Fatalf("search by identity: total=%v err=%v", res, err)
+	}
+	// Поиск по несуществующему email не находит.
+	res, err = s.ListPersons(ctx, &store.PersonFilter{Search: "whoever@nowhere.example"})
+	if err != nil || res.Total != 0 {
+		t.Fatalf("search no-match: total=%v err=%v", res, err)
+	}
 }
 
 func TestPersons_EnsureByEmail_Idempotent(t *testing.T) {

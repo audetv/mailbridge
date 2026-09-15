@@ -20,6 +20,9 @@ export const useTasksStore = defineStore('tasks', () => {
     epic_id: '',
     statuses: ['new', 'in_progress'],
     assignee: '',
+    // Персоны (v0.24, шаг 6): UUID-фильтры по ролям (заказчик/исполнитель).
+    requestor_id: '',
+    assignee_id: '',
     search: '',
     page: 1,
     per_page: 50
@@ -32,6 +35,9 @@ export const useTasksStore = defineStore('tasks', () => {
       delete params.statuses
       // пусто → не слать (иначе бекенд будет парсить '' как отсутствующий)
       if (!params.epic_id) delete params.epic_id
+      if (!params.requestor_id) delete params.requestor_id
+      if (!params.assignee_id) delete params.assignee_id
+      if (!params.assignee) delete params.assignee
       const { data } = await apiClient.get('/tasks', {
         params: {
           ...params,

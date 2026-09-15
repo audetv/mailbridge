@@ -338,7 +338,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.requestor_id, t.assignee_id, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -365,14 +365,24 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		task := &store.Task{}
 		unread := 0
 		var epicID sql.NullInt64
+		var reqID sql.NullString
+		var asnID sql.NullString
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &reqID, &asnID, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 		if epicID.Valid {
 			task.EpicID = &epicID.Int64
+		}
+		if reqID.Valid {
+			pid := store.PersonID(reqID.String)
+			task.RequestorID = &pid
+		}
+		if asnID.Valid {
+			pid := store.PersonID(asnID.String)
+			task.AssigneeID = &pid
 		}
 		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}

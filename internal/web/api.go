@@ -323,17 +323,36 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Персоны (шаг 6): фильтр задач по ролям — UUID-персоны.
+	// ?requestor_id= / ?assignee_id= — по UUID; ?assignee=<email> (legacy) —
+	// по тексту assignee (совместимость, решение 9: legacy живёт до конца шага).
+	var requestorID, assigneeID *store.PersonID
+	if raw := q.Get("requestor_id"); raw != "" {
+		v, ok := parsePersonIDValue(raw)
+		if ok {
+			requestorID = &v
+		}
+	}
+	if raw := q.Get("assignee_id"); raw != "" {
+		v, ok := parsePersonIDValue(raw)
+		if ok {
+			assigneeID = &v
+		}
+	}
+
 	filter := &store.TaskFilter{
-		Project:  q.Get("project"),
-		EpicID:   epicID,
-		Statuses: statuses,
-		Assignee: q.Get("assignee"),
-		Type:     q.Get("type"),
-		Priority: q.Get("priority"),
-		Search:   q.Get("search"),
-		Page:     page,
-		PerPage:  perPage,
-		Username: username,
+		Project:     q.Get("project"),
+		EpicID:      epicID,
+		Statuses:    statuses,
+		Assignee:    q.Get("assignee"),
+		RequestorID: requestorID,
+		AssigneeID:  assigneeID,
+		Type:        q.Get("type"),
+		Priority:    q.Get("priority"),
+		Search:      q.Get("search"),
+		Page:        page,
+		PerPage:     perPage,
+		Username:    username,
 	}
 
 	result, err := h.store.ListTasks(r.Context(), filter)

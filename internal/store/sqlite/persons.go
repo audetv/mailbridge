@@ -267,6 +267,28 @@ func scanPerson(row interface{ Scan(...interface{}) error }) (*store.Person, err
 	return p, nil
 }
 
+// scanPersonWithPrimaryEmail — как scanPerson + primary_email (колонка №7).
+// NULL → пустая строка (JSON omitempty скроет пустое значение).
+func scanPersonWithPrimaryEmail(row interface{ Scan(...interface{}) error }) (*store.Person, error) {
+	p := &store.Person{}
+	var isInternal, confirmed, archived int
+	var email interface{}
+	err := row.Scan(&p.ID, &p.Name, &p.Org, &isInternal, &confirmed, &archived, &email, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan person: %w", err)
+	}
+	if email != nil {
+		p.PrimaryEmail, _ = email.(string)
+	}
+	p.IsInternal = intToBool(isInternal)
+	p.Confirmed = intToBool(confirmed)
+	p.Archived = intToBool(archived)
+	return p, nil
+}
+
 func (s *Store) ListPersons(ctx context.Context, filter *store.PersonFilter) (*store.PersonListResult, error) {
 	if filter == nil {
 		filter = &store.PersonFilter{Page: 1, PerPage: 50}
@@ -284,14 +306,18 @@ func (s *Store) ListPersons(ctx context.Context, filter *store.PersonFilter) (*s
 		// Диалектная заметка (Postgres): SQLite без unicode-lowercase — LIKE
 		// без LOWER() (lower() — ASCII-only fallback); в Postgres → ILIKE /
 		// citext нормализация. Диалект — только в store-реализации (правило схемы).
-		where = append(where, "(name LIKE ? OR org LIKE ?)")
+		// Поиск и по имени/организации, и по identity (email/phone): персона
+		// «в процессе узнавания» имеет имя пустое — email единственный вход
+		// человека в справочник (канон §7.7.1).
 		like := "%" + filter.Search + "%"
-		args = append(args, like, like)
+		where = append(where, "(p.name LIKE ? OR p.org LIKE ? OR EXISTS ("+
+			"SELECT 1 FROM person_identities pi WHERE pi.person_id = p.id AND pi.value LIKE ?))")
+		args = append(args, like, like, like)
 	}
 	for _, f := range []struct {
 		col string
 		val *bool
-	}{{"confirmed", filter.Confirmed}, {"archived", filter.Archived}, {"is_internal", filter.IsInternal}} {
+	}{{"p.confirmed", filter.Confirmed}, {"p.archived", filter.Archived}, {"p.is_internal", filter.IsInternal}} {
 		if f.val != nil {
 			where = append(where, f.col+" = ?")
 			args = append(args, boolToInt(*f.val))
@@ -300,14 +326,27 @@ func (s *Store) ListPersons(ctx context.Context, filter *store.PersonFilter) (*s
 	whereSQL := strings.Join(where, " AND ")
 
 	var total int64
-	countRow := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM persons WHERE "+whereSQL, args...)
+	countRow := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM persons p WHERE "+whereSQL, args...)
 	if err := countRow.Scan(&total); err != nil {
 		return nil, fmt.Errorf("failed to count persons: %w", err)
 	}
 
 	offset := (filter.Page - 1) * filter.PerPage
-	query := fmt.Sprintf(`SELECT id, name, org, is_internal, confirmed, archived, created_at, updated_at
-		FROM persons WHERE %s ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`, whereSQL)
+	// primary_email — исполнимость строки: персона без имени «в процессе
+	// узнавания» (name='') — email единственная отображаемая деталь (канон §7.7.1).
+	// COALESCE: основная (is_primary=1) → самая свежая email → NULL (нет
+	// email вообще). Чистый SQL — Postgres-совместимо.
+	query := `SELECT p.id, p.name, p.org, p.is_internal, p.confirmed, p.archived,
+			COALESCE(
+				(SELECT pi.value FROM person_identities pi
+				 WHERE pi.person_id = p.id AND pi.kind = 'email' AND pi.is_primary = 1
+				 LIMIT 1),
+				(SELECT pi2.value FROM person_identities pi2
+				 WHERE pi2.person_id = p.id AND pi2.kind = 'email'
+				 ORDER BY pi2.created_at DESC LIMIT 1)
+			) AS primary_email,
+			p.created_at, p.updated_at
+		FROM persons p WHERE ` + whereSQL + ` ORDER BY p.name COLLATE NOCASE LIMIT ? OFFSET ?`
 	rows, err := s.db.QueryContext(ctx, query, append(args, filter.PerPage, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list persons: %w", err)
@@ -316,7 +355,7 @@ func (s *Store) ListPersons(ctx context.Context, filter *store.PersonFilter) (*s
 
 	var persons []*store.Person
 	for rows.Next() {
-		p, err := scanPerson(rows)
+		p, err := scanPersonWithPrimaryEmail(rows)
 		if err != nil {
 			return nil, err
 		}
