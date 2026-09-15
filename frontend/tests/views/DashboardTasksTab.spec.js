@@ -92,8 +92,8 @@ describe('DashboardView — переход вкладок по URL (шаг 13.2)
     const { router, wrapper } = await mountAt('/?tab=projects')
     await flushPromises()
 
-    // вкладки (TabBar) на месте
-    expect(wrapper.findAll('.tab-bar button').length).toBe(6)
+    // вкладки (TabBar) на месте (v0.24 шаг 6: + вкладка «Персоны» → 7)
+    expect(wrapper.findAll('.tab-bar button').length).toBe(7)
     expect(tasksMock.fetchTasks).not.toHaveBeenCalled()
 
     // имитируем ProjectsView.goToTasks(p): replace на «Активные» + фильтр
