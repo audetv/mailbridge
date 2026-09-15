@@ -65,6 +65,15 @@ v0.22.0: проекты/модули, срез Plane, outbound SMTP, темы, o
 
 **Риски/границы:** is_internal — только hint; identity без имени = «персона в процессе узнавания» (UI показывaет email); команды (info@) — open question в онтологии, не в v0.24.
 
+**Решение владельца (2026-09-15): схема — под Postgres, SQLite лишь слой.** Будущие слои: Postgres + ManticoreSearch (поиск). Правила для новых таблиц:
+- UUID (`persons.id`, FK) = `TEXT` в SQLite-реализации (тип уровня реализации, в Postgres станет `UUID`); PK — без `AUTOINCREMENT`.
+- Booleans — `INTEGER NOT NULL DEFAULT 0 CHECK (col IN (0,1))` (в Postgres → `BOOLEAN`).
+- Идентичность email: normalization case-fold в app-слое при записи + lookup; уникальность — `UNIQUE(kind, value)` на уровне таблицы (диалект-нейтрально).
+- FK — `ON DELETE SET NULL` + `IS NOT NULL` где семантика требует; archived — «вместо удаления» (закрытые задачи не теряют ссылку).
+- Движки поиска/fuzzy (LIKE/inmemory) — НЕ в схеме: ManticoreSearch — будущий слой, SQLite-LIKE — только dev-заглушка в app-слое.
+- Backfill — идемпотентно через `UNIQUE` + `INSERT OR IGNORE` (диалект SQLite; в Postgres — `ON CONFLICT DO NOTHING`).
+- Правило: Store-интерфейс — единственный диалект-aware слой; бизнес-код (processor/web) не знает диалект.
+
 ### [ ] Шаг 7 — Due date: дата «до…/нужно до…» + SLA (v0.24) — РЕЖИМ B
 
 **Цель.** Задача знает дату, до которой нужно ответить/выполнить («до 18.09») — статус/SLA/напоминания. (Зависит от шага 6: SLA меряется «кому» — на персонах.)
