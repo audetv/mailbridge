@@ -8,8 +8,9 @@
 
 **Дата обновления:** 2026-09-15
 **Версия:** в разработке **v0.24**; **v0.23.0 — выпущен 2026-09-15** (тег по решению владельца; блок 0–5 в `archive/PLAN.v0.23.md`)
-**Текущий шаг:** **шаг 7 (Due date/SLA) — РЕЖИМ B** (следующий после шага 6).
+**Текущий шаг:** **шаг 6-F (hotfix) — чистота identity — РЕЖИМ A, старт** (баг-фикс после шага 6; перед шагом 7).
 **Предыдущий шаг (завершён):** **шаг 6 (Персоны) — CLOSED 2026-09-15** (режим A; store+web+processor+UI+тесты+fix ListTasks; квитанция в шаге 6; к релизу v0.24.0 вместе со шагом 7).
+**След. после 6-F:** **шаг 7 (Due date/SLA) — РЕЖИМ B.**
 **Пред. шаг:** v0.22.0 (тег 2026-08-30) — архив.
 
 ## Что уже работает (карта — новые шаги строить поверх этого)
@@ -77,6 +78,52 @@ v0.22.0: проекты/модули, срез Plane, outbound SMTP, темы, o
 - Движки поиска/fuzzy (LIKE/inmemory) — НЕ в схеме: ManticoreSearch — будущий слой, SQLite-LIKE — только dev-заглушка в app-слое.
 - Backfill — идемпотентно через `UNIQUE` + `INSERT OR IGNORE` (диалект SQLite; в Postgres — `ON CONFLICT DO NOTHING`).
 - Правило: Store-интерфейс — единственный диалект-aware слой; бизнес-код (processor/web) не знает диалект.
+
+### [ ] Шаг 6-F — хотфикс: чистота `person_identities` + разбор RFC822-отправителя (баг шага 6) — РЕЖИМ A
+**Добавлен 2026-09-15 после теста владельца на dev. Статус: решения зафиксированы (владелец подтвердил), исполнение — новая сессия.**
+
+**Проблема (найдена в owner-тесте, подтверждено по prod-БД):**
+1. `inbox_items.from_contact` — ВСЕ строки вида `Имя <email` **без закрывающей `>`** (prod: 53 distinct из вида, 0 с `>`): `strings.Trim(decoded, "<> ")` в `extractor.go:152` (cutset режет обе скобки с обоих концов).
+2. `EnsurePersonByEmail`-family (`sqlite/persons.go:396`, `normalizeEmail` 219) принимает ВХОД как email, но получает сырой RFC822-хедер `имя <email@x.ru` → identity value = мусор → нарушает `UNIQUE(kind,value)`-натурный ключ, ломает `SuggestMatch`/`primary_email`/label-формулу; dev-БД: 32 из 45 identity = отрывки, 36 безымянных персон.
+3. **Исправляется НЕ в `inbox_items.from_contact`/`tasks.assignee` (legacy — остаётся как есть; решение владельца 2026-09-15: в dev-разгаре старые записи не чиним, главное — новые)** — только путь persons.
+
+**Решения (владелица, 2026-09-15):**
+1. **Чиним сейчас, отдельным хотфикс-шагом (стратегия (a))** — до выхода на шаг 7, чтобы шаг 7 строился на чистом фундаменте.
+2. **Автоподстановка имени** при авто-создании персон из входящих: `from_name` (у extractor уже парсится, 53/53 в prod заполнен) → `persons.name` (пустое имя → заполнить). **Эвристика «машин/но-репл»: локаль email `no-reply|noreply|no_?reply|postfix|mailer|donotreply|auto(no)?`** → имя всё равно ставим (это «name/псевдоним»), но помечаем `org=` `«машина»` и не пытаемся «узнать человека»; такие персоны — отдельный анализ позже (решение владельца: в реальном использовании такие email есть — support/gcarenda, Selectel, SpaceWeb и т.п.).
+3. **Чиним только `person_identities` + авто-имя**, не legacy-колонки (`from_contact`, `tasks.assignee`, `task_comments.author`) — те остаются как есть (решение владельца: приемлемо на dev, в prod step 6 ещё не выпущен).
+
+**Scope (режим A):**
+1. **Extractor — структура, не строки:**
+   - `extractor.go` — `From: cleanHeader(GetHeader("From"))` → заменить на разбор RFC822: выдать `FromName string`, `FromEmail string`, `FromDisplay string` (совместимый legacy-текст `имя <email>` **с** закрывающей скобкой для `inbox_items.from_contact` — но для отладки человек-читаемый).
+   - `extractNameFromEmail` + новый `extractEmailFromFrom` — общий `parseFromHeader(from string) (name, email, display string)`.
+   - `adapters/email_adapter.go` — `FromContact: display` (совместимость UI-история), `FromName: name`, + `FromEmail: email` (новый, struct-поле `store.InboxItem`) и `store.Task.FromEmail` (новый — для persons-моста).
+   - `extractor_test.go`/`adapters/email_adapter_test.go` + fixture: `«Имя <a@b.ru» → (name=Имя, email=a@b.ru, display=Имя <a@b.ru>)`; edge: `«<a@b.ru» → (name='', email=a@b.ru)`; `a@b.ru → (name='', email=a@b.ru)`; quoted `"Имя Фамилия" <a@b.ru>`; multi-address (take first).
+2. **Store/Persons:**
+   - `store.go` (interface) — `EnsurePersonByEmail` **остаётся** (контракт: email); + новый/дополненный `EnsurePersonFromIncoming(ctx, fromName, fromEmail string) (*Person, error)` — принимает разбор из extractor (не сырой хедер).
+   - `sqlite/persons.go` — `EnsurePersonByEmail` **жёстко** требует email-вид (`@` + `.` после @), иначе error (не мусор в identity). Новый helper `personFromIncoming(name, email)` — idempotent: identity(email) → person; если person.name пуст и имя пришло — автозаполняем (provenance: `name_from_incoming` в `match_rejections`-style note НЕ нужно — просто `updated_at`).
+   - **Эвристика машина/но-репл:** локаль email по `no-reply|noreply|auto( no)?|postfix|mailer|bot|donotreply|mailer-daemon|abuse|spamtraps?(list|)?@` (regex) + имя «машина» в org — помечаем `persons.org` = «машина» (не имя); UI-бейдж «машина» (optional, low-pri).
+   - `FindPersonByEmail` + `SuggestMatch` (если есть) — не должны падать на identity-виде.
+3. **Processor:** `processor.go:252/313` — `EnsurePersonByEmail(email.From)` → **`EnsurePersonFromIncoming(name, email)`** (в `processor.go` `email.FromName` уже есть после шага 1; использовать его).
+4. **Dev-БД — пересадка на копию prod** (решение владельца 2026-09-15):
+   - `cd ~/apps/mailbridge && sqlite3 data/mailbridge.db "PRAGMA wal_checkpoint(TRUNCATE);"`
+   - Копировать `data/mailbridge.db` + `data/mailbridge.db-wal` + `data/mailbridge.db-shm` → `site/mailbridge/data/` (overwrite).
+   - После: `cd site/mailbridge/frontend && npm run e2e:seed` (правило AGENTS.md §3) — seed test persons.
+   - Старые identity в dev (мусор от текущего dev-БД) — **удаляются** при пересадке (новая копия prod — там persons нет).
+5. **Идемпотентное one-off** (обязательный, но на новой копии — no-op): в код добавить (по решению владельца: миграция в code, не SQL-скрипт): при `EnsurePersonFromIncoming` — если identity по email уже есть но value не чистый email → переименовать identity value → чистый email (idempotent, идемпотентный). Это страховка на случай prod-деплой с уже существующей БД с мусором (например, если владелец закинет v0.24.0 на прод).
+6. **UI** — low-pri, не блокирует: бейдж «машина» в `PersonsView` + `TaskTable` (org=`«машина»` → иконка ⚙️); name авто — уже отображается (label).
+7. **TDD:** unit-тесты:
+   - `extractor_test.go` — `parseFromHeader` все edge cases (quoted, bare email, no-`>`, multi).
+   - `sqlite/persons_test.go` — `EnsurePersonByEmail("имя <a@b.ru>")` → **error** (не мусор); `EnsurePersonFromIncoming(«Имя», «a@b.ru») → person.name=«Имя»`; idempotence (2 calls, 1 person).
+   - `adapters/email_adapter_test.go` — `FromContact`/`FromName`/`FromEmail` при разных From.
+   - `processor_test.go` — `EnsurePersonFromIncoming` вызывается с (name, email) от `email` struct (не с хедером).
+   - **e2e:** persons.spec.js — новый test G: «входящее письмо (via seed API, `from_email=«Имя <x@y.z»`) → auto-create person.name=«Имя», identity.email=x@y.z, label формула работает»; **test H:** no-reply case (name=«машина», org-бейдж).
+8. **CHANGELOG** — `[0.24.0] Fixed:` bullet: `persons identity: чистый email вместо RFC822-хедера; авто-имя из from_name; эвристика «машина» для no-reply.`
+9. **Квитанция (чек-лист закрытия):** `make lint && make test` (go golangci + go test) + `cd frontend && npm run lint && npm run build && npm test` (vitest!) + e2e persons full (включая G/H) + PR (branch `hotfix/6-f-clean-identity`) + merge + squash-тест `e2e:seed` + `git push`. **Обязательный pitfall:** `make lint` НЕ включает vitest (см. mailbridge-dev SKILL).
+10. **Отложенные (не блокируют):** чистка legacy `inbox_items.from_contact`/`tasks.assignee` (шаг 9+), UI «машина» бейдж (по опыту), Manticore (после Postgres), `confirmed`/match_rejections (v0.24.1 по опыту).
+
+**Риски:** `@`-вид email в `EnsurePersonByEmail` — не ломать (E2E A — уже проверяет). `FromName` для `inbox_items` — не ломать (UI-история). Processor — не сломать (auto-assign по email).
+
+**Чек-лист закрытия:** CONTRIBUTING.md §Методология.
 
 ### [ ] Шаг 7 — Due date: дата «до…/нужно до…» + SLA (v0.24) — РЕЖИМ B
 
