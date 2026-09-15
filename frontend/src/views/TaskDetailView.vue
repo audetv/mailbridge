@@ -159,6 +159,31 @@
               <label>Исполнитель</label>
               <InputText v-model="assignee" @blur="updateField('assignee', assignee)" />
             </div>
+
+            <!-- Персоны (v0.24, шаг 6): роли на задаче (§7.7): заказчик/исполнитель.
+                 Legacy-поле «Исполнитель» (email) — рядом; персона — ссылка + роль. -->
+            <div class="person-fields">
+              <div class="field">
+                <label>Заказчик (персона)</label>
+                <Select
+                  v-model="requestorId"
+                  :options="personOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  @change="onPersonRoleChange('requestor_id', $event.value)"
+                />
+              </div>
+              <div class="field">
+                <label>Исполнитель (персона)</label>
+                <Select
+                  v-model="assigneeId"
+                  :options="personOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  @change="onPersonRoleChange('assignee_id', $event.value)"
+                />
+              </div>
+            </div>
           </template>
         </Card>
       </div>
@@ -173,6 +198,7 @@ import { useToast } from 'primevue/usetoast'
 import { useTasksStore } from '@/stores/tasks'
 import { useProjectsStore } from '@/stores/projects'
 import { useEpicsStore } from '@/stores/epics'
+import { usePersonsStore } from '@/stores/persons'
 import apiClient from '@/api/client'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
@@ -193,6 +219,7 @@ const projectsStore = useProjectsStore()
 const epicsStore = useEpicsStore()
 const wsStore = useWebSocket()
 const authStore = useAuthStore()
+const personsStore = usePersonsStore()
 
 const project = ref(null)
 const status = ref(null)
@@ -200,6 +227,9 @@ const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
 const epic = ref(null)
+// Персоны (v0.24, шаг 6): роли на задаче (§7.7) — заказчик/исполнитель.
+const requestorId = ref('')
+const assigneeId = ref('')
 const inboxItems = ref([])
 const taskAttachments = ref([])
 const expanded = ref(false)
@@ -209,6 +239,15 @@ let unsubscribeResync = null
 
 const epicOptions = computed(() =>
   epicsStore.epics.map((e) => ({ label: e.name, value: e.id }))
+)
+
+// Персона-опции: [{label, value}] (label: имя/org/email — для «в процессе
+// узнавания» (name='') — email из primary_email; канон §7.7.1).
+const personOptions = computed(() =>
+  personsStore.list.map((p) => ({
+    label: p.name || p.org || p.primary_email || 'персона',
+    value: p.id
+  }))
 )
 
 const projectOptions = [
@@ -272,6 +311,8 @@ onMounted(async () => {
   await store.fetchTask(route.params.id)
   syncFields()
   await loadEpics()
+  // Список персон для селекторов Заказчик/Исполнитель (шаг 6).
+  await personsStore.fetchPersons().catch(() => {})
   store.markAsRead(route.params.id)
   inboxItems.value = await store.fetchTaskInbox(route.params.id)
   taskAttachments.value = await fetchTaskAttachments(route.params.id)
@@ -315,6 +356,24 @@ function syncFields() {
   priority.value = store.currentTask.priority
   type.value = store.currentTask.type
   assignee.value = store.currentTask.assignee
+  // Персоны (роль на задаче, §7.7) — из store; '' = не назначена.
+  requestorId.value = store.currentTask.requestor_id || ''
+  assigneeId.value = store.currentTask.assignee_id || ''
+}
+
+// Смена роли персоны на задаче (v0.24, шаг 6; PUT /api/tasks/{id}/persons).
+// Контракт: опущенное поле НЕ меняется; явный '' — отвязать.
+async function onPersonRoleChange(field, value) {
+  const key = field === 'requestor_id' ? 'requestorId' : 'assigneeId'
+  try {
+    const task = await personsStore.setTaskRoles(route.params.id, {
+      [key]: value || null
+    })
+    store.currentTask = task
+    toast.add({ severity: 'success', summary: 'Персона обновлена', life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: 'Не удалось обновить персону', life: 3000 })
+  }
 }
 
 async function updateField(field, value) {

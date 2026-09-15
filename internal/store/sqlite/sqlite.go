@@ -245,7 +245,7 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 // GetTask возвращает задачу по ID.
 func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
 		FROM tasks WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -255,7 +255,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 // GetTaskByMessageID возвращает задачу по Message-ID.
 func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
 		FROM tasks WHERE message_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, messageID)
@@ -297,6 +297,15 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		conditions = append(conditions, "t.assignee = ?")
 		args = append(args, filter.Assignee)
 	}
+	// Персоны (шаг 6): фильтр по роли на задаче.
+	if filter.RequestorID != nil {
+		conditions = append(conditions, "t.requestor_id = ?")
+		args = append(args, string(*filter.RequestorID))
+	}
+	if filter.AssigneeID != nil {
+		conditions = append(conditions, "t.assignee_id = ?")
+		args = append(args, string(*filter.AssigneeID))
+	}
 	if filter.Type != "" {
 		conditions = append(conditions, "t.type = ?")
 		args = append(args, filter.Type)
@@ -329,7 +338,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 
 	offset := (filter.Page - 1) * filter.PerPage
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.requestor_id, t.assignee_id, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -356,14 +365,24 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		task := &store.Task{}
 		unread := 0
 		var epicID sql.NullInt64
+		var reqID sql.NullString
+		var asnID sql.NullString
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &reqID, &asnID, &task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 		if epicID.Valid {
 			task.EpicID = &epicID.Int64
+		}
+		if reqID.Valid {
+			pid := store.PersonID(reqID.String)
+			task.RequestorID = &pid
+		}
+		if asnID.Valid {
+			pid := store.PersonID(asnID.String)
+			task.AssigneeID = &pid
 		}
 		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}
@@ -428,6 +447,15 @@ func (s *Store) SetTaskStatus(ctx context.Context, taskID int64, toStatus, by st
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
+	// v0.24, шаг 6 (Персоны): авто-назначение assignee_id = тот, кто подтвердил
+	// (режим A). Срабатывает на переходе в закрытый статус; не затирает ручной assign.
+	// Best-effort: ошибка auto-assign не фейлит сам переход статуса (история уже важна).
+	if isClosedStatus(toStatus) {
+		// Best-effort: ошибка auto-assign не фейлит переход статуса (режим A:
+		// персоны не критичны — система работает и без них). TODO(step7/8): log hook.
+		_ = autoAssignLastConfirmer(ctx, tx, taskID)
+	}
+
 	// История: строка пишется только при реальном переходе (смена статуса,
 	// включая первый — from_status NULL). Повторный write с тем же статусом
 	// строки не даёт (идемпотентность: batch/bulk не заваливают историю).
@@ -446,6 +474,99 @@ func (s *Store) SetTaskStatus(ctx context.Context, taskID int64, toStatus, by st
 	}
 
 	return tx.Commit()
+}
+
+// isClosedStatus — статус, означающий «задача закрыта подтверждениями» (решение владельца:
+// «статут задачи = done или closed»). В v0.24-набор статусов (api.go): new|backlog|
+// in_progress|completed|closed — закрытые это completed и closed (legacy «done» больше нет).
+func isClosedStatus(status string) bool {
+	return status == "completed" || status == "closed"
+}
+
+// lastIncomingConfirmationEmail — автор последнего входящего подтверждения по задаче.
+// Канон (онтология §7.7, решение 3, шаг 6): auto-assignee = тот, кто подтвердил.
+// Источники (по приоритету):
+//  1. task_comments(direction='in') — входящие комментарии по задаче;
+//  2. from_email задачи — отправитель первого письма.
+//
+// Возвращает пустую строку, если подтверждения не найдено (режим A «без персон»).
+// db — интерфейс с QueryRowContext: работает и с *sql.DB, и с *sql.Tx.
+func lastIncomingConfirmationEmail(ctx context.Context, db queryer, taskID int64) (string, error) {
+	// 1) входящие комментарии — кто подтвердил по задаче (direction: 'in' входящее, 'out' исходящее).
+	var email string
+	err := db.QueryRowContext(ctx,
+		"SELECT c.author FROM task_comments c"+
+			" WHERE c.task_id = ? AND c.direction = 'in'"+
+			" ORDER BY c.created_at DESC LIMIT 1", taskID).Scan(&email)
+	if err == nil && email != "" {
+		return email, nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return "", fmt.Errorf("last confirmation via comments: %w", err)
+	}
+
+	// 2) fallback: the task's own from_email (first-message sender in the thread).
+	if err := db.QueryRowContext(ctx, "SELECT from_email FROM tasks WHERE id = ?", taskID).Scan(&email); err == nil {
+		return email, nil
+	}
+	return "", nil
+}
+
+// queryer — общий минимальный интерфейс для *sql.DB и *sql.Tx (контекстный доступ
+// без привязки к конкретному типу — авто-ассигнмент работает в tx смены статуса).
+type queryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// ensurePersonInTx = upsertPersonByEmailInTx, но с сигнатурой (string, error):
+// found=false трактует как no-op (пустую персона).
+func ensurePersonInTx(ctx context.Context, tx *sql.Tx, email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return "", nil
+	}
+	pid, found, err := upsertPersonByEmailInTx(ctx, tx, email)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", nil
+	}
+	return pid, nil
+}
+
+// autoAssignLastConfirmer — hook, вызывается из SetTaskStatus / BulkUpdateTasks
+// при переходе задачи в закрытый статус (completed/closed). В tx:
+//   - если assignee_id уже установлен — не трогаем (manual wins, решение 6);
+//   - ищем автора последнего входящего; создаём Person (email), если нет;
+//   - ставим assignee_id на задачу.
+//
+// Идемпотентно: повторный вызов на already-assigned task — no-op.
+func autoAssignLastConfirmer(ctx context.Context, tx *sql.Tx, taskID int64) error {
+	// Manual assign already set — do not overwrite (decision 3: manual is primary).
+	var existingPersonID sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT assignee_id FROM tasks WHERE id = ?`, taskID).Scan(&existingPersonID); err == nil && existingPersonID.Valid {
+		return nil
+	}
+
+	email, err := lastIncomingConfirmationEmail(ctx, tx, taskID)
+	if err != nil || email == "" {
+		return nil // no confirmation → no auto-assign; regime A "no persons" path
+	}
+
+	// Ensure person by email (create if missing), inside the same tx to keep
+	// the auto-assign atomic with the status change.
+	personID, err := ensurePersonInTx(ctx, tx, email)
+	if err != nil || personID == "" {
+		return nil // non-fatal: auto-assign best-effort.
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE tasks SET assignee_id = ? WHERE id = ?`, personID, taskID); err != nil {
+		return fmt.Errorf("auto-assign: update tasks.assignee_id: %w", err)
+	}
+	return nil
 }
 
 // BulkUpdateTasks — пакетная смена статуса N задач (v0.23, шаг 4).
@@ -494,6 +615,10 @@ func (s *Store) BulkUpdateTasks(ctx context.Context, taskIDs []int64, toStatus, 
 			`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			toStatus, c.id); err != nil {
 			return 0, fmt.Errorf("failed to update task %d status: %w", c.id, err)
+		}
+		// v0.24, шаг 6 (Персоны): auto-assign на closed (best-effort, не ломает bulk).
+		if isClosedStatus(toStatus) {
+			_ = autoAssignLastConfirmer(ctx, tx, c.id)
 		}
 		if c.fromStatus == toStatus {
 			continue // совпадение → строки истории нет (как SetTaskStatus)
@@ -583,11 +708,11 @@ func (s *Store) GetTaskStatusHistory(ctx context.Context, taskID int64) ([]*stor
 
 // AddTaskComment добавляет комментарий к задаче.
 func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) error {
-	query := `INSERT INTO task_comments (task_id, author, body, direction, kind, inbox_item_id, verdict_json) 
-		VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO task_comments (task_id, author, body, direction, kind, inbox_item_id, verdict_json, author_person_id) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	result, err := s.db.ExecContext(ctx, query,
 		comment.TaskID, comment.Author, comment.Body, comment.Direction,
-		comment.Kind, comment.InboxItemID, comment.VerdictJSON)
+		comment.Kind, comment.InboxItemID, comment.VerdictJSON, personIDToSQL(comment.AuthorPersonID))
 	if err != nil {
 		return fmt.Errorf("failed to add comment: %w", err)
 	}
@@ -616,36 +741,22 @@ func (s *Store) SetTaskCommentApproved(ctx context.Context, id int64, approved b
 
 // GetTaskComment возвращает один комментарий по id (для approve, ФАЗА 4).
 func (s *Store) GetTaskComment(ctx context.Context, id int64) (*store.TaskComment, error) {
-	c := &store.TaskComment{}
-	var inboxItemID sql.NullInt64
-	var verdictJSON sql.NullString
-	var approved sql.NullInt32
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
-		 FROM task_comments WHERE id = ?`, id).
-		Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction, &c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrCommentNotFound
-	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, author_person_id, created_at
+		 FROM task_comments WHERE id = ?`, id)
+	c, err := scanComment(row)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get comment %d: %w", id, err)
+		return nil, err
 	}
-	if inboxItemID.Valid {
-		c.InboxItemID = &inboxItemID.Int64
-	}
-	if verdictJSON.Valid {
-		c.VerdictJSON = verdictJSON.String
-	}
-	if approved.Valid {
-		v := int(approved.Int32)
-		c.Approved = &v
+	if c == nil {
+		return nil, store.ErrCommentNotFound
 	}
 	return c, nil
 }
 
 // GetTaskComments возвращает список комментариев задачи.
 func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.TaskComment, error) {
-	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, created_at
+	query := `SELECT id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, author_person_id, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, taskID)
@@ -656,26 +767,13 @@ func (s *Store) GetTaskComments(ctx context.Context, taskID int64) ([]*store.Tas
 
 	var comments []*store.TaskComment
 	for rows.Next() {
-		c := &store.TaskComment{}
-		var inboxItemID sql.NullInt64
-		var verdictJSON sql.NullString
-		var approved sql.NullInt32
-		err := rows.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction,
-			&c.Kind, &inboxItemID, &verdictJSON, &approved, &c.CreatedAt)
+		c, err := scanComment(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
-		if inboxItemID.Valid {
-			c.InboxItemID = &inboxItemID.Int64
+		if c != nil {
+			comments = append(comments, c)
 		}
-		if verdictJSON.Valid {
-			c.VerdictJSON = verdictJSON.String
-		}
-		if approved.Valid {
-			v := int(approved.Int32)
-			c.Approved = &v
-		}
-		comments = append(comments, c)
 	}
 	return comments, rows.Err()
 }
@@ -795,9 +893,11 @@ func (s *Store) TableExists(ctx context.Context, table string) (bool, error) {
 func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) {
 	t := &store.Task{}
 	var epicID sql.NullInt64
+	var requestorID, assigneeID sql.NullString
 	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
 		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
-		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &epicID, &t.CreatedAt, &t.UpdatedAt)
+		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &epicID, &requestorID, &assigneeID,
+		&t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -807,7 +907,52 @@ func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) 
 	if epicID.Valid {
 		t.EpicID = &epicID.Int64
 	}
+	if requestorID.Valid {
+		pid := store.PersonID(requestorID.String)
+		t.RequestorID = &pid
+	}
+	if assigneeID.Valid {
+		pid := store.PersonID(assigneeID.String)
+		t.AssigneeID = &pid
+	}
 	return t, nil
+}
+
+// scanComment читает строку task_comments во всех местах, где комментарии сканируются.
+// Порядок колонок (Postgres-совместимый, 2026-09-15):
+// id, task_id, author, body, direction, kind, inbox_item_id, verdict_json, approved, author_person_id, created_at
+// NULL = автор не распознан как Персона (режим A «без персон»).
+func scanComment(row interface {
+	Scan(...interface{}) error
+}) (*store.TaskComment, error) {
+	c := &store.TaskComment{}
+	var inboxItemID sql.NullInt64
+	var verdictJSON sql.NullString
+	var approved sql.NullInt32
+	var authorPersonID sql.NullString
+	err := row.Scan(&c.ID, &c.TaskID, &c.Author, &c.Body, &c.Direction,
+		&c.Kind, &inboxItemID, &verdictJSON, &approved, &authorPersonID, &c.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to scan comment: %w", err)
+	}
+	if inboxItemID.Valid {
+		c.InboxItemID = &inboxItemID.Int64
+	}
+	if verdictJSON.Valid {
+		c.VerdictJSON = verdictJSON.String
+	}
+	if approved.Valid {
+		v := int(approved.Int32)
+		c.Approved = &v
+	}
+	if authorPersonID.Valid {
+		pid := store.PersonID(authorPersonID.String)
+		c.AuthorPersonID = &pid
+	}
+	return c, nil
 }
 
 // CreateThread создаёт новую цепочку писем.
@@ -856,7 +1001,7 @@ func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary strin
 // GetActiveTasksByThread возвращает активные задачи цепочки.
 func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
 		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved', 'info_only') ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, threadID)

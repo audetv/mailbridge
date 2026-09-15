@@ -393,6 +393,49 @@ func main() {
 	mux.HandleFunc("/api/inbox/{id}/unread", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/archive", taskHandler.UpdateInboxStatus)
 	mux.HandleFunc("/api/inbox/{id}/task", taskHandler.CreateTaskFromInbox)
+
+	// Персоны (v0.24, шаг 6, Режим A). Канон: docs/ontology.md §7.7 / §7.7.1.
+	personHandler := web.NewPersonHandler(st, broker)
+	mux.HandleFunc("/api/persons", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			personHandler.ListPersons(w, r)
+		case http.MethodPost:
+			personHandler.CreatePerson(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/persons/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			personHandler.GetPerson(w, r)
+		case http.MethodPut:
+			personHandler.UpdatePerson(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/persons/{id}/archive", personHandler.ArchivePerson)
+	mux.HandleFunc("/api/persons/{id}/unarchive", personHandler.UnarchivePerson)
+	mux.HandleFunc("/api/persons/{id}/identities", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			personHandler.ListIdentities(w, r)
+		case http.MethodPost:
+			personHandler.AddIdentity(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	// Предложение слияния (fast-path/fuzzy): /api/persons-suggest.
+	// Слияние дублей: /api/persons-merge {target_id, source_id}.
+	// Отдельные пути — не /api/persons/{id}/..., чтобы не конфликтовать
+	// с wildcard /api/persons/{id} в Go ServeMux (concrete vs pattern).
+	mux.HandleFunc("/api/persons-suggest", personHandler.SuggestMatches)
+	mux.HandleFunc("/api/persons-merge", personHandler.MergePersons)
+	// Роль персоны на задаче: {requestor_id?, assignee_id?} (шаг 6, решение 6).
+	mux.HandleFunc("/api/tasks/{id}/persons", personHandler.SetTaskPersonRoles)
 	mux.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:

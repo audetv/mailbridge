@@ -90,6 +90,19 @@
         </template>
       </Column>
       <Column field="assignee" header="Исполнитель" style="width: 120px" />
+      <!-- Персоны (v0.24, шаг 6): роли на задаче (§7.7). UUID → имя из persons-store. -->
+      <Column field="requestor_id" header="Заказчик" style="width: 150px">
+        <template #body="{ data }">
+          <Tag v-if="requestorLabel(data)" :value="requestorLabel(data)" severity="info" />
+          <span v-else class="epic-none">—</span>
+        </template>
+      </Column>
+      <Column field="assignee_id" header="Исп. (персона)" style="width: 150px">
+        <template #body="{ data }">
+          <Tag v-if="assigneePersonLabel(data)" :value="assigneePersonLabel(data)" severity="success" />
+          <span v-else class="epic-none">—</span>
+        </template>
+      </Column>
     </DataTable>
 
     <!-- Плавающая панель bulk-действий — появляется после >=1 выбранного (шаг 4). -->
@@ -159,6 +172,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
 import { useProjectsStore } from '@/stores/projects'
+import { usePersonsStore } from '@/stores/persons'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
@@ -168,6 +182,7 @@ import { useToast } from 'primevue/usetoast'
 const store = useTasksStore()
 const epics = useEpicsStore()
 const projectsStore = useProjectsStore()
+const personsStore = usePersonsStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -269,6 +284,37 @@ function epicName(task) {
   if (!task.epic_id) return null
   const e = epics.epicById(task.epic_id)
   return e ? e.name : null
+}
+
+// — Персоны (v0.24, шаг 6): UUID → имя для колонок Заказчик/Исп. (персона). —
+// Ленивая подгрузка списка персон: только если есть задача с role-UUID.
+// personsStore общий (не переопределяем) — кэш из PersonsView/задания.
+let personsLoaded = false
+watch(
+  () => store.tasks,
+  (tasks) => {
+    if (personsLoaded || !tasks.some((t) => t.requestor_id || t.assignee_id)) return
+    personsLoaded = true
+    personsStore.fetchPersons().catch(() => {})
+  },
+  { immediate: true }
+)
+
+// Имя персоны по UUID (имя → org → email → пусто). UUID → 'персона-<4hex>'
+// (задача не теряет ссылку, если персона выключилась из списка).
+function personNameById(id) {
+  if (!id) return ''
+  const p = personsStore.list.find((x) => x.id === id)
+  if (!p) return id.slice(0, 4) + '…'
+  return p.name || p.org || p.primary_email || id.slice(0, 4) + '…'
+}
+
+function requestorLabel(task) {
+  return personNameById(task.requestor_id)
+}
+
+function assigneePersonLabel(task) {
+  return personNameById(task.assignee_id)
 }
 
 function formatDate(dateStr) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.0] - 2026-09-15
+
+### Added
+- **Персоны (v0.24, шаг 6, режим A):** справочник `persons` (id UUID, name, org, is_internal, confirmed, archived) + `person_identities` (person_id, kind, value, is_primary); Postgres-совместимая схема (TEXT/BIGINT/TIMESTAMP, без AUTOINCREMENT/FTS5, `ON CONFLICT DO NOTHING`, booleans `CHECK IN (0,1)`). API `/api/persons*`: CRUD, identities (primary email), `/api/persons-suggest` (fast-path + fuzzy) и `/api/persons-merge` `{target_id, source_id}` (source → archived, задачи reassigned на target). `tasks.requestor_id`/`tasks.assignee_id` (UUID) + `task_comments.person_id`; авто-создание персоны при первом контакте (`confirmed=false`, до подтверждения — email, не имя) и авто-назначение assignee при закрытии (`autoAssignLastConfirmer`, manual wins; best-effort). Backfill: `tasks.assignee` → `persons` + `tasks.requestor_id`. UI: вкладка «Персоны» (список + поиск + детали + identities + архив), selects «Заказчик»/«Исполнитель» в карточке задачи, колонки «Заказчик»/«Исполнитель» в таблице задач, фильтры по ролям + deep-link `?requestor_id=<uuid>` из «К задачам». Тесты: unit (fast-path/fuzzy/reject/merge/auto-assign-on-close), web `persons_test.go`, e2e `tests-e2e/persons.spec.js` (создание через UI, primary_email, связывание/отвязание ролей, deep-link + фильтр, merge).
+- **Fix (входит в 0.24.0):** `ListTasks` SELECT не перечислял `t.requestor_id`/`t.assignee_id` (фильтр `?requestor_id=`/`?assignee_id=` работал, но строки сериализовались с `requestor_id:null`) — добавлены обе колонки + scan в `sql.NullString` → `*PersonID`.
+
 ## [0.23.0] - 2026-09-15
 
 ### Added
