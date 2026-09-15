@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] (v0.23.0)
+## [0.23.0] - 2026-09-15
 
 ### Added
 - **История статусов задачи (v0.23, шаг 2):** таблица `task_status_history` (task_id, from_status NULL при создании, to_status, by, created_at); единственный путь смены статуса — `Store.SetTaskStatus` (транзакция: UPDATE + строка истории при реальном переходе); пишут UI/workflow-кнопки (`by` из JWT) и AI-вердикты (`by=ai`); `GET /api/tasks/{id}/history` (хронология, `[]` если нет переходов); старые переходы не восстанавливаются
