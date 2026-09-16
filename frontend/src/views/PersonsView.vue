@@ -51,6 +51,17 @@
                   icon="pi pi-eye"
                   @click="openProfile(data)"
                 />
+                <!-- 6-G: ручное подтверждение (не архивным, пока не подтверждена) -->
+                <Button
+                  v-if="!data.confirmed && !data.archived"
+                  label="Подтвердить"
+                  severity="secondary"
+                  text
+                  size="small"
+                  icon="pi pi-check"
+                  :loading="confirmBusyId === data.id"
+                  @click="confirm(data)"
+                />
                 <Button
                   v-if="!data.archived"
                   label="В архив"
@@ -144,6 +155,17 @@
           </Message>
         </div>
 
+        <!-- 6-G: ручное подтверждение персоны -->
+        <h4 class="profile-section">Подтверждение</h4>
+        <p v-if="!profile.confirmed" class="muted">
+          Персона создана автоматически при первом контакте (heuristic identity).
+          Подтвердите, что это корректный человек / организация.
+        </p>
+        <p v-else class="muted">Персона подтверждена (6-G).</p>
+        <Message v-if="confirmError" severity="error" :closable="true" @close="confirmError = ''" class="merge-error">
+          {{ confirmError }}
+        </Message>
+
         <h4 class="profile-section">Слияние дубля</h4>
         <div class="merge-row">
           <InputText v-model="mergeValue" placeholder="Email или имя дубля (source)" />
@@ -164,6 +186,14 @@
       </div>
       <template #footer>
         <div class="dialog-actions">
+          <!-- 6-G: ручное подтверждение персоны -->
+          <Button
+            v-if="profile && !profile.confirmed"
+            label="Подтвердить"
+            icon="pi pi-check"
+            :loading="confirmBusyId === (profile && profile.id)"
+            @click="confirm(profile)"
+          />
           <Button label="К задачам" icon="pi pi-list" severity="secondary" @click="goToTasks(profile)" />
           <Button label="Закрыть" severity="secondary" text @click="profileDialog = false" />
         </div>
@@ -320,6 +350,33 @@ async function addIdentity() {
     identityError.value = e.response?.data?.error || 'Не удалось привязать идентичность'
   } finally {
     identityBusy.value = false
+  }
+}
+
+// 6-G: ручное подтверждение персоны ===================================
+// Кнопка «Подтвердить» (строка списка + футер профиля) → store.confirmPerson:
+// PUT /api/persons/{id} ПОЛНЫМ payload (UpdatePerson — full-overwrite, см. store).
+const confirmError = ref('')
+const confirmBusyId = ref(null)
+
+async function confirm(p) {
+  if (!p) return
+  confirmError.value = ''
+  confirmBusyId.value = p.id
+  try {
+    const updated = await store.confirmPerson(p)
+    toast.add({
+      severity: 'success',
+      summary: `Подтверждена: ${updated.name || p.name || p.id}`,
+      life: 3000
+    })
+    if (profile.value && profile.value.id === p.id) {
+      profile.value = { ...profile.value, ...updated }
+    }
+  } catch (e) {
+    confirmError.value = e.response?.data?.error || 'Не удалось подтвердить персону'
+  } finally {
+    confirmBusyId.value = null
   }
 }
 

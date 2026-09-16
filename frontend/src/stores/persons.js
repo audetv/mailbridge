@@ -56,6 +56,29 @@ export const usePersonsStore = defineStore('persons', {
       return data
     },
 
+    // Шаг 6-G: ручное подтверждение персоны.
+    // ВАЖНО: бекенд UpdatePerson — FULL-overwrite (все 5 полей из тела
+    // перезаписывают сохранённые, internal/web/persons.go), поэтому payload
+    // всегда ПОЛНЫЙ: текущие name/org/is_internal/archived + confirmed=true.
+    // Отдельный action (не updatePerson), чтобы UI не мог забыть поле.
+    async confirmPerson(person) {
+      const payload = {
+        name: person.name || '',
+        org: person.org || '',
+        is_internal: !!person.is_internal,
+        archived: !!person.archived,
+        confirmed: true
+      }
+      const { data } = await apiClient.put(`/persons/${person.id}`, payload)
+      // Локальное обновление (без доп. GET): list + selected.
+      const idx = this.list.findIndex((x) => x.id === person.id)
+      if (idx !== -1) this.list[idx] = { ...this.list[idx], ...data }
+      if (this.selected && this.selected.id === person.id) {
+        this.selected = { ...this.selected, ...data }
+      }
+      return data
+    },
+
     // POST /api/persons — создание (+опц. email → идентичность).
     async createPerson(payload) {
       const { data } = await apiClient.post('/persons', payload)

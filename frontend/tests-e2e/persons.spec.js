@@ -242,9 +242,20 @@ async function fetchInboxUnread(req) {
 }
 
 // Персона по email: list даёт primary_email; identities — под-роут /api/persons/{id}/identities.
+// ПЕРЕГРУЗКА-БЕЗОПАСНО: бекенд ограничивает per_page (max 200, иначе дефолт 50),
+// а репо может расти за 1 страницу → идём по страницам до end (вместо одного большого request).
 async function findPersonByEmail(req, email) {
-  const persons = ((await api(req, 'GET', '/api/persons?per_page=500')).json?.persons) || []
-  return persons.find((p) => (p.primary_email || '').toLowerCase() === email.toLowerCase()) || null
+  let page = 1
+  for (let guard = 0; guard < 20; guard++) { // cap на 20 страниц (>=4000 персон) как защита от зацикливания
+    const r = await api(req, 'GET', `/api/persons?page=${page}&per_page=100`)
+    const arr = r.json?.persons || []
+    const hit = arr.find((p) => (p.primary_email || '').toLowerCase() === email.toLowerCase())
+    if (hit) return hit
+    const total = Number(r.json?.total || 0)
+    if (page * 100 >= total) return null
+    page++
+  }
+  return null
 }
 
 async function assertIdentityClean(req, person, email) {
@@ -320,6 +331,61 @@ test('G: 6-F legacy-форма inbox → персона + чистый email', a
   expect(person, 'персона по чистому email ' + expectEmail).toBeTruthy()
   expect((person.name || '').trim().length > 0, 'name авто-заполнен (from_name=' + normal.from_name + ')').toBe(true)
   await assertIdentityClean(req, person, expectEmail)
+})
+
+// I: Шаг 6-G (v0.24): ручное подтверждение персоны в UI.
+// Персона (confirmed=false) → клик «Подтвердить» на строке → тег «не подтверждена»
+// исчезает + API: confirmed=true, ИМЯ/ОРГАН не потеряны (регрессия full-overwrite:
+// UpdatePerson перезаписывает ВСЕ поля из тела — payload должен быть полным).
+test('I: 6-G подтверждение персоны в UI → confirmed=true, поля не потеряны', async ({ page }) => {
+  const req = page.request
+  await login(req)
+  const ts = Date.now().toString()
+  const pName = `E2E Conf ${ts}`
+  const pOrg = `Орг6G ${ts}`
+
+  const p = await api(req, 'POST', '/api/persons', { name: pName, org: pOrg, is_internal: true })
+  expect(p.status, `POST /api/persons → ${p.status}`).toBe(201)
+  const person = p.json.person || p.json
+  expect(person.id).toBeTruthy()
+
+  // Исходное состояние: confirmed=false.
+  const d0 = await api(req, 'GET', `/api/persons/${person.id}`)
+  expect(d0.json.confirmed).toBe(false)
+
+  await page.goto('/')
+  await expect(page.locator('.tab-bar')).toBeVisible({ timeout: 15000 })
+  await page.locator('.tab-bar button', { hasText: 'Персоны' }).click()
+  await expect(page.locator('.persons')).toBeVisible({ timeout: 10000 })
+
+  // Поиск по уникальному имени (robust к пагинации — паттерн теста A).
+  const searchI = page.locator('.persons input[placeholder^="Поиск"]')
+  await searchI.fill(pName)
+  const row = page.locator('.persons tbody tr', { hasText: pName }).first()
+  await expect(row, 'персона I не найдена по поиску').toBeVisible({ timeout: 8000 })
+
+  // До клика: метка «не подтверждена» видна.
+  await expect(row.locator('text="не подтверждена"').first()).toBeVisible()
+
+  // Клик «Подтвердить».
+  await row.locator('button', { hasText: 'Подтвердить' }).first().click()
+
+  // После: метка «не подтверждена» на этой строке исчезла (тег-статус обновлён).
+  await expect
+    .poll(
+      async () => row.locator('text="не подтверждена"').count(),
+      { timeout: 8000, message: 'тег «не подтверждена» не исчез после подтверждения' }
+    )
+    .toBe(0)
+
+  // API: confirmed=true + name/org/is_internal СОХРАНИЛИСЬ (полный payload).
+  const d1 = await api(req, 'GET', `/api/persons/${person.id}`)
+  expect(d1.status).toBe(200)
+  expect(d1.json.confirmed).toBe(true)
+  expect(d1.json.name).toBe(pName)
+  expect(d1.json.org).toBe(pOrg)
+  expect(d1.json.is_internal).toBe(true)
+  expect(d1.json.archived).toBe(false)
 })
 
 // H: machine-форма (postfix / no-reply / noreply в локальной части) →
