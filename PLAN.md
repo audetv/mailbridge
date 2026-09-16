@@ -158,14 +158,15 @@ v0.22.0: проекты/модули, срез Plane, outbound SMTP, темы, o
 **Что НЕ входит (границы):** авто-правила confirmation (B-2 — отдельно, по данным B-1); «отвергнуть»/match-rejections UI (задел шага 6, по опыту); RBAC. **Правило 10 соблюдено: отдельный номерной шаг, не «заодно» в шаге 7.**
 
 **Решения (зафиксировано 2026-09-16, режим обсуждения → владелец согласился):**
-1. Форма: **кнопка/чекбокс «Подтвердить» на карточке персоны** (список + профиль), `PUT /api/persons/{id}` `{"confirmed": true}`.
-2. Обратное действие — не в этом шаге (обсудить B-2); тег-статус уже отображается.
-3. Событие WS: опционально, low-pri (не блокирует).
-4. e2e: persons.spec.js — новый test I: «персона (confirmed=false) → клик «Подтвердить» → тег «подтверждена» + GET /api/persons показывает confirmed=true».
+1. Форма: **кнопка «Подтвердить» на карточке персоны** (список + профиль), `PUT /api/persons/{id}` с **полным payload** (см. п.2 — почему не `{"confirmed":true}`).
+2. **Обнаружено при старт-реверсе (2026-09-16):** `UpdatePerson` — FULL-overwrite (все 5 полей из тела перезаписывают сохранённые: persons.go `existing.X = body.X`), а не present-update. (Проверено: в UI сейчас нет редактора имени — `updatePerson`-action нигде не вызывается, только список+профиль+merge.) Поэтому payload `confirmPerson` всегда полный `{name, org, is_internal, archived, confirmed}`; будущему редактору — то же самое.
+3. Обратное действие («отменить подтверждение») — не в этом шаге (обсудить B-2); тег-статус уже отображается.
+4. Событие WS: бекенд уже шлёт `person_updated` (persons.go publishWS) — на стороне, low-pri.
+5. e2e: persons.spec.js — новый test I: «персона (confirmed=false) → клик «Подтвердить» → тег «не подтверждена» исчезает + API confirmed=true + имя/орган не потеряны (регрессия full-overwrite)».
 
 **Scope (режим A):**
-1. `PersonsView.vue` — кнопка «Подтвердить» на карточке + в профиле (hidden при confirmed=true); вызов существующего `updatePerson({confirmed:true})` из store; toast успех/ошибка.
-2. Store: проверить что payload включает `confirmed` (UI сейчас не шлёт — backend `UpdatePerson` уже принимает).
+1. `PersonsView.vue` — кнопка «Подтвердить»: строка списка (видна при `!confirmed && !archived`) + блок в профиле; toast успех/ошибка.
+2. Store `persons.js` — новый action `confirmPerson(person)`: полный payload (full-overwrite защита) + локальное обновление `list`/`selected`.
 3. e2e test I + CHANGELOG `[0.24.0]` bullet + квитанция `[x]`.
 
 **Тесты:** vitest на store-функцию (confirmed в payload); e2e persons full (A–I); `make lint` + `make test` (go — без изменений, но прогон по чек-листу) + `npm run lint && npm run build && npm test` + e2e.
