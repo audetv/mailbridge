@@ -106,8 +106,16 @@ type Task struct {
 	// Legacy-текст Assignee/FromEmail остаётся до конца шага (совместимость).
 	RequestorID *PersonID `json:"requestor_id,omitempty"`
 	AssigneeID  *PersonID `json:"assignee_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// v0.25, шаг 7a: срок задачи — DATE в формате YYYY-MM-DD (без времени).
+	// Канон: онтология v0.5.2 §7.5. Ручной срок приоритетнее AI;
+	// AI-предложение (ai_due_date, due_source) появится в шаге 7b.
+	DueDate *string `json:"due_date,omitempty"`
+	// AI-предложение срока (пополняется в шаге 7b): хранится ВСЕГДА (и отклонённые — база ошибок AI).
+	AIDueDate    *string   `json:"ai_due_date,omitempty"`
+	DueSource    *string   `json:"due_source,omitempty"`     // 'ai' | 'manual'
+	DueAIPending *bool     `json:"due_ai_pending,omitempty"` // pending-предложение AI (7b/7c)
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Thread представляет цепочку входящих.
@@ -176,6 +184,11 @@ type TaskFilter struct {
 	// legacy-текст Assignee по-прежнему работает (по email — совмещение).
 	RequestorID *PersonID `json:"requestor_id,omitempty"`
 	AssigneeID  *PersonID `json:"assignee_id,omitempty"`
+
+	// v0.25, шаг 7a: серверная сортировка списка. "due" | "updated".
+	// Дефолт (пусто) = "due" — просроченные сверху, без срока внизу;
+	// "updated" — по свежести активности.
+	Sort string
 }
 
 // TaskListResult содержит результат запроса списка задач.

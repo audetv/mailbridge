@@ -309,6 +309,39 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		}
 	}
 
+	// Срок задачи (v0.25, шаг 7a). Канон: онтология v0.5.2 §7.5.
+	// due_date — утверждённый срок (DATE, без времени); ai_due_date + due_ai_pending
+	// + due_source — инфраструктура AI-предложения (заполняется с шага 7b;
+	// ручной срок ставит due_source='manual', AI его не перезаписывает).
+	// Канон: онтология v0.5.2 §7.5 — срок = DATE в формате YYYY-MM-DD (без времени).
+	// Тип TEXT: храним строку как есть (численные/DATE-аффинити SQLite могут
+	// перекодировать значение; TEXT гарантирует идентичность при чтении).
+	dueColumns := map[string]string{
+		"due_date":       "TEXT NULL",
+		"ai_due_date":    "TEXT NULL",
+		"due_source":     "TEXT NULL CHECK (due_source IN ('ai','manual'))",
+		"due_ai_pending": "INTEGER NOT NULL DEFAULT 0",
+	}
+	for col, typ := range dueColumns {
+		has, err := s.columnExists(ctx, "tasks", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	// Индекс для сортировки по срокам (?sort=due, v0.25 шаг 7a).
+	// SQLite 3.3+ поддерживает индекс с выражением — но для совместимости
+	// (и простоты) идём простым индексом по колонке: сортировка «без срока внизу»
+	// через (due_date IS NULL) + due_date — на тысячах задач быстро и без выражения.
+	if _, err := s.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)"); err != nil {
+		return fmt.Errorf("failed to create idx_tasks_due_date: %w", err)
+	}
+
 	// Модули: в ранней версии схемы (v0.22 шаг 3) epics создавались без description/status;
 	// идемпотентно дособираем колонки, если их нет.
 	epicsBackfillColumns := map[string]string{

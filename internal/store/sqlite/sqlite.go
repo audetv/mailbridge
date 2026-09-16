@@ -223,14 +223,15 @@ func (s *Store) GetTasksByInboxItem(ctx context.Context, inboxItemID int64) ([]*
 
 // CreateTask создаёт новую задачу.
 func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
-	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (message_id, subject, body_text, body_html, from_email, from_name, project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, due_date, due_source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	result, err := s.db.ExecContext(ctx, query,
 		task.MessageID, task.Subject, task.BodyText, task.BodyHTML,
 		task.FromEmail, task.FromName, task.Project, task.Type,
 		task.Priority, task.Status, task.Assignee,
-		task.ThreadID, task.SourceEmailID, task.AIVerdict)
+		task.ThreadID, task.SourceEmailID, task.AIVerdict,
+		task.DueDate, task.DueSource)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -245,7 +246,7 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 // GetTask возвращает задачу по ID.
 func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, due_date, ai_due_date, due_source, due_ai_pending, created_at, updated_at
 		FROM tasks WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -255,7 +256,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*store.Task, error) {
 // GetTaskByMessageID возвращает задачу по Message-ID.
 func (s *Store) GetTaskByMessageID(ctx context.Context, messageID string) (*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, due_date, ai_due_date, due_source, due_ai_pending, created_at, updated_at
 		FROM tasks WHERE message_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, messageID)
@@ -337,8 +338,18 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	}
 
 	offset := (filter.Page - 1) * filter.PerPage
+
+	// v0.25, шаг 7a: серверная сортировка (стабильна через пагинацию).
+	// "due" (дефолт): просроченные сверху (due_date ASC — мин. срок = самый просроченный
+	// = приоритет), без срока — внизу (NULLS LAST); "updated": по свежести обновлений.
+	// Тикер по id — полная детерминированность (без дублей/склеек между страницами).
+	orderClause := "ORDER BY t.due_date IS NULL ASC, t.due_date ASC, t.id ASC"
+	if sortKey := strings.TrimSpace(filter.Sort); sortKey == "updated" {
+		orderClause = "ORDER BY t.updated_at DESC, t.id DESC"
+	}
+
 	dataQuery := fmt.Sprintf(`SELECT t.id, t.message_id, t.subject, t.body_text, t.body_html, t.from_email, t.from_name,
-		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.requestor_id, t.assignee_id, t.created_at, t.updated_at,
+		t.project, t.type, t.priority, t.status, t.assignee, t.thread_id, t.source_email_id, t.ai_verdict, t.epic_id, t.requestor_id, t.assignee_id, t.due_date, t.ai_due_date, t.due_source, t.due_ai_pending, t.created_at, t.updated_at,
 		(SELECT COUNT(*) FROM task_comments tc 
 		 WHERE tc.task_id = t.id 
 		 AND tc.direction = 'in' 
@@ -349,7 +360,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		) + 
 		CASE WHEN (SELECT read_at FROM task_reads WHERE task_id = t.id AND username = ?1) IS NULL THEN 1 ELSE 0 END
 		as unread_comments
-		FROM tasks t %s ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, where)
+		FROM tasks t %s %s LIMIT ? OFFSET ?`, where, orderClause)
 
 	dataArgs := append([]interface{}{username}, args...)
 	dataArgs = append(dataArgs, filter.PerPage, offset)
@@ -367,9 +378,13 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		var epicID sql.NullInt64
 		var reqID sql.NullString
 		var asnID sql.NullString
+		var dueDate, aiDueDate, dueSource sql.NullString
+		var dueAIPending sql.NullInt64
 		err := rows.Scan(&task.ID, &task.MessageID, &task.Subject, &task.BodyText, &task.BodyHTML,
 			&task.FromEmail, &task.FromName, &task.Project, &task.Type, &task.Priority, &task.Status, &task.Assignee,
-			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &reqID, &asnID, &task.CreatedAt, &task.UpdatedAt, &unread)
+			&task.ThreadID, &task.SourceEmailID, &task.AIVerdict, &epicID, &reqID, &asnID,
+			&dueDate, &aiDueDate, &dueSource, &dueAIPending,
+			&task.CreatedAt, &task.UpdatedAt, &unread)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
@@ -383,6 +398,19 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		if asnID.Valid {
 			pid := store.PersonID(asnID.String)
 			task.AssigneeID = &pid
+		}
+		if dueDate.Valid {
+			task.DueDate = &dueDate.String
+		}
+		if aiDueDate.Valid {
+			task.AIDueDate = &aiDueDate.String
+		}
+		if dueSource.Valid {
+			task.DueSource = &dueSource.String
+		}
+		if dueAIPending.Valid {
+			v := dueAIPending.Int64 != 0
+			task.DueAIPending = &v
 		}
 		tasks = append(tasks, &store.TaskWithUnread{Task: task, UnreadComments: unread})
 	}
@@ -890,13 +918,18 @@ func (s *Store) TableExists(ctx context.Context, table string) (bool, error) {
 }
 
 // scanTask сканирует строку в Task.
+// Порядок колонок: ... assignee_id, due_date, ai_due_date, due_source, due_ai_pending, created_at, updated_at
+// (v0.25 шаг 7a — срок; все SELECT задач перечисляют их в этом порядке).
 func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) {
 	t := &store.Task{}
 	var epicID sql.NullInt64
 	var requestorID, assigneeID sql.NullString
+	var dueDate, aiDueDate, dueSource sql.NullString
+	var dueAIPending sql.NullInt64
 	err := row.Scan(&t.ID, &t.MessageID, &t.Subject, &t.BodyText, &t.BodyHTML,
 		&t.FromEmail, &t.FromName, &t.Project, &t.Type, &t.Priority, &t.Status, &t.Assignee,
 		&t.ThreadID, &t.SourceEmailID, &t.AIVerdict, &epicID, &requestorID, &assigneeID,
+		&dueDate, &aiDueDate, &dueSource, &dueAIPending,
 		&t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -914,6 +947,19 @@ func scanTask(row interface{ Scan(...interface{}) error }) (*store.Task, error) 
 	if assigneeID.Valid {
 		pid := store.PersonID(assigneeID.String)
 		t.AssigneeID = &pid
+	}
+	if dueDate.Valid {
+		t.DueDate = &dueDate.String
+	}
+	if aiDueDate.Valid {
+		t.AIDueDate = &aiDueDate.String
+	}
+	if dueSource.Valid {
+		t.DueSource = &dueSource.String
+	}
+	if dueAIPending.Valid {
+		v := dueAIPending.Int64 != 0
+		t.DueAIPending = &v
 	}
 	return t, nil
 }
@@ -1001,7 +1047,7 @@ func (s *Store) UpdateThreadSummary(ctx context.Context, threadID, summary strin
 // GetActiveTasksByThread возвращает активные задачи цепочки.
 func (s *Store) GetActiveTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, due_date, ai_due_date, due_source, due_ai_pending, created_at, updated_at
 		FROM tasks WHERE thread_id = ? AND status IN ('new', 'in_progress', 'resolved', 'info_only') ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, threadID)

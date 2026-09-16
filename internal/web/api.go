@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/audetv/mailbridge/internal/store"
 )
@@ -366,6 +367,9 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		Page:        page,
 		PerPage:     perPage,
 		Username:    username,
+		// v0.25, шаг 7a: сортировка списка. "due" (дефолт, store её выбирает)
+		// или "updated" — по свежести правок.
+		Sort: q.Get("sort"),
 	}
 
 	result, err := h.store.ListTasks(r.Context(), filter)
@@ -402,6 +406,8 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		Project     string  `json:"project"`
 		Description *string `json:"description"`
 		EpicID      *int64  `json:"epic_id"`
+		// v0.25, шаг 7a: срок задачи — "YYYY-MM-DD" (дата, без времени).
+		DueDate *string `json:"due_date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -449,12 +455,23 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.DueDate != nil && strings.TrimSpace(*req.DueDate) != "" && !validDueDate(*req.DueDate) {
+		writeError(w, http.StatusBadRequest, "due_date must be \"YYYY-MM-DD\"")
+		return
+	}
+
 	task := &store.Task{
 		MessageID: "manual-" + newManualID(),
 		Subject:   req.Title,
 		BodyText:  deref(req.Description),
 		Project:   req.Project,
 		Status:    string(store.StatusNew),
+	}
+	if req.DueDate != nil && strings.TrimSpace(*req.DueDate) != "" {
+		task.DueDate = req.DueDate
+		// Ручное создание: source = manual (AI тут не участвует).
+		manual := "manual"
+		task.DueSource = &manual
 	}
 	if err := h.store.CreateTask(r.Context(), task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -559,6 +576,19 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// validDueDate — срок задачи: строка "YYYY-MM-DD" (дата, без времени).
+// Канон: онтология v0.5.2 §7.5. Проверяет формат и реальное существование дня
+// (например, 31 Feb — нет), чтобы в БД хранились только корректные DATE.
+func validDueDate(s string) bool {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return false
+	}
+	// time.Parse "2006-01-02" уже отклоняет невалидные даты (день > макс. в месяце),
+	// но на всякий случай сверяем с форматом — защита от "2026-9-1" и т. п.
+	return t.Format("2006-01-02") == s
+}
+
 // UpdateTask обрабатывает PATCH /api/tasks/{id}
 func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
@@ -586,6 +616,8 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	allowedFields := map[string]bool{
 		"project": true, "assignee": true,
 		"type": true, "priority": true, "epic_id": true,
+		// v0.25, шаг 7a: срок задачи (string "YYYY-MM-DD" | null — снять срок).
+		"due_date": true,
 	}
 
 	filtered := make(map[string]interface{})
@@ -595,6 +627,23 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			if s, ok := v.(string); ok && s != "" {
 				newStatus = s
 			}
+			continue
+		}
+		if k == "due_date" {
+			// null / "null" / отсутствующее значение — снять срок; иначе строка даты.
+			if v == nil {
+				filtered["due_date"] = nil
+				filtered["due_source"] = "manual"
+				continue
+			}
+			ds, ok := v.(string)
+			if !ok || !validDueDate(ds) {
+				http.Error(w, `{"error":"due_date must be \"YYYY-MM-DD\" or null"}`, http.StatusBadRequest)
+				return
+			}
+			filtered["due_date"] = ds
+			// Ручное изменение всегда приоритетнее: source = manual (канон: онтология v0.5.2 §7.5).
+			filtered["due_source"] = "manual"
 			continue
 		}
 		if allowedFields[k] {

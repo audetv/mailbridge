@@ -81,6 +81,7 @@ Query-параметры:
 - `status` — может повторяться: `?status=new&status=in_progress`
 - `project`, `assignee`, `type`, `priority` — фильтры
 - `search` — поиск по теме/тексту/email
+- `sort` (v0.25, шаг 7a) — `due` (default) — по сроку возраст, задачи без срока в конце (просроченные выше); `updated` — по дате обновления, новые сверху. Неизвестное значение → `400`.
 
 Ответ:
 
@@ -98,6 +99,7 @@ Query-параметры:
       "priority": "high",
       "status": "new",
       "assignee": "",
+      "due_date": "2026-12-01",
       "unread_comments": 2,
       "created_at": "...",
       "updated_at": "..."
@@ -139,8 +141,10 @@ Query-параметры:
 Body — допустимые поля:
 
 ```json
-{"project": "Отель", "status": "in_progress", "priority": "high", "type": "bug", "assignee": "Иванов"}
+{"project": "Отель", "status": "in_progress", "priority": "high", "type": "bug", "assignee": "Иванов", "due_date": "2026-12-31"}
 ```
+
+`due_date` (v0.25, шаг 7a) — срок задачи, дата `"YYYY-MM-DD"` (без времени, канон: онтология v0.5.2 §7.5). Установить — строка; снять — `null` или пустая строка. Не-канонический формат (`DD.MM.YYYY`, `2026-13-01`, `2026-02-31`, время `...T00:00:00Z`) → `400`. Ручная установка пишет `due_source = 'manual'`.
 
 `status` (статус) — единственный путь смены: атомарно обновляет `tasks.status` и при реальном переходе (`from != to`) пишет строку в `task_status_history` с `by` = имя текущего пользователя (из JWT). → обновлённая `task`.
 
@@ -170,6 +174,11 @@ Body — допустимые поля:
 - `status` идёт через тот же `SetTaskStatus`, что и одиночный `PATCH /api/tasks/{id}`: при реальном переходе — строка в `task_status_history` (`by` — юзер из JWT).
 - Ответ: `200 {"count": N, "changed": N, ...}` (число затронутых задач). **Все** переданные ID не найдены → `404`; частично — существующие обновляются, отсутствующие не считаются в `count`.
 - WS: **одно** событие `batch_update` (`{event, count, source}`) на всю операцию — не N событий по одной.
+
+### `POST /api/tasks` (ручное создание)
+
+Body: `{"title": "Тема (обяз., 1..500)", "project": "Имя проекта (обяз., существующий)", "description": "текст (опц.)", "epic_id": 3, "due_date": "2026-12-31"}`.
+`due_date` (v0.25, шаг 7a) — `"YYYY-MM-DD"`, не-канон → `400`, задача не создаётся. Статус всегда `new` → `201 {task}`; WS `task_created`.
 
 ### `POST /api/tasks/{id}/reply`
 

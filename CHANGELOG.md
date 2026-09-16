@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased] — v0.25
+
+### Added
+- **Срок задачи (v0.25, шаг 7a, РЕЖИМ A):** канон онтология v0.5.2 §7.5 — срок = `due_date`, ДАТА `YYYY-MM-DD` (без времени). Миграция: 4 колонки `tasks.due_date` / `ai_due_date` / `due_source` / `due_ai_pending` (AI-колонки — инфраструктура для шага 7b, пока только в схеме; тип `TEXT`: тип `DATE` даёт SQLite-аффинити, и драйвер `mattn/go-sqlite3` перекодирует при чтении `YYYY-MM-DD` в RFC3339 — caught тестами). API: `GET /api/tasks` сериализует `due_date`; `PATCH /api/tasks/{id}` принимает `due_date` (установить = строка `YYYY-MM-DD`; снять = `null`/пустая) — валидация формата И календарных дней (реджект `2026-02-31`, `2026-13-01`, `DD.MM.YYYY`, RFC3339) → `400`; ручная установка пишет `due_source='manual'`. `POST /api/tasks` (ручное создание) принимает `due_date`. `GET /api/tasks?sort=due` (default: ASC, NULL-сроки в конец — просроченные выше) / `?sort=updated` (новые сверху); неизвестное значение → `400`. Отложено: фильтры по срокам (`due_from`/`due_to`) — шаг 7d; AI-предложения срока (`ai_due_date`/`due_ai_pending` в структуре) — шаг 7b; автоприменение AI-срока (`MAILBRIDGE_AI_AUTO_APPLY_DUE`) — позже. **Не входит в 7a:** UI/визуал (бейдж, расцветка, сортировка во фронте). Тесты: store (создание/чтение/обновление/сброс срока), web `api_duedate_test.go` (create + set/unset, 400 на неканонический формат, `due_source=manual`).
+
+### Docs
+- `docs/api.md` — `due_date` в PATCH/POST/GET + `?sort`; `docs/data-model.md` — 4 новые колонки + примечание про `TEXT`.
+
 ## [0.24.0] - 2026-09-15
 
 ### Fixed
