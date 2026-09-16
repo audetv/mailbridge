@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/classifier"
@@ -107,6 +108,81 @@ Content-Type: text/plain
 	}
 	if len(comments) != 0 {
 		t.Errorf("expected 0 comment, got %d", len(comments))
+	}
+}
+
+// TestProcess_6F_RequestorPerson — 6-F: входящее письмо авто-создаёт requestor-персону
+// по ЧИСТЫМ (name, email) из extractor, а не по сырому RFC822-хедеру.
+func TestProcess_6F_RequestorPerson(t *testing.T) {
+	proc, st, cleanup := setupProcessor(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	raw := []byte(`From: "Иван Петров" <ivan@example.com>
+To: support@example.com
+Subject: Шаг 6-F проверка персоны
+Message-ID: <6f-person@example.com>
+Content-Type: text/plain
+
+Здравствуйте`)
+
+	result, err := proc.Process(ctx, raw)
+	if err != nil {
+		t.Fatalf("Process error: %v", err)
+	}
+	if result.Action != processor.ActionCreateIssue {
+		t.Fatalf("expected ActionCreateIssue, got %s", result.Action)
+	}
+	// Task в БД
+	task, err := st.GetTask(ctx, result.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask error: %v", err)
+	}
+	if task.RequestorID == nil {
+		t.Fatalf("requestor not set (6-F: EnsurePersonFromIncoming не вызван?)")
+	}
+	person, err := st.GetPerson(ctx, *task.RequestorID)
+	if err != nil {
+		t.Fatalf("GetPerson error: %v", err)
+	}
+	if person.Name != "Иван Петров" {
+		t.Errorf("requestor name = %q, want Иван Петров", person.Name)
+	}
+	// identity — чистый email (не «Иван Петров <ivan@example.com» без «>»)
+	ident, err := st.ListIdentities(ctx, *task.RequestorID)
+	if err != nil {
+		t.Fatalf("GetPersonIdentities error: %v", err)
+	}
+	var found bool
+	for _, i := range ident {
+		if i.Kind == "email" && i.Value == "ivan@example.com" {
+			found = true
+		}
+		if strings.Contains(i.Value, "<") || strings.Contains(i.Value, "Иван") {
+			t.Errorf("identity value = %q — мусор (RFC822-хедер)", i.Value)
+		}
+	}
+	if !found {
+		t.Errorf("clean identity ivan@example.com not found: %v", ident)
+	}
+
+	// Идемпотентность: второе письмо с тем же отправителем → НЕ новая персона
+	raw2 := []byte(`From: "Иван Петров" <ivan@example.com>
+To: support@example.com
+Subject: Шаг 6-F идемпотентность
+Message-ID: <6f-person-2@example.com>
+Content-Type: text/plain
+
+Ещё письмо`)
+	if _, err := proc.Process(ctx, raw2); err != nil {
+		t.Fatalf("Process 2 error: %v", err)
+	}
+	plist, err := st.ListPersons(ctx, &store.PersonFilter{})
+	if err != nil {
+		t.Fatalf("ListPersons error: %v", err)
+	}
+	if len(plist.Persons) != 1 {
+		t.Errorf("persons count = %d, want 1 (idempotence)", len(plist.Persons))
 	}
 }
 

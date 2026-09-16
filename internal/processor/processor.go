@@ -248,8 +248,11 @@ func (p *MessageProcessor) createNewTask(ctx context.Context, email *extractor.E
 
 	// v0.24 шаг 6 (Персоны), решение 7: персона авто-создаётся при первом
 	// контакте (confirmed=false). Отправитель письма становится requestor.
+	// 6-F: вход — разобранный email (FromEmail) + имя (FromName); эвристика «машина».
 	// Best-effort: персона не ломает создание задачи (режим A).
-	if person, perr := p.store.EnsurePersonByEmail(ctx, email.From); perr != nil {
+	if email.FromEmail == "" {
+		p.logger.Warn("no valid from email for requestor person")
+	} else if person, perr := p.store.EnsurePersonFromIncoming(ctx, email.FromName, email.FromEmail); perr != nil {
 		p.logger.Warn("ensure person (requestor) failed", "error", perr)
 	} else if person != nil {
 		if rerr := p.store.SetTaskPersonRoles(ctx, task.ID, &person.ID, nil); rerr != nil {
@@ -310,10 +313,13 @@ func (p *MessageProcessor) addCommentToTask(ctx context.Context, email *extracto
 
 	// v0.24 шаг 6, решение 7: автор входа получает персону (авто-создание
 	// при первом контакте). Best-effort: ошибка не ломает добавление комментария.
-	if person, perr := p.store.EnsurePersonByEmail(ctx, email.From); perr != nil {
-		p.logger.Warn("ensure person (comment author) failed", "error", perr)
-	} else if person != nil {
-		comment.AuthorPersonID = &person.ID
+	// 6-F: разобранный email + имя.
+	if email.FromEmail != "" {
+		if person, perr := p.store.EnsurePersonFromIncoming(ctx, email.FromName, email.FromEmail); perr != nil {
+			p.logger.Warn("ensure person (comment author) failed", "error", perr)
+		} else if person != nil {
+			comment.AuthorPersonID = &person.ID
+		}
 	}
 
 	if err := p.store.AddTaskComment(ctx, comment); err != nil {
