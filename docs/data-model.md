@@ -87,6 +87,10 @@ SQLite (WAL-режим), файл `data/mailbridge.db`. Миграции в `int
 | source_email_id | TEXT | ID письма-источника |
 | ai_verdict | TEXT (JSON) | Последний вердикт |
 | epic_id | INTEGER FK → epics(id) (ON DELETE SET NULL) | Связь задачи с модулем (nullable) |
+| due_date | TEXT (YYYY-MM-DD) | **Срок задачи** (v0.25, шаг 7a; онтология v0.5.2 §7.5) — ДАТА, без времени; `TEXT` намеренно (тип DATE-аффинити перекодил бы строку) |
+| ai_due_date | TEXT (YYYY-MM-DD) | Срок, предложенный AI (v0.25, шаг 7b): база ошибок AI — хранится всегда, даже если отклонён |
+| due_source | TEXT ('ai' / 'manual') | Кто установил `due_date`; ручная установка приоритетнее AI (решение владельца) |
+| due_ai_pending | INTEGER (0/1) | AI предложил срок — ждёт решения человека (v0.25, шаг 7b) |
 
 Индексы: `message_id`, `status`, `project`, `assignee`, `thread_id`, `source_email_id`, `epic_id`.
 

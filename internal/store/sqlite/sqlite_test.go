@@ -184,6 +184,145 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// v0.25, шаг 7a — срок задачи (due_date)
+// ---------------------------------------------------------------------------
+
+func strp(v string) *string { return &v }
+
+func TestDueDate_CreateGet(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	manual := "manual"
+	t1 := &store.Task{MessageID: "due-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new",
+		DueDate: strp("2026-10-01"), DueSource: &manual}
+	mustCreateTask(t, s, t1)
+
+	got, err := s.GetTask(ctx, t1.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.DueDate == nil || *got.DueDate != "2026-10-01" {
+		t.Errorf("due_date = %v, want 2026-10-01", got.DueDate)
+	}
+	if got.DueSource == nil || *got.DueSource != "manual" {
+		t.Errorf("due_source = %v, want manual", got.DueSource)
+	}
+
+	// Без срока — null (не ошибка, поле отсутствует).
+	t2 := &store.Task{MessageID: "due-2", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, t2)
+	g2, err := s.GetTask(ctx, t2.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if g2.DueDate != nil {
+		t.Errorf("due_date = %v, want nil", g2.DueDate)
+	}
+}
+
+func TestDueDate_UpdateAndClear(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tk := &store.Task{MessageID: "due-u", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, tk)
+
+	// Установка срока (как делает API: value + due_source=manual).
+	if err := s.UpdateTask(ctx, tk.ID, map[string]interface{}{"due_date": "2026-12-31", "due_source": "manual"}); err != nil {
+		t.Fatalf("UpdateTask set: %v", err)
+	}
+	g, _ := s.GetTask(ctx, tk.ID)
+	if g.DueDate == nil || *g.DueDate != "2026-12-31" {
+		t.Errorf("after set, due_date = %v, want 2026-12-31", g.DueDate)
+	}
+
+	// Снятие срока (NULL).
+	if err := s.UpdateTask(ctx, tk.ID, map[string]interface{}{"due_date": nil, "due_source": "manual"}); err != nil {
+		t.Fatalf("UpdateTask clear: %v", err)
+	}
+	g2, _ := s.GetTask(ctx, tk.ID)
+	if g2.DueDate != nil {
+		t.Errorf("after clear, due_date = %v, want nil", g2.DueDate)
+	}
+}
+
+func TestDueDate_ListSortDefault(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// 3 с разными сроками + 1 без срока.
+	d := func(id, date string) *store.Task {
+		tk := &store.Task{MessageID: id, Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+		if date != "" {
+			tk.DueDate = strp(date)
+			tk.DueSource = strp("manual")
+		}
+		return tk
+	}
+	dFar := d("due-far", "2026-12-01")
+	dMid := d("due-mid", "2026-10-15")
+	dOverdue := d("due-over", "2026-01-05") // просроченный — мин. дата
+	dNone := d("due-none", "")
+	mustCreateTask(t, s, dOverdue)
+	mustCreateTask(t, s, dMid)
+	mustCreateTask(t, s, dFar)
+	mustCreateTask(t, s, dNone)
+
+	// Дефолтная сортировка ("due"): просроченные раньше, без срока — внизу.
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Page: 1, PerPage: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	var ids []string
+	for _, tk := range res.Tasks {
+		ids = append(ids, tk.MessageID)
+	}
+	if len(ids) != 4 {
+		t.Fatalf("expected 4 tasks, got %d (%v)", len(ids), ids)
+	}
+	if ids[0] != "due-over" {
+		t.Errorf("first (most overdue) = %v, want due-over", ids[0])
+	}
+	if ids[3] != "due-none" {
+		t.Errorf("last (no due date) = %v, want due-none", ids[3])
+	}
+}
+
+func TestDueDate_ListSortUpdated(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	mk := func(id string) *store.Task {
+		tk := &store.Task{MessageID: id, Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+		mustCreateTask(t, s, tk)
+		return tk
+	}
+	a := mk("upd-a")
+	b := mk("upd-b")
+	// Подкручиваем updated_at у b свежее.
+	_ = a
+	if err := s.UpdateTask(ctx, b.ID, map[string]interface{}{"priority": "high"}); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Sort: "updated", Page: 1, PerPage: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(res.Tasks) != 2 {
+		t.Fatalf("expected 2, got %d", len(res.Tasks))
+	}
+	// b обновлён позже → сверху при sort=updated.
+	if res.Tasks[0].ID != b.ID {
+		t.Errorf("first with sort=updated should be b (%d), got %d", b.ID, res.Tasks[0].ID)
+	}
+}
+
 func TestListTasks_Search(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()
