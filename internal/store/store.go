@@ -61,6 +61,7 @@ type InboxItem struct {
 	ThreadID    string    `json:"thread_id"`
 	FromContact string    `json:"from_contact"`
 	FromName    string    `json:"from_name"`
+	FromEmail   string    `json:"from_email"`
 	Subject     string    `json:"subject"`
 	BodyText    string    `json:"body_text"`
 	BodyHTML    string    `json:"body_html"`
@@ -325,7 +326,14 @@ type Store interface {
 	FindPersonByEmail(ctx context.Context, email string) (*Person, error)
 	// EnsurePersonByEmail создаёт (confirmed=false) или возвращает персону по email:
 	// авто-создание при первом контакте (решение 7); идемпотентно (UNIQUE(kind,value)).
+	// ВХОД — строка email («a@b.ru»): жёсткое требование вида «@ + точка после @» (6-F),
+	// иначе error — мусор (RFC822-хедер) в identity не записывается.
 	EnsurePersonByEmail(ctx context.Context, email string) (*Person, error)
+	// EnsurePersonFromIncoming (6-F) — разбор из extractor (name, email):
+	// если имя пустое и пришло — авто-заполняем persons.name;
+	// если email похож на «машину» (no-reply/postfix/mailer/bot/...) — org='машина'.
+	// Идемпотентна.
+	EnsurePersonFromIncoming(ctx context.Context, fromName, fromEmail string) (*Person, error)
 
 	// Identities
 	AddPersonIdentity(ctx context.Context, ident *PersonIdentity) (*PersonIdentity, error)

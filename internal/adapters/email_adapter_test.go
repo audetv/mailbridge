@@ -46,6 +46,10 @@ Content-Type: text/plain; charset=utf-8
 	if item.SourceID != "test-msg-1@example.com" {
 		t.Errorf("SourceID = %s", item.SourceID)
 	}
+	// 6-F: FromEmail — ЧИСТЫЙ email (адаптер не передаёт сырой RFC822-хедер).
+	if item.FromEmail != "ivan@example.com" {
+		t.Errorf("FromEmail = %s, want ivan@example.com", item.FromEmail)
+	}
 	if item.FromName != "Иван Петров" {
 		t.Errorf("FromName = %s", item.FromName)
 	}

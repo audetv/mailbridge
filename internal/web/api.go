@@ -276,6 +276,19 @@ func (h *TaskHandler) CreateTaskFromInbox(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 6-F: персона-заявитель (requestor) — best-effort (режим A: не ломает задачу).
+	// item.FromContact — legacy (RFC822/чистый email); имя из item.FromName.
+	// EnsurePersonFromIncoming сама разбирает/валидирует email (extractor внутри).
+	if item.FromContact != "" {
+		if person, perr := h.store.EnsurePersonFromIncoming(r.Context(), item.FromName, item.FromContact); perr != nil {
+			log.Printf("ensure person (requestor) from inbox failed: %v", perr)
+		} else if person != nil {
+			if rerr := h.store.SetTaskPersonRoles(r.Context(), task.ID, &person.ID, nil); rerr != nil {
+				log.Printf("set task requestor failed: %v", rerr)
+			}
+		}
+	}
+
 	// Связываем с лентой
 	if err := h.store.LinkTaskToInboxItem(r.Context(), task.ID, item.ID, "created_manually"); err != nil {
 		log.Printf("failed to link task to inbox: %v", err)

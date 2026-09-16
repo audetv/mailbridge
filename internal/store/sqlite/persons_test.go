@@ -2,9 +2,11 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/store"
+	"github.com/audetv/mailbridge/internal/store/sqlite"
 )
 
 func TestPersons_MigrationCreatesTables(t *testing.T) {
@@ -20,6 +22,143 @@ func TestPersons_MigrationCreatesTables(t *testing.T) {
 			t.Errorf("%s table not created", table)
 		}
 	}
+}
+
+func TestPersons_6F_EnsurePersonFromIncoming(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// 1. Имя из FromName — авто-заполнение persons.name.
+	p1, err := s.EnsurePersonFromIncoming(ctx, "Дмитрий", "dmitry@example.com")
+	if err != nil || p1 == nil {
+		t.Fatalf("EnsurePersonFromIncoming: %v / %v", err, p1)
+	}
+	if p1.Name != "Дмитрий" {
+		t.Fatalf("Name: got %q", p1.Name)
+	}
+
+	// 2. Legacy-форма «Имя <email» БЕЗ закрывающей скобки (prod-БД):
+	//    ParseFromHeader разбирает на (email, name) — персона создаётся,
+	//    identity = чистый email (6-F п.3: чиним путь persons, не legacy).
+	p3, err := s.EnsurePersonFromIncoming(ctx, "", "\u0418\u0432\u0430\u043d <ivan@x.ru")
+	if err != nil || p3 == nil {
+		t.Fatalf("bracketless legacy: %v / %v", err, p3)
+	}
+	if p3.Name != "\u0418\u0432\u0430\u043d" {
+		t.Fatalf("bracketless legacy Name: got %q, want \u0418\u0432\u0430\u043d", p3.Name)
+	}
+	ident, err := s.FindIdentity(ctx, "email", "ivan@x.ru")
+	if err != nil || ident == nil {
+		t.Fatalf("FindIdentity(ivan@x.ru): %v / %v", err, ident)
+	}
+	if ident.PersonID != p3.ID {
+		t.Fatalf("identity person: got %q, want %q", ident.PersonID, p3.ID)
+	}
+
+	// 3. Эвристика «машина»: no-reply@ без имени → org=машина.
+	pm, errm := s.EnsurePersonFromIncoming(ctx, "", "no-reply@mail.example.com")
+	if errm != nil || pm == nil {
+		t.Fatalf("no-reply: %v / %v", errm, pm)
+	}
+	if pm.Org != "\u043c\u0430\u0448\u0438\u043d\u0430" {
+		t.Errorf("no-reply Org: got %q", pm.Org)
+	}
+
+	// 4. Идемпотентность: (kind=email, value, case-fold) → та же персона, что case 1.
+	p2, err := s.EnsurePersonFromIncoming(ctx, "Дмитрий", "DMITRY@Example.COM")
+	if err != nil || p2 == nil {
+		t.Fatalf("idempotent: %v / %v", err, p2)
+	}
+	if string(p2.ID) != string(p1.ID) {
+		t.Fatalf("idempotent: different person id: %q vs %q", p2.ID, p1.ID)
+	}
+}
+
+func TestPersons_6F_EnsurePersonByEmail_RejectsJunk(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	if p, err := s.EnsurePersonByEmail(ctx, "Имя <ivan@x.ru"); err != nil || p != nil {
+		t.Fatalf("junk: got %v, %v; want nil, nil", p, err)
+	}
+	if p, err := s.EnsurePersonByEmail(ctx, "a.example.com"); err != nil || p != nil {
+		t.Fatalf("no-at: got %v, %v; want nil, nil", p, err)
+	}
+}
+
+// П.5 (6-F): self-heal — «грязная» identity (RFC822-хедер без «>») по этому
+// email переименовывается в чистый; дубль не остаётся. Идемпотентно.
+func TestPersons_6F_SelfHealDirtyIdentity(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Симулируем legacy-мусор: персона + identity «Имя <dirty@x.ru».
+	pid := "test-self-heal-p1"
+	if _, err := s.ExecForTest(ctx,
+		`INSERT INTO persons (id, name, confirmed, is_internal, archived) VALUES (?, '', 1, 0, 0)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExecForTest(ctx,
+		`INSERT INTO person_identities (id, person_id, kind, value, is_primary) VALUES (?, ?, 'email', 'Имя <dirty@x.ru', 1)`,
+		"test-self-heal-i1", pid); err != nil {
+		t.Fatal(err)
+	}
+
+	// EnsurePersonFromIncoming — чистый email → dirty переименовывается,
+	// персона = та же (pid).
+	p, err := s.EnsurePersonFromIncoming(ctx, "Имя", "dirty@x.ru")
+	if err != nil || p == nil {
+		t.Fatalf("ensure: %v / %v", err, p)
+	}
+
+	// Идентичности по email: ровно одна, value = чистый, person_id = pid.
+	count, dirty := identityStats(ctx, t, s, "dirty@x.ru", "Имя <dirty@x.ru")
+	if count != 1 {
+		t.Fatalf("identities count: got %d, want 1", count)
+	}
+	if dirty != 0 {
+		t.Fatalf("dirty identities: got %d, want 0", dirty)
+	}
+	personID, ok := identityPersonID(ctx, t, s, "dirty@x.ru")
+	if !ok {
+		t.Fatalf("identity person_id: missing")
+	}
+	if personID != pid {
+		t.Fatalf("identity person_id: got %q, want %q", personID, pid)
+	}
+
+	// Идемпотентность: повторный вызов — не дублит, не ломает.
+	if p2, err := s.EnsurePersonFromIncoming(ctx, "Имя", "dirty@X.RU"); err != nil || p2 == nil {
+		t.Fatalf("re-ensure: %v / %v", err, p2)
+	}
+	if count, _ := identityStats(ctx, t, s, "dirty@x.ru", "Имя <dirty@x.ru"); count != 1 {
+		t.Fatalf("re-ensure identities count: got %d, want 1", count)
+	}
+}
+
+func identityStats(ctx context.Context, t *testing.T, s *sqlite.Store, clean, dirty string) (count, dirtyN int) {
+	t.Helper()
+	var n int
+	if err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM person_identities WHERE kind='email' AND value = %q`, clean)).Scan(&n); err != nil {
+		t.Fatalf("count clean: %v", err)
+	}
+	var dn int
+	if err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM person_identities WHERE kind='email' AND value = %q`, dirty)).Scan(&dn); err != nil {
+		t.Fatalf("count dirty: %v", err)
+	}
+	return n, dn
+}
+
+func identityPersonID(ctx context.Context, t *testing.T, s *sqlite.Store, value string) (string, bool) {
+	t.Helper()
+	var pid string
+	err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT person_id FROM person_identities WHERE kind='email' AND value = %q`, value)).Scan(&pid)
+	return pid, err == nil
 }
 
 func TestPersons_Crud(t *testing.T) {
@@ -56,7 +195,8 @@ func TestPersons_ListPrimaryEmailAndSearchByIdentity(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	p, err := s.EnsurePersonByEmail(ctx, "Гусев Алексей <agusev@gcconsulting.ru>")
+	// 6-F: identity = чистый email из extractor (RFC822-заголовок — мусор, отклоняется валидатором).
+	p, err := s.EnsurePersonByEmail(ctx, "agusev@gcconsulting.ru")
 	if err != nil || p == nil {
 		t.Fatalf("EnsurePersonByEmail: %v / %v", err, p)
 	}

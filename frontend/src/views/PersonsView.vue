@@ -23,7 +23,9 @@
             <template #body="{ data }">
               <span v-if="data.name" class="name">{{ data.name }}</span>
               <span v-else class="muted name">({{ primaryEmail(data) || 'в процессе узнавания' }})</span>
-              <Tag v-if="data.org" :value="data.org" severity="secondary" class="org-tag" />
+              <Tag v-if="data.org && data.org !== 'машина'" :value="data.org" severity="secondary" class="org-tag" />
+              <!-- 6-F: эвристика «машина» (no-reply/bot) — org='машина' → бейдж ⚙️, человек НЕ предпологается -->
+              <Tag v-if="data.org === 'машина'" value="⚙️ машина" severity="help" class="org-tag" />
               <Tag v-if="data.isInternal" value="своя" severity="info" />
               <Tag v-if="!data.confirmed" value="не подтверждена" severity="warn" />
               <Tag v-if="data.archived" value="архив" severity="secondary" />

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
 )
 
@@ -119,22 +120,48 @@ func (s *Store) migratePersons(ctx context.Context) error {
 //
 // Источники: tasks.from_email (заказчик), tasks.assignee (legacy-текст,
 // если это email), task_comments.author (если это email).
+// 6-F: имена персон — из legacy-колонки tasks.from_name (если это был
+// чистый email-вход, имя может быть хедером — EnsurePersonFromIncoming
+// сама разбирает); no-reply/под.-адреса → org='машина' (эвристика 6-F п.2).
 func (s *Store) backfillPersons(ctx context.Context) error {
 	// 1. Персона + идентичность по каждому email'у из задач и комментариев.
-	var emails []string
+	type senderEmail struct {
+		email string
+		name  string // display-name из legacy-хедера (parseFromHeader)
+	}
+	var senders []senderEmail
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT from_email FROM tasks
+		SELECT DISTINCT from_email, COALESCE(from_name, '') FROM tasks
 		WHERE from_email IS NOT NULL AND from_email <> ''`)
 	if err != nil {
 		return fmt.Errorf("backfill: list task emails: %w", err)
 	}
 	for rows.Next() {
-		var e string
-		if err := rows.Scan(&e); err != nil {
+		var rawEmail, rawName string
+		if err := rows.Scan(&rawEmail, &rawName); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		emails = append(emails, e)
+		// 6-F: tasks.from_email — legacy RFC822-хедер «Имя <email>»;
+		// разбираем на (email, name). Чистый адрес — из <...>/голового токена;
+		// display-name — из отобранного хедера, либо из чистой колонки from_name.
+		email, name := "", ""
+		if parsed, parsedName := extractor.ParseFromHeader(rawEmail); parsed != "" {
+			email = parsed
+			name = parsedName
+		} else if clean := normalizeEmail(rawEmail); isValidPersonEmail(clean) {
+			email = clean
+		}
+		if parsed, parsedName := extractor.ParseFromHeader(rawName); parsed != "" {
+			if email == "" {
+				email = parsed
+			}
+			name = parsedName
+		}
+		if name == "" && !strings.Contains(rawName, "<") {
+			name = strings.TrimSpace(rawName) // чистая колонка — приоритетнее хедера
+		}
+		senders = append(senders, senderEmail{email, name})
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -148,7 +175,9 @@ func (s *Store) backfillPersons(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("backfill: list assignee emails: %w", err)
 	}
-	emails = append(emails, assigneeEmails...)
+	for _, e := range assigneeEmails {
+		senders = append(senders, senderEmail{e, ""})
+	}
 
 	commentEmails, err := s.collectEmails(ctx, `
 		SELECT DISTINCT c.author FROM task_comments c
@@ -156,11 +185,16 @@ func (s *Store) backfillPersons(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("backfill: list comment author emails: %w", err)
 	}
-	emails = append(emails, commentEmails...)
+	for _, e := range commentEmails {
+		senders = append(senders, senderEmail{e, ""})
+	}
 
-	for _, email := range emails {
-		if _, err := s.EnsurePersonByEmail(ctx, email); err != nil {
-			return fmt.Errorf("backfill: ensure person %q: %w", email, err)
+	// 6-F: имя персон из legacy-колонки (разбор RFC822-хедера внутри).
+	// no-reply → org='машина' (эвристика п.2; имя ставится, org-бейдж —
+	// low-pri — по решению владельца). Идемпотентно (UNIQUE(kind,value)).
+	for _, snd := range senders {
+		if _, err := s.EnsurePersonFromIncoming(ctx, snd.name, snd.email); err != nil {
+			return fmt.Errorf("backfill: ensure person %q: %w", snd.email, err)
 		}
 	}
 
@@ -398,6 +432,10 @@ func (s *Store) EnsurePersonByEmail(ctx context.Context, email string) (*store.P
 	if email == "" {
 		return nil, nil
 	}
+	// 6-F: жёсткая валидация — мусор (RFC822-хедер, без «@», без точки) в identity не записывается.
+	if !isValidPersonEmail(email) {
+		return nil, nil
+	}
 	// Fast-path: идентичность уже есть?
 	row := s.db.QueryRowContext(ctx, `
 		SELECT person_id FROM person_identities WHERE kind = 'email' AND value = ?`, email)
@@ -444,6 +482,208 @@ func (s *Store) EnsurePersonByEmail(ctx context.Context, email string) (*store.P
 	}
 	// Возвращаем фактическую персону (при гошке — уже существующую).
 	return s.FindPersonByEmail(ctx, email)
+}
+
+// --- Шаг 6-F: чистота identity — разбор From, жёсткая валидация, эвристика «машина» ---
+
+// isValidPersonEmail (6-F): разрешение только допустимых символов email
+// (localpart + domain) и наличие точки после @.
+// Пустой, «имя <email>», без @, с пробелами — отклоняются.
+func isLocalPartChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') ||
+		r == '.' || r == '_' || r == '-' || r == '+'
+}
+
+func isValidPersonEmail(s string) bool {
+	if s == "" || s != strings.TrimSpace(s) {
+		return false
+	}
+	at := strings.LastIndex(s, "@")
+	if at <= 0 || at == len(s)-1 {
+		return false
+	}
+	local, dom := s[:at], s[at+1:]
+	for _, r := range local {
+		if !isLocalPartChar(r) {
+			return false
+		}
+	}
+	parts := strings.Split(dom, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, r := range p {
+			if !isDomainLabelChar(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isDomainLabelChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') ||
+		r == '-'
+}
+
+// machineLocalParts (6-F): локальные части, которые считаются «машиной»
+// (автогенераторы, боты, постмастеры). Имя пустое + машина → org='машина'.
+func isMachineEmail(email string) bool {
+	local := strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndex(local, "@")
+	if at > 0 {
+		local = local[:at]
+	}
+	for _, mp := range []string{"no-reply", "noreply", "no_reply", "postmaster", "mailer-daemon", "mailer", "postfix", "bounce", "bot"} {
+		if local == mp || strings.Contains(local, mp) {
+			return true
+		}
+	}
+	// info@, support@, hello@, office@, sales@, admin@ — типовые сервисные адреса (не человек).
+	if local == "info" || local == "support" || local == "hello" || local == "office" || local == "sales" || local == "admin" {
+		return true
+	}
+	return false
+}
+
+// EnsurePersonFromIncoming (6-F): разбор из extractor (name, email) —
+// авто-наполнение persons.name из email.FromName; эвристика «машина»:
+// нет имени и email похож на «машину» → org='машина'.
+// Идемпотентна: identity(email) → person. Мусор (пустой, без «@», хедер)
+// → nil, nil (персона НЕ создаётся).
+func (s *Store) EnsurePersonFromIncoming(ctx context.Context, fromName, fromEmail string) (*store.Person, error) {
+	// 6-F п.4: вход может быть legacy-хедером «Имя <email>»
+	// (inbox from_contact, tasks.from_email, tasks.from_name).
+	// Разбираем на (email, name) до записи — identity получает ТОЛЬКО
+	// чистый email; имя из display-name, если явного имени нет.
+	var parsedName, email string
+	if parsed, pName := extractor.ParseFromHeader(fromEmail); parsed != "" {
+		parsedName, email = pName, parsed
+	} else {
+		email = fromEmail
+	}
+	if parsedName != "" && strings.TrimSpace(fromName) == "" {
+		fromName = parsedName
+	}
+	email = normalizeEmail(email)
+	if !isValidPersonEmail(email) {
+		return nil, nil
+	}
+	name := strings.TrimSpace(fromName)
+	isMachine := isMachineEmail(email)
+
+	// П.5 (6-F): self-heal — «грязные» identity по этому email (v0.23.0
+	// записывал RFC822-хедер «Имя <email» без «>») переименовываем в чистый.
+	// Дубли (clean-identity уже была + переименованная) — оставляем одну:
+	// MIN(id) на (email, person). Идемпотентно: после первого прохода
+	// dirty-строк по этому email не остаётся. (Страховка prod-деплоя.)
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT 'true'
+		FROM person_identities
+		WHERE kind = 'email' AND value <> ?
+		  AND instr(lower(value), lower(?)) > 0
+		LIMIT 1`, email, email).Scan(new(string)); err == nil {
+		if _, err = s.db.ExecContext(ctx, `
+			UPDATE person_identities
+			SET value = ?
+			WHERE kind = 'email' AND value <> ?
+			  AND instr(lower(value), lower(?)) > 0`, email, email, email); err != nil {
+			return nil, fmt.Errorf("failed to rename dirty identity: %w", err)
+		}
+		if _, err = s.db.ExecContext(ctx, `
+			DELETE FROM person_identities
+			WHERE kind = 'email' AND value = ?
+			  AND id NOT IN (
+			      SELECT MIN(id) FROM person_identities
+			      WHERE kind = 'email' AND value = ?
+			      GROUP BY person_id)`, email, email); err != nil {
+			return nil, fmt.Errorf("failed to dedup clean identities: %w", err)
+		}
+	}
+
+	// Fast-path: идентичность уже есть?
+	row := s.db.QueryRowContext(ctx, `
+		SELECT person_id FROM person_identities WHERE kind = 'email' AND value = ?`, email)
+	var personID string
+	switch err := row.Scan(&personID); err {
+	case nil:
+		p, gerr := s.GetPerson(ctx, store.PersonID(personID))
+		if gerr != nil {
+			return nil, gerr
+		}
+		if p.Name == "" || p.Org == "" {
+			_ = s.fillPersonNameOrg(ctx, p.Name, name, p.Org, isMachine, p.ID)
+			return s.GetPerson(ctx, p.ID)
+		}
+		return p, nil
+	case sql.ErrNoRows:
+		// продолжаем — создаём
+	default:
+		return nil, fmt.Errorf("failed to look up email identity: %w", err)
+	}
+
+	// Новая персона — имя + (опционально) org='машина'.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	pid, err := newPersonID()
+	if err != nil {
+		return nil, err
+	}
+	iid, err := newPersonID()
+	if err != nil {
+		return nil, err
+	}
+	org := ""
+	if isMachine && name == "" {
+		org = "машина"
+	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO persons (id, name, org, is_internal, confirmed, archived)
+		VALUES (?, ?, ?, 0, 0, 0)`, string(pid), name, org); err != nil {
+		return nil, fmt.Errorf("failed to insert person: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO person_identities (id, person_id, kind, value, external_id, is_primary, provenance)
+		VALUES (?, ?, 'email', ?, '', 0, 'auto')`,
+		string(iid), string(pid), email); err != nil {
+		return nil, fmt.Errorf("failed to insert identity: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	// Возвращаем созданную персону (ID известен — быстрее и детерминированнее).
+	return s.GetPerson(ctx, pid)
+}
+
+// fillPersonNameOrg (6-F): idempotent-update — имя (если было пустым) и/или org.
+func (s *Store) fillPersonNameOrg(ctx context.Context, oldName, newName, oldOrg string, isMachine bool, id store.PersonID) error {
+	if oldName != "" && oldOrg != "" {
+		return nil
+	}
+	name := oldName
+	if oldName == "" && newName != "" {
+		name = newName
+	}
+	org := oldOrg
+	if oldOrg == "" && isMachine {
+		org = "машина"
+	}
+	if name == oldName && org == oldOrg {
+		return nil
+	}
+	return s.UpdatePerson(ctx, &store.Person{ID: id, Name: name, Org: org})
 }
 
 // upsertPersonByEmailInTx — то же, что EnsurePersonByEmail, но в уже открытой tx

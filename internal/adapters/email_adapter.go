@@ -75,12 +75,15 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 		bodyText += email.Calendar
 	}
 
+	// Шаг 6-F: identity = чисто разобранный адрес (ExtractedEmail.FromEmail),
+	// имя — из FromName (парсинг From-заголовка, RFC 5322).
 	item := &store.InboxItem{
 		Source:      "email",
 		SourceID:    email.MessageID,
 		ThreadID:    threadID,
 		FromContact: email.From,
-		FromName:    extractNameFromEmail(email.From),
+		FromName:    email.FromName,
+		FromEmail:   email.FromEmail,
 		Subject:     email.Subject,
 		BodyText:    bodyText,
 		BodyHTML:    email.BodyHTML,
@@ -119,24 +122,4 @@ func (a *EmailAdapter) Parse(raw []byte) (*ParseResult, error) {
 		InboxItem:   item,
 		Attachments: attachments,
 	}, nil
-}
-
-// extractNameFromEmail извлекает имя из адреса "Имя <email>".
-func extractNameFromEmail(from string) string {
-	for i := 0; i < len(from); i++ {
-		if from[i] == '<' {
-			return trimQuotes(from[:i])
-		}
-	}
-	return ""
-}
-
-func trimQuotes(s string) string {
-	for len(s) > 0 && (s[0] == '"' || s[0] == ' ') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == '"' || s[len(s)-1] == ' ') {
-		s = s[:len(s)-1]
-	}
-	return s
 }
