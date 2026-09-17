@@ -189,6 +189,16 @@ type TaskFilter struct {
 	// Дефолт (пусто) = "due" — просроченные сверху, без срока внизу;
 	// "updated" — по свежести активности.
 	Sort string
+
+	// v0.26, шаг 7d: фильтр по срокам (одно значение за запрос):
+	// "overdue"        — срок в прошлом (due_date < сегодня),
+	// "today"          — срок = сегодня,
+	// "tomorrow"       — срок = завтра,
+	// "7d" / "30d"     — срок в ближайшие N дней (включая сегодня),
+	// "none"           — срок не установлен (due_date IS NULL),
+	// "due_pending"    — срок на подтверждении (due_ai_pending=1).
+	// Даты сравнения — канонические YYYY-MM-DD, «сегодня» — часовой пояс сервера.
+	Due string
 }
 
 // TaskListResult содержит результат запроса списка задач.
@@ -377,6 +387,10 @@ type Store interface {
 	MergePersons(ctx context.Context, sourceID, targetID PersonID) error
 
 	// Task Comments
+	// AddTaskComment добавляет комментарий и поднимает активность задачи:
+	// tasks.updated_at обновляется до времени комментария (вклад-активность,
+	// v0.26, шаг 7d — сортировка «по активности»: ответ/комментарий
+	// поднимают задачу наверх, а не только метаданные).
 	AddTaskComment(ctx context.Context, comment *TaskComment) error
 	GetTaskComments(ctx context.Context, taskID int64) ([]*TaskComment, error)
 	GetTaskComment(ctx context.Context, id int64) (*TaskComment, error)

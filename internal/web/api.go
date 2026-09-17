@@ -354,6 +354,16 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// v0.26, шаг 7d: фильтр по срокам — один из фиксированных значений.
+	// Невалидное → 400 (молчаливый fallback на «без фильтра» скрывал typo).
+	rawDue := q.Get("due")
+	switch rawDue {
+	case "", "overdue", "today", "tomorrow", "7d", "30d", "none", "due_pending":
+	default:
+		http.Error(w, `{"error":"due must be overdue|today|tomorrow|7d|30d|none|due_pending"}`, http.StatusBadRequest)
+		return
+	}
+
 	filter := &store.TaskFilter{
 		Project:     q.Get("project"),
 		EpicID:      epicID,
@@ -370,6 +380,8 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		// v0.25, шаг 7a: сортировка списка. "due" (дефолт, store её выбирает)
 		// или "updated" — по свежести правок.
 		Sort: q.Get("sort"),
+		// v0.26, шаг 7d: фильтр по срокам (проверен выше).
+		Due: rawDue,
 	}
 
 	result, err := h.store.ListTasks(r.Context(), filter)

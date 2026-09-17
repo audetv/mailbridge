@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.26.0] - 2026-09-17
+
+v0.26.0 = шаг 7d (Due date: вкладка «Все» + сортировки + фильтры по срокам, РЕЖИМ A).
+
+### Added
+- **Вкладка «Все» (шаг 7d):** задачи любого статуса — `?statuses=` не посылается, бек-энд отдаёт любой. `setTab` в store задаёт дефолт-сортировку: «Все» → `updated` (активность); статусные вкладки → `due` (по срокам). UI — `DashboardView` + `TabBar` (кнопка «Все» в начале ряда вкладок). Тесты: `tests/views/DashboardTasksTab.spec.js` (setTab mock, tab count 8, fetchTasks assertion).
+- **Селектор «Сортировка» (шаг 7d):** PrimeVue `Select` в `FilterBar` — «По срокам» (`sort=due`) / «По активности» (`sort=updated`). Дефолт по вкладке (см. выше). API — `?sort=` уже есть из 7a (внесение в UI + дефолт-связка с вкладкой).
+- **Фильтры по срокам (шаг 7d):** серверный параметр `?due=` + 7 опций (PrimeVue `Select` в `FilterBar`): «Просроченные» / «Сегодня» / «Завтра» / «7 дней» / «30 дней» / «Без срока» / «Срок на подтверждении». Значения: `overdue` / `today` / `tomorrow` / `7d` / `30d` / `none` / `due_pending`. Валидация на API-уровне (`internal/web/api.go:359` — неизвестное значение → `400` + JSON error). В `store.TaskFilter.Due` (interface) + sqlite: WHERE-clause для каждого значения. `store.AddTaskComment` — бампит `tasks.updated_at` (вклад активности — для сортировки «по активности»). T-тесты: `TestDueDate_FilterByDueBuckets` (`internal/store/sqlite/sqlite_test.go:744` — 7 значений), `TestAddTaskComment_BumpsUpdatedAt` (`:819`). e2e: `due-filters-7d.spec.js` (вкладка «Все» + «по активности», вкладка «Активные» + «по срокам», сравнение просроченных/ближайших).
+
+### Docs
+- `docs/api.md` — `?due=` (7 значений + 400). `docs/data-model.md` — `updated_at` бампит в `AddTaskComment`.
+
 ## [0.25.0] - 2026-09-17
 
 v0.25.0 = шаги 7a + 7b + 7c + фикс календаря (PR #46) + х...[truncated]

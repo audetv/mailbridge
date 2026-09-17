@@ -109,6 +109,8 @@ SQLite (WAL-режим), файл `data/mailbridge.db`. Миграции в `int
 | approved | INTEGER | 0/NULL = не утверждённый, 1 = утверждённый (admin-only `PATCH /api/comments/{id}/approve`) |
 | created_at | TIMESTAMP | |
 
+> **v0.26.0 (шаг 7d):** `AddTaskComment` бампит `tasks.updated_at` — вклад активности, на который опирается сортировка `?sort=updated` («по активности»).
+
 ### attachments — файлы (CAS)
 
 | Поле | Тип | Описание |

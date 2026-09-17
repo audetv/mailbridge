@@ -42,7 +42,7 @@ test('attachments inherit: inbox item -> task (manual create)', async ({ page })
     if (Array.isArray(arr) && arr.length >= 2) {
       inboxItem = item
       inboxAtts = arr
-      const listR = await api(page.request, 'GET', '/api/tasks?per_page=200', null, token)
+      const listR = await api(page.request, 'GET', `/api/tasks?per_page=200&search=${encodeURIComponent(item.subject)}`, null, token)
       if (listR.status === 200) {
         const tasks = JSON.parse(listR.text).tasks || []
         existingTask = tasks.find((t) => t.subject === item.subject) || null
