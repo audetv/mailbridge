@@ -25,6 +25,7 @@
   --mb-text: #334155; /* slate-700 */
   --mb-text-muted: #64748b; /* slate-500 */
   --mb-primary: #10b981; /* emerald-500 (Aura primary) */
+  --mb-warn: #eab308; /* yellow-500 — AI-pending / warning (v0.25, 7c) */
   --mb-primary-soft: #ecfdf5; /* emerald-50 */
   --mb-primary-softer: #d1fae5; /* emerald-100 */
 }

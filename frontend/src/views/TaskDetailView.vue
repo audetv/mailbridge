@@ -160,6 +160,44 @@
               <InputText v-model="assignee" @blur="updateField('assignee', assignee)" />
             </div>
 
+            <!-- Срок (v0.25, шаги 7a/7c): утверждённый срок + AI-предложение (принять/изменить/отклонить). -->
+            <div class="field due-field" :class="{ 'due-field--pending': store.currentTask?.due_ai_pending }">
+              <label data-testid="due-label">Срок</label>
+              <DatePicker
+                v-model="dueDateValue"
+                dateFormat="dd.mm.yy"
+                :showClear="true"
+                @change="onDueDateChange"
+                data-testid="due-datepicker"
+              />
+              <div class="due-source" v-if="store.currentTask?.due_date && store.currentTask?.due_source">
+                <span v-if="store.currentTask.due_source === 'ai'" data-testid="due-source-ai">срок: AI</span>
+                <span v-else data-testid="due-source-manual">срок: вручную</span>
+              </div>
+              <!-- AI-предложение (pending, шаг 7b) → человек решает (7c). «Изменить» — AI-значение предзаполнено выше. -->
+              <div class="due-ai-row" v-if="store.currentTask?.due_ai_pending" data-testid="due-ai-row">
+                <span class="due-ai-label" data-testid="due-ai-suggestion">
+                  срок? (AI: {{ store.currentTask.ai_due_date }})
+                </span>
+                <div class="due-ai-actions">
+                  <Button size="small" label="Принять" @click="resolveAiDue('accept')" data-testid="due-ai-accept" />
+                  <Button
+                    size="small"
+                    label="Изменить"
+                    @click="resolveAiDue('edit')"
+                    data-testid="due-ai-edit"
+                  />
+                  <Button
+                    size="small"
+                    label="Отклонить"
+                    severity="secondary"
+                    @click="resolveAiDue('reject')"
+                    data-testid="due-ai-reject"
+                  />
+                </div>
+              </div>
+            </div>
+
             <!-- Персоны (v0.24, шаг 6): роли на задаче (§7.7): заказчик/исполнитель.
                  Legacy-поле «Исполнитель» (email) — рядом; персона — ссылка + роль. -->
             <div class="person-fields">
@@ -204,12 +242,14 @@ import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
+import DatePicker from 'primevue/datepicker'
 import CommentList from '@/components/CommentList.vue'
 import ReplyForm from '@/components/ReplyForm.vue'
 import { useWebSocket } from '@/stores/websocket'
 import { useAuthStore } from '@/stores/auth'
 import WorkflowButtons from '@/components/WorkflowButtons.vue'
 import { newMessagePartOf } from '@/utils/new-message-part'
+import { toCanonicalDate, toDatePickerValue } from '@/utils/due-date'
 
 const route = useRoute()
 const router = useRouter()
@@ -227,6 +267,8 @@ const priority = ref(null)
 const type = ref(null)
 const assignee = ref('')
 const epic = ref(null)
+// Срок (v0.25, 7c): значение DatePicker (Date | null) для утверждённого due_date.
+const dueDateValue = ref(null)
 // Персоны (v0.24, шаг 6): роли на задаче (§7.7) — заказчик/исполнитель.
 const requestorId = ref('')
 const assigneeId = ref('')
@@ -356,6 +398,8 @@ function syncFields() {
   priority.value = store.currentTask.priority
   type.value = store.currentTask.type
   assignee.value = store.currentTask.assignee
+  // Срок (7c): канон «YYYY-MM-DD» → Date для DatePicker (null — без срока).
+  dueDateValue.value = toDatePickerValue(store.currentTask.due_date)
   // Персоны (роль на задаче, §7.7) — из store; '' = не назначена.
   requestorId.value = store.currentTask.requestor_id || ''
   assigneeId.value = store.currentTask.assignee_id || ''
@@ -378,6 +422,41 @@ async function onPersonRoleChange(field, value) {
 
 async function updateField(field, value) {
   await store.updateTask(route.params.id, { [field]: value })
+}
+
+// — Срок (v0.25, шаг 7c): цикл «AI предложил → человек решил» —
+// Любая ручная запись даты = source=manual (backend), pending снимается (backend).
+// value — Date (DatePicker) | строчка 'YYYY-MM-DD' | null/'' (снять срок).
+async function saveDueDate(value) {
+  const due = toCanonicalDate(value) // null — срок снят
+  const r = await store.updateTask(route.params.id, { due_date: due })
+  dueDateValue.value = toDatePickerValue(r?.task?.due_date)
+}
+
+async function onDueDateChange() {
+  // DatePicker уже обновил v-model (dueDateValue); null = пользователь снял срок.
+  await saveDueDate(dueDateValue.value)
+}
+
+// Решение по AI-предложению срока (due_ai_pending, 7b):
+//   accept — due_date := ai_due_date (due_source=ai);
+//   reject — снять pending, ai_due_date остаётся (база ошибок AI);
+//   edit   — AI-значение уже в датпикере; человек меняет (решение = manual).
+async function resolveAiDue(mode) {
+  const task = store.currentTask
+  if (!task) return
+  if (mode === 'accept') {
+    const r = await store.updateTask(route.params.id, { due_ai_resolve: 'accept' })
+    dueDateValue.value = toDatePickerValue(r?.task?.due_date ?? task.due_date)
+    toast.add({ severity: 'success', summary: 'AI-срок принят', life: 2000 })
+  } else if (mode === 'reject') {
+    await store.updateTask(route.params.id, { due_ai_resolve: 'reject' })
+  } else if (mode === 'edit') {
+    // «Изменить» (PLAN 7c): AI-значение ПРЕДЗАПОЛНЕНО в DatePicker — человек
+    // подбирает дату; смена даты в поле = ручное решение (source=manual,
+    // pending снимается бэкендом). Пока не тронуто — решение не отправлено.
+    dueDateValue.value = toDatePickerValue(task.ai_due_date)
+  }
 }
 
 // Смена модуля. null — сброс (задача без модуля).
@@ -479,7 +558,16 @@ function escapeHtml(text) {
   return text?.replace(/\n/g, '<br>') || ''
 }
 
-defineExpose({ epic, epicOptions, onEpicChange, loadEpics })
+defineExpose({
+  epic,
+  epicOptions,
+  onEpicChange,
+  loadEpics,
+  dueDateValue,
+  onDueDateChange,
+  saveDueDate,
+  resolveAiDue
+})
 </script>
 
 <style scoped>
@@ -611,6 +699,36 @@ defineExpose({ epic, epicOptions, onEpicChange, loadEpics })
 
 .field {
   margin-bottom: 1rem;
+}
+
+/* Срок (v0.25, 7c): pending-подсветка строки поля; AI-строка — бейдж + кнопки. */
+.due-field--pending {
+  border: 1px solid var(--mb-warn, #eab308);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin: -0.5rem -0.75rem 1rem;
+  background: color-mix(in srgb, var(--mb-warn, #eab308) 12%, transparent);
+}
+.due-source {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--mb-muted);
+}
+.due-ai-row {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.due-ai-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mb-warn, #a16207);
+}
+.due-ai-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .field label {

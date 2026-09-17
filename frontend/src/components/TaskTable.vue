@@ -89,6 +89,22 @@
           <Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" />
         </template>
       </Column>
+      <!-- Срок (v0.25, шаг 7c): расцветка по due_date; бейдж — срок? (AI-предложение, pending). -->
+      <Column field="due_date" header="Срок" style="width: 130px">
+        <template #body="{ data }">
+          <div data-testid="due-cell" class="due-cell" :class="dueClassOf(data)">
+            <Tag v-if="data.due_date" class="due-tag" :value="data.due_date" :severity="dueSeverity(data)" />
+            <span v-else class="epic-none" data-testid="due-none">—</span>
+            <Badge
+              v-if="data.due_ai_pending"
+              value="срок?"
+              severity="warn"
+              size="small"
+              data-testid="due-pending-badge"
+            />
+          </div>
+        </template>
+      </Column>
       <Column field="assignee" header="Исполнитель" style="width: 120px" />
       <!-- Персоны (v0.24, шаг 6): роли на задаче (§7.7). UUID → имя из persons-store. -->
       <Column field="requestor_id" header="Заказчик" style="width: 150px">
@@ -178,6 +194,7 @@ import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Badge from 'primevue/badge'
 import { useToast } from 'primevue/usetoast'
+import { dueClassOf } from '@/utils/due-date'
 
 const store = useTasksStore()
 const epics = useEpicsStore()
@@ -311,6 +328,16 @@ function personNameById(id) {
 
 function requestorLabel(task) {
   return personNameById(task.requestor_id)
+}
+
+// Срок (7c): severity тега — просрочено danger, сегодня warn, дальше secondary,
+// pending без утверждённого срока — warn.
+function dueSeverity(task) {
+  if (task.due_ai_pending && !task.due_date) return 'warn'
+  const cls = dueClassOf(task)
+  if (cls === 'due--overdue') return 'danger'
+  if (cls === 'due--today') return 'warn'
+  return 'secondary'
 }
 
 function assigneePersonLabel(task) {
@@ -498,6 +525,22 @@ defineExpose({ epicName })
   color: var(--mb-muted);
   cursor: pointer;
   margin-left: auto;
+}
+
+/* Срок (v0.25, шаг 7c): секция колонки — теги по severity + pending-бейдж. */
+.due-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.due--overdue,
+.due--overdue .due-tag {
+  color: var(--mb-danger, #b91c1c);
+}
+.due--today,
+.due--today .due-tag {
+  color: var(--mb-warn, #a16207);
 }
 
 /* UX-фикс (v0.23): клик по чекбоксу строки — зона hit-target минимум 28px.

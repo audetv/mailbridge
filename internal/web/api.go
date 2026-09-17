@@ -618,10 +618,16 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		"type": true, "priority": true, "epic_id": true,
 		// v0.25, шаг 7a: срок задачи (string "YYYY-MM-DD" | null — снять срок).
 		"due_date": true,
+		// 7c, тестовый: установка AI-предложения срока (e2e/unit без LLM).
+		// Действует ТОЛЬКО при due_ai_pending=1 — иначе 400 (не для продуктового UI).
+		"due_ai_set": true,
 	}
 
 	filtered := make(map[string]interface{})
 	newStatus := ""
+	aiDueResolve := "" // шаг 7c: "accept" — применить AI-срок, "reject" — отклонить.
+	aiDueTouched := false
+	manualDue := false
 	for k, v := range updates {
 		if k == "status" {
 			if s, ok := v.(string); ok && s != "" {
@@ -634,6 +640,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			if v == nil {
 				filtered["due_date"] = nil
 				filtered["due_source"] = "manual"
+				manualDue = true
 				continue
 			}
 			ds, ok := v.(string)
@@ -644,11 +651,75 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			filtered["due_date"] = ds
 			// Ручное изменение всегда приоритетнее: source = manual (канон: онтология v0.5.2 §7.5).
 			filtered["due_source"] = "manual"
+			manualDue = true
+			continue
+		}
+		// v0.25, шаг 7c: принятие/отклонение AI-срока — отдельные сигналы.
+		if k == "due_ai_resolve" {
+			if aiDueTouched {
+				http.Error(w, `{"error":"due_ai_resolve must be provided once"}`, http.StatusBadRequest)
+				return
+			}
+			rs, ok := v.(string)
+			if !ok || (rs != "accept" && rs != "reject") {
+				http.Error(w, `{"error":"due_ai_resolve must be \"accept\" or \"reject\""}`, http.StatusBadRequest)
+				return
+			}
+			aiDueResolve = rs
+			aiDueTouched = true
 			continue
 		}
 		if allowedFields[k] {
 			filtered[k] = v
 		}
+	}
+
+	// Шаг 7c: решение человека по AI-предложению срока (due_ai_pending, 7b).
+	// «принять» — due_date := ai_due_date, due_source = ai (ai_due_date остаётся —
+	// база ошибок AI); «отклонить» — снять pending, ai_due_date нетронута.
+	if aiDueTouched {
+		tk, terr := h.store.GetTask(r.Context(), id)
+		if terr != nil || tk == nil {
+			if terr == nil {
+				http.Error(w, `{"error":"task not found"}`, http.StatusNotFound)
+			} else {
+				http.Error(w, `{"error":"`+terr.Error()+`"}`, http.StatusInternalServerError)
+			}
+			return
+		}
+		if aiDueResolve == "accept" {
+			if tk.AIDueDate == nil {
+				http.Error(w, `{"error":"no AI due date to accept"}`, http.StatusUnprocessableEntity)
+				return
+			}
+			filtered["due_date"] = *tk.AIDueDate
+			filtered["due_source"] = "ai"
+		}
+		filtered["due_ai_pending"] = 0
+	}
+
+	// «Изменить» после AI-предложения = решение человека = manual — снять pending.
+	if manualDue {
+		filtered["due_ai_pending"] = 0
+	}
+
+	// 7c, тестовый: AI-предложение срока (ai_due_date + due_ai_pending=1) — сид для
+	// e2e/unit без LLM; '' снимает предложение. Только поле — продуктовый UI не шлёт
+	// этот ключ, так что в проде путь мёртвый, а на dev-стенде — единственный способ
+	// поставить proposal без Ollama.
+	if v, present := updates["due_ai_set"]; present {
+		delete(filtered, "due_ai_set") // не столбец БД — переводится в ai_due_date ниже
+		dv, ok := v.(string)
+		if !ok || dv != "" && !validDueDate(dv) {
+			http.Error(w, `{"error":"due_ai_set must be "YYYY-MM-DD" or empty"}`, http.StatusBadRequest)
+			return
+		}
+		if dv == "" {
+			filtered["ai_due_date"] = nil
+		} else {
+			filtered["ai_due_date"] = dv
+		}
+		filtered["due_ai_pending"] = 1
 	}
 
 	if err := h.store.UpdateTask(r.Context(), id, filtered); err != nil {
