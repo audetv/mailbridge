@@ -750,7 +750,7 @@ func TestDueDate_FilterByDueBuckets(t *testing.T) {
 	today := now.Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
 	in7 := now.AddDate(0, 0, 5).Format("2006-01-02")
-	in30 := now.AddDate(0, 0, 25).Format("2006-01-02") // в пределах 30-дневного, вне 7-дневного
+	in30 := now.AddDate(0, 0, 25).Format("2006-01-02")    // в пределах 30-дневного, вне 7-дневного
 	after30 := now.AddDate(0, 0, 33).Format("2006-01-02") // вне даже 30-дневного окна
 	overdue := now.AddDate(0, 0, -3).Format("2006-01-02")
 
