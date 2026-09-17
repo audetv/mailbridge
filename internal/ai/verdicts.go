@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
@@ -63,6 +64,63 @@ func (o *Orchestrator) ApplyVerdicts(ctx context.Context, email *extractor.Extra
 	return nil
 }
 
+// normalizeDueDate — срок вердикта в канонический формат "YYYY-MM-DD"
+// (онтология v0.5.2 §7.5; БД хранит TEXT date, без времени).
+// Форматы: "2026-10-01" / "2026-10-01 14:00:00" / "2026-10-1T14:00:00".
+// Не похоже на дату (пусто, "скоро", мусор) → (nil, false): срок НЕ
+// предлагать — вердикт без срока (никогда не выдумывать).
+// Пустая строка → (nil, true): явное «срока нет» — предложение не менять.
+func normalizeDueDate(raw string) (*string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil, true
+	}
+	for _, f := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(f, s); err == nil {
+			d := t.Format("2006-01-02")
+			return &d, true
+		}
+	}
+	return nil, false
+}
+
+// applyDueDate — v0.25 шаг 7b: AI-предложение срока (due_date).
+// ai_due_date хранится ВСЕГДА (база ошибок AI: попал/упустил/заврался),
+// due_ai_pending=1 — предложение ожидает решения человека (7c — приём/отказ).
+// due_date / due_source НЕ трогаются — решение человека только в 7c.
+// Флаг MAILBRIDGE_AI_AUTO_APPLY_DUE — 7d, здесь не участвует.
+// Ошибки сохранения — только Warning: задача уже создана/обновлена,
+// потеря предложения срока не критична.
+func (o *Orchestrator) applyDueDate(ctx context.Context, taskID int64, due *string) {
+	if due == nil {
+		return // поле не пришло (null/absent) — не предлагать
+	}
+	nDue, said := normalizeDueDate(*due)
+	if !said || nDue == nil {
+		return // срок не указан / явное «срока нет» — не предлагать (не выдумывать)
+	}
+	// ai_due_date — ВСЕГДА (база ошибок AI), pending — по умолчанию 1.
+	if err := o.store.SetTaskDueAIPending(ctx, taskID, nDue, true); err != nil {
+		log.Printf("[AI] SetTaskDueAIPending failed (ignored): task=%d err=%v", taskID, err)
+		return
+	}
+	log.Printf("[AI] task %d: AI due date proposed: %v (due_ai_pending=1)", taskID, nDue)
+
+	// v0.25 шаг 7d (флаг MAILBRIDGE_AI_AUTO_APPLY_DUE): авто-принятие —
+	// срок сразу в due_date, источник 'ai', pending снимаем.
+	if o.autoApplyDue {
+		if err := o.store.UpdateTask(ctx, taskID, map[string]interface{}{
+			"due_date":       nDue,
+			"due_source":     "ai",
+			"due_ai_pending": 0,
+		}); err != nil {
+			log.Printf("[AI] auto-apply due failed (ignored): task=%d err=%v", taskID, err)
+			return
+		}
+		log.Printf("[AI] task %d: AI due date AUTO-APPLIED: %v (due_source=ai, pending=0)", taskID, nDue)
+	}
+}
+
 // copyInboxAttachmentsToTask — общая функция: переносит вложения входящего
 // в задачу (идемпотентно, дубли по hash/filename невозможны: связь — по ID
 // вложения, INSERT OR IGNORE).
@@ -109,6 +167,14 @@ func (o *Orchestrator) createTaskFromVerdict(ctx context.Context, email *extract
 		return err
 	}
 
+	// v0.25 шаг 7b — AI-предложение срока из вердикта (в ai_due_date + pending).
+	// due: nil — срок не предложен.
+	var duePtr *string
+	if t := verdict.Task; t != nil {
+		duePtr = t.DueDate
+	}
+	o.applyDueDate(ctx, task.ID, duePtr)
+
 	// Вложения входящего достают в задачу (общий хелпер, идемпотентно)
 	o.copyInboxAttachmentsToTask(ctx, task.ID, inboxItemID)
 
@@ -147,6 +213,10 @@ func (o *Orchestrator) updateTaskFromVerdict(ctx context.Context, email *extract
 			}
 		}
 	}
+
+	// v0.25 шаг 7b — AI-предложение срока из вердикта (в ai_due_date + pending;
+	// due_date не трогается — решение человека в 7c).
+	o.applyDueDate(ctx, int64(taskID), verdict.Updates.DueDate)
 
 	var userComment *store.TaskComment
 	var aiComment *store.TaskComment

@@ -179,6 +179,8 @@ func main() {
 	}
 
 	if orchestrator != nil {
+		// v0.25 шаг 7b/7d: авто-принятие AI-сроков (MAILBRIDGE_AI_AUTO_APPLY_DUE, default false).
+		orchestrator.SetAutoApplyDue(cfg.AI.AutoApplyDue)
 		// Фаза 3 шаг 14: проекты для AI берутся из внутренней БД (aktivные), не из Plane.
 		orchestrator.SetProjectsProvider(func(ctx context.Context) ([]string, error) {
 			archived := false

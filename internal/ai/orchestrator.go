@@ -22,15 +22,26 @@ type Orchestrator struct {
 	store            store.Store
 	projects         []string
 	projectsProvider func(ctx context.Context) ([]string, error)
+	// v0.25 шаг 7b: auto-принятие AI-сроков (MAILBRIDGE_AI_AUTO_APPLY_DUE).
+	// false (дефолт): вердикт пишет только ai_due_date + due_ai_pending=1.
+	// true: срок применяется сразу (due_date + due_source='ai').
+	// В обоих случаях ai_due_date хранится ВСЕГДА — база ошибок AI.
+	autoApplyDue bool
+	// todayFunc — «сегодня» для валидации срока (тесты подменяют).
+	todayFunc func() time.Time
 }
 
 // NewOrchestrator создаёт новый Orchestrator.
 func NewOrchestrator(client Client, st store.Store) *Orchestrator {
 	return &Orchestrator{
-		client: client,
-		store:  st,
+		client:    client,
+		store:     st,
+		todayFunc: time.Now,
 	}
 }
+
+// SetAutoApplyDue (v0.25 шаг 7b) включает авто-принятие AI-сроков.
+func (o *Orchestrator) SetAutoApplyDue(v bool) { o.autoApplyDue = v }
 
 // DefaultProject — fallback-проект при пустом AI-классификаторе (шаг 15).
 // Переопределяется через MAILBRIDGE_DEFAULT_PROJECT.
@@ -362,8 +373,12 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	if len(activeTasks) > 0 {
 		sb.WriteString("=== ЗАДАЧИ ЦЕПОЧКИ ===\n")
 		for _, task := range activeTasks {
-			fmt.Fprintf(&sb, "- Task #%d: %s (статус: %s, приоритет: %s)\n",
-				task.ID, task.Subject, task.Status, task.Priority)
+			line := ""
+			if task.DueDate != nil {
+				line = fmt.Sprintf(" (срок: %s)", *task.DueDate)
+			}
+			fmt.Fprintf(&sb, "- Task #%d: %s (статус: %s, приоритет: %s)%s\n",
+				task.ID, task.Subject, task.Status, task.Priority, line)
 
 			// Краткое описание последнего AI-вердикта
 			if task.AIVerdict != "" {
@@ -380,6 +395,9 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
 	}
 
 	sb.WriteString("=== НОВОЕ ПИСЬМО ===\n")
+	if !email.ReceivedAt.IsZero() {
+		fmt.Fprintf(&sb, "Дата письма: %s\n", email.ReceivedAt.Format("2006-01-02"))
+	}
 	fmt.Fprintf(&sb, "От: %s\n", email.From)
 	fmt.Fprintf(&sb, "Тема: %s\n", email.Subject)
 	sb.WriteString("\n")
@@ -398,7 +416,8 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
         "project": "Название проекта",
         "type": "bug|feature|support|access|seo|content",
         "source_email_id": "message-id из заголовка",
-        "image_note": "Описание скриншота или null"
+        "image_note": "Описание скриншота или null",
+        "due_date": "Явный срок из письма в формате YYYY-MM-DD, либо null — срока нет"
       }
     },
     {
@@ -408,7 +427,8 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
         "priority": "urgent",
         "add_comment": "Комментарий — саммари сути, без копирования длинных фрагментов письма",
         "quote": "Дословная цитата из письма (1–3 строки) — тот фрагмент, к которому относится этот вердикт",
-        "change_status": "in_progress"
+        "change_status": "in_progress",
+        "due_date": "Новый/уточнённый явный срок из письма YYYY-MM-DD, либо null — срок не уточняется"
       }
     },
     {
@@ -431,6 +451,12 @@ func (o *Orchestrator) buildPrompt(summary string, activeTasks []*store.Task, em
     }
   ]
 }
+
+ПРАВИЛО ДЛЯ due_date (срок задачи):
+- due_date — ТОЛЬКО явно обозначенный в письме срок («сделайте до 18.09», «нужно до пятницы»).
+  Формат строго YYYY-MM-DD. Дату из «до пятницы»/«до конца месяца» привязывай к дате письма.
+- Если явного срока в письме нет — due_date: null (или не указывай поле). НИКОГДА не выдумывай срок.
+- Для completed срок НЕ указывается (задача уже выполнена).
 
 ПРАВИЛО ДЛЯ quote:
 - quote — дословные 1–3 строки из ТЕКУЩЕГО письма (НЕ перефраз), к которым относится вердикт.
