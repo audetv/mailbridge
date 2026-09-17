@@ -168,6 +168,8 @@
                 dateFormat="dd.mm.yy"
                 :showClear="true"
                 @change="onDueDateChange"
+                @date-select="onDueDateChange"
+                @clear-click="onDueDateChange"
                 data-testid="due-datepicker"
               />
               <div class="due-source" v-if="store.currentTask?.due_date && store.currentTask?.due_source">

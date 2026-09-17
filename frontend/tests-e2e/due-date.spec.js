@@ -146,3 +146,37 @@ test('7c-C: «Изменить» — AI-значение предзаполне�
   expect(t.due_ai_pending).toBeFalsy()
   expect(t.ai_due_date).toBe(AI) // AI-значение не затёрто решением человека
 })
+
+// ── D: Ручная дата КЛИКОМ по календарю (регресс: в v5 DatePicker нет «change») ─
+test('7c-D: клик по календарю в карточке задачи сохраняет срок (manual)', async ({ page, request }) => {
+  const task = await seedTask(request, '2027-07-01')
+
+  await openPending(page, task.id)
+
+  // Открываем календарь кликом по полю; оверлей — в портале вне .due-field.
+  const input = page.locator('.due-field input').first()
+  await input.click()
+  const todayCell = page.locator('td[data-p-today="true"]').first()
+  await expect(todayCell, 'ячейка «сегодня» в календаре').toBeVisible({ timeout: 5000 })
+
+  const respPromise = page.waitForResponse(
+    (r) => r.request().method() === 'PATCH' && r.url().includes(`/api/tasks/${task.id}`),
+    { timeout: 15000 }
+  )
+  await todayCell.click()
+  const resp = await respPromise
+  expect(resp.status(), 'PATCH calendar-click → 200').toBe(200)
+
+  // «Сегодня» = каноническая дата в формате сервера (YYYY-MM-DD).
+  const today = await page.evaluate(() => {
+    const d = new Date()
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  })
+
+  const g = await api(request, 'GET', `/api/tasks/${task.id}`)
+  expect(g.status).toBe(200)
+  const t = g.json.task || g.json
+  expect(t.due_date, 'дата, выбранная кликом, сохранена').toBe(today)
+  expect(t.due_source).toBe('manual')
+})
