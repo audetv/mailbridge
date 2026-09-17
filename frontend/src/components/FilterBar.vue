@@ -43,11 +43,34 @@
       showClear
       class="person-select"
     />
+    <!-- Срок (v0.26, шаг 7d): сортировка + фильтр по датам — серверные ключи. -->
+    <Select
+      v-model="sort"
+      :options="SORT_OPTIONS"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Сортировка"
+      @change="onChange('sort', $event.value)"
+      :allowEmpty="false"
+      class="sort-select"
+      data-testid="sort-select"
+    />
+    <Select
+      v-model="due"
+      :options="DUE_OPTIONS"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Срок (фильтр)"
+      @change="onChange('due', $event.value)"
+      showClear
+      class="due-select"
+      data-testid="due-select"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useEpicsStore } from '@/stores/epics'
 import { useProjectsStore } from '@/stores/projects'
@@ -65,6 +88,28 @@ const project = ref(null)
 const epic = ref(null)
 const requestor = ref(null)
 const assigneePerson = ref(null)
+// Срок (v0.26, шаг 7d): сортировка (дефолт по вкладке — store фильтрует) +
+// фильтр по срокам (showClear — снял = любой срок).
+const sort = ref('due')
+const due = ref(null)
+
+// Сортировка (серверная, 7a/7d): «по срокам» = due, «по активности» = updated.
+const SORT_OPTIONS = [
+  { label: 'По срокам', value: 'due' },
+  { label: 'По активности', value: 'updated' },
+]
+
+// Фильтр по срокам (7d): значения — ключи ?due=; null/'' — без фильтра
+// (showClear в Select; onChange переводит null → '').
+const DUE_OPTIONS = [
+  { label: 'Просроченные', value: 'overdue' },
+  { label: 'Сегодня', value: 'today' },
+  { label: 'Завтра', value: 'tomorrow' },
+  { label: 'До 7 дней', value: '7d' },
+  { label: 'До 30 дней', value: '30d' },
+  { label: 'Без срока', value: 'none' },
+  { label: 'Срок в процессе узнавания', value: 'due_pending' },
+]
 
 const epicOptions = ref([])
 
@@ -96,6 +141,8 @@ onMounted(async () => {
   project.value = store.filters.project || null
   requestor.value = store.filters.requestor_id || null
   assigneePerson.value = store.filters.assignee_id || null
+  sort.value = store.filters.sort || 'due'
+  due.value = store.filters.due || null
   if (project.value) {
     const projectId = await projectsIdByName(project.value)
     await loadEpicOptions(projectId)
@@ -149,6 +196,21 @@ async function onProjectChange(value) {
 function onChange(key, value) {
   store.setFilter(key, value || '')
 }
+
+// Вкладка меняет sort/due (store.setTab) — синхронизируем UI-рефы
+// (напр. «Все» → сортировка по активности, due-фильтр сброшен).
+watch(
+  () => store.filters.sort,
+  (v) => {
+    if (v !== null && v !== undefined) sort.value = v
+  }
+)
+watch(
+  () => store.filters.due,
+  (v) => {
+    due.value = v || null
+  }
+)
 
 defineExpose({ onProjectChange, onChange, epicOptions })
 </script>

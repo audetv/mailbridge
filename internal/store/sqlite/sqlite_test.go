@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/audetv/mailbridge/internal/ai"
 	"github.com/audetv/mailbridge/internal/store"
@@ -736,5 +737,135 @@ func TestAIQueue_LoadPending(t *testing.T) {
 		default:
 			t.Fatalf("expected item %d in queue", i)
 		}
+	}
+}
+
+// v0.26, шаг 7d: фильтры по срокам (due=overdue|today|tomorrow|7d|30d|none|due_pending).
+func TestDueDate_FilterByDueBuckets(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	in7 := now.AddDate(0, 0, 5).Format("2006-01-02")
+	in30 := now.AddDate(0, 0, 25).Format("2006-01-02") // в пределах 30-дневного, вне 7-дневного
+	after30 := now.AddDate(0, 0, 33).Format("2006-01-02") // вне даже 30-дневного окна
+	overdue := now.AddDate(0, 0, -3).Format("2006-01-02")
+
+	mk := func(id, date string) *store.Task {
+		tk := &store.Task{MessageID: id, Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+		if date != "" {
+			tk.DueDate = strp(date)
+			tk.DueSource = strp("manual")
+		}
+		mustCreateTask(t, s, tk)
+		return tk
+	}
+	pending := mk("due-pend", after30)
+	_ = s.SetTaskDueAIPending(ctx, pending.ID, strp(after30), true)
+	mk("due-none", "")
+	mk("due-overdue", overdue)
+	mk("due-today", today)
+	mk("due-tomorrow", tomorrow)
+	mk("due-in7", in7)
+	mk("due-in30", in30)
+	mk("due-far", after30)
+
+	want := map[string][]string{
+		"overdue":     {"due-overdue"},
+		"today":       {"due-today"},
+		"tomorrow":    {"due-tomorrow"},
+		"7d":          {"due-today", "due-tomorrow", "due-in7"},
+		"30d":         {"due-today", "due-tomorrow", "due-in7", "due-in30"},
+		"none":        {"due-none"},
+		"due_pending": {"due-pend"},
+	}
+	for _, d := range []string{"overdue", "today", "tomorrow", "7d", "30d", "none", "due_pending"} {
+		res, err := s.ListTasks(ctx, &store.TaskFilter{Due: d, Page: 1, PerPage: 20})
+		if err != nil {
+			t.Fatalf("ListTasks due=%s: %v", d, err)
+		}
+		got := map[string]bool{}
+		for _, tk := range res.Tasks {
+			got[tk.MessageID] = true
+		}
+		if len(res.Tasks) != len(want[d]) {
+			t.Errorf("due=%s: got %d tasks (%v), want %v", d, len(res.Tasks), got, want[d])
+			continue
+		}
+		for _, id := range want[d] {
+			if !got[id] {
+				t.Errorf("due=%s: missing %s in %v", d, id, got)
+			}
+		}
+	}
+
+	// Неизвестное значение = фильтр не применяется (store его игнорирует;
+	// API-слой отвечает 400 — здесь проверяем только устойчивость store).
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Due: "bogus", Page: 1, PerPage: 20})
+	if err != nil {
+		t.Fatalf("ListTasks due=bogus: %v", err)
+	}
+	if len(res.Tasks) != 8 {
+		t.Errorf("due=bogus: expected no filter applied (8 tasks), got %d", len(res.Tasks))
+	}
+}
+
+// v0.26, шаг 7d: вклад-активность — новый комментарий поднимает
+// tasks.updated_at (сортировка «по активности» учитывает ответы, не только
+// правки метаданных).
+func TestAddTaskComment_BumpsUpdatedAt(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task := &store.Task{MessageID: "touch-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, task)
+	before, err := s.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	// Даем обновлению заметную просадку (updated_at имеет секундную точность).
+	time.Sleep(1100 * time.Millisecond)
+	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: task.ID, Body: "reply"}); err != nil {
+		t.Fatalf("AddTaskComment: %v", err)
+	}
+	after, err := s.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("expected updated_at to bump after comment: before=%v after=%v", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// v0.26, шаг 7d: sort=updated после ответа — отвеченная задача поднимается.
+func TestListTasks_SortUpdatedAfterReply(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	quiet := &store.Task{MessageID: "act-quiet", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	busy := &store.Task{MessageID: "act-busy", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, quiet)
+	mustCreateTask(t, s, busy)
+
+	time.Sleep(50 * time.Millisecond)
+	if err := s.AddTaskComment(ctx, &store.TaskComment{TaskID: busy.ID, Body: "hot thread"}); err != nil {
+		t.Fatalf("AddTaskComment: %v", err)
+	}
+
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Sort: "updated", Page: 1, PerPage: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(res.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(res.Tasks))
+	}
+	if res.Tasks[0].ID != busy.ID {
+		t.Errorf("first with sort=updated after reply should be %d, got %d", busy.ID, res.Tasks[0].ID)
 	}
 }

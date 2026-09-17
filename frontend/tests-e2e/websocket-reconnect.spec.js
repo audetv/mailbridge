@@ -71,7 +71,11 @@ test.describe('WS-reliability — Шаг 0 (v0.22.1)', () => {
     const projectName = Array.isArray(projResp.json) && projResp.json.length ? projResp.json[0].name : null
     expect(projectName, 'нет проектов в seed').toBeTruthy()
     const title = `E2E-ws0 ${Date.now()}`
-    const created = await api(request, 'POST', '/api/tasks', { title, project: projectName }, token)
+    // 7a дефолт: sort=due + IS NULL ASC … id ASC. Новая без срока (NULL)
+    // уйдёт за per_page=50 из-за накопившихся stale e2e-строк с due → явный
+    // минимальный срок держит её на 1‑й странице (top) при sort=due.
+    const overdueMin = '2000-01-01'
+    const created = await api(request, 'POST', '/api/tasks', { title, project: projectName, due_date: overdueMin }, token)
     expect(created.status, `POST /tasks -> ${JSON.stringify(created.json)}`).toBe(201)
 
     // Таблица её НЕ видит (сделана за время разрыва, WS-событие потеряно).

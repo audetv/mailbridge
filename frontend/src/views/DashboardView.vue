@@ -92,6 +92,7 @@ function onTaskCreated() {
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },
+  { key: 'all', label: 'Все', count: 0 },
   { key: 'active', label: 'Активные', count: 0 },
   { key: 'backlog', label: 'Бэклог', count: 0 },
   { key: 'completed', label: 'Выполненные', count: 0 },
@@ -100,7 +101,11 @@ const tabItems = computed(() => [
   { key: 'persons', label: 'Персоны', count: 0 }
 ])
 
+// Вкладки (v0.26, шаг 7d): «Все» — любой статус (пустой массив → без status
+// в запросе); дефолтные сортировки — Все: по активности, статусные: по срокам
+// (серверные sort=updated/due из 7a).
 const tabStatuses = {
+  all: [],
   active: ['new', 'in_progress'],
   backlog: ['backlog'],
   completed: ['completed'],
@@ -131,7 +136,8 @@ function applyTab(tab) {
   if (!isKnownTab(tab)) return
   activeTab.value = tab
   if (tab !== 'inbox') {
-    store.setStatuses(defaultStatuses(tab))
+    // 7d: setTab — статусы вкладки + дефолт-сортировка + сброс due-фильтра.
+    store.setTab(tab)
   }
 }
 
@@ -183,7 +189,7 @@ function onTabSelect(key) {
   if (key === 'projects' || key === 'inbox') delete query.project
   router.replace({ query })
   if (key !== 'inbox' && key !== 'projects') {
-    store.setStatuses(tabStatuses[key])
+    store.setTab(key)
   }
 }
 
