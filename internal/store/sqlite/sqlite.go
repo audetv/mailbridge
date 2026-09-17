@@ -504,6 +504,31 @@ func (s *Store) SetTaskStatus(ctx context.Context, taskID int64, toStatus, by st
 	return tx.Commit()
 }
 
+// SetTaskDueAIPending — v0.25 шаг 7b: AI-предложение срока задачи.
+// ai_due_date хранится ВСЕГДА (в т.ч. NULL — «AI срока не извлек»: база ошибок,
+// шаг 8 метрики), due_ai_pending=1 — предложение ждёт решения человека (7c).
+// due_date/due_source НЕ изменяются: решение человека только принимает срок (7c).
+func (s *Store) SetTaskDueAIPending(ctx context.Context, taskID int64, aiDueDate *string, pending bool) error {
+	p := 0
+	if pending {
+		p = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE tasks SET ai_due_date = ?, due_ai_pending = ?, updated_at = ? WHERE id = ?`,
+		aiDueDate, p, time.Now(), taskID); err != nil {
+		return fmt.Errorf("failed to set AI due date: %w", err)
+	}
+	// Задача отсутствовала — 0 строк; ошибка, чтобы вердикт-путь это увидел.
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT changes()`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("task %d: %w", taskID, store.ErrTaskNotFound)
+	}
+	return nil
+}
+
 // isClosedStatus — статус, означающий «задача закрыта подтверждениями» (решение владельца:
 // «статут задачи = done или closed»). В v0.24-набор статусов (api.go): new|backlog|
 // in_progress|completed|closed — закрытые это completed и closed (legacy «done» больше нет).

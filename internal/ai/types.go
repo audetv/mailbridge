@@ -26,6 +26,9 @@ type NewTaskData struct {
 	Type          string `json:"type"`
 	SourceEmailID string `json:"source_email_id"`
 	ImageNote     string `json:"image_note,omitempty"`
+	// v0.25 шаг 7b: явно обозначенный в письме срок (предложение AI).
+	// *string: JSON null / поле отсутствует → nil (срок не извлечён → не трогаем).
+	DueDate *string `json:"due_date,omitempty"`
 }
 
 // TaskUpdates — поля для обновления существующей задачи.
@@ -34,6 +37,8 @@ type TaskUpdates struct {
 	AddComment   string `json:"add_comment,omitempty"`
 	Quote        string `json:"quote,omitempty"` // (step 5 v0.23) дословная цитата 1–2 строк из письма — «затронутый фрагмент»
 	ChangeStatus string `json:"change_status,omitempty"`
+	// v0.25 шаг 7b: срок из нового письма (предложение AI; ручной срок AI не трогает).
+	DueDate *string `json:"due_date,omitempty"`
 }
 
 // Verdict — одно решение LLM по письму.

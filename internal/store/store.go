@@ -329,6 +329,14 @@ type Store interface {
 	// Ручное назначение имеет приоритет над авто (правило решения 6).
 	SetTaskPersonRoles(ctx context.Context, taskID int64, requestorID, assigneeID *PersonID) error
 
+	// SetTaskDueAIPending — v0.25 шаг 7b: AI-предложение срока задачи.
+	// Пишет ai_due_date (NULL — срок не извлечён, база ошибок AI:
+	// попал/упустил/заврался) и due_ai_pending (1 — предложение ждёт решения
+	// человека; приём/отмена — 7c, там же пишется due_date/due_source).
+	// due_date/due_source НЕ изменяются: решение человека только в 7c.
+	// Флаг MAILBRIDGE_AI_AUTO_APPLY_DUE (авто-принятие) — шаг 7d.
+	SetTaskDueAIPending(ctx context.Context, taskID int64, aiDueDate *string, pending bool) error
+
 	// Persons (v0.24, шаг 6) — справочник действующих лиц.
 	// CreatePerson создаёт персону; ID должен быть задан приложением (UUID).
 	CreatePerson(ctx context.Context, p *Person) error

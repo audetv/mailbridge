@@ -138,6 +138,30 @@ func TestLoad_AIConfig_TemperatureDefault(t *testing.T) {
 	if cfg.AI.SystemPromptFile != "" {
 		t.Errorf("AI.SystemPromptFile default = %s, want empty", cfg.AI.SystemPromptFile)
 	}
+	if cfg.AI.AutoApplyDue {
+		t.Errorf("AI.AutoApplyDue default = true, want false (авто-принятие выкл по умолчанию)")
+	}
+}
+
+// TestLoad_AIConfig_AutoApplyDueOverride — флаг MAILBRIDGE_AI_AUTO_APPLY_DUE
+// переопределяет дефолт (шаг 7b v0.25).
+func TestLoad_AIConfig_AutoApplyDueOverride(t *testing.T) {
+	setEnvs(t, map[string]string{
+		"MAILBRIDGE_IMAP_SERVER":       "imap.example.com",
+		"MAILBRIDGE_IMAP_USER":         "user@example.com",
+		"MAILBRIDGE_IMAP_PASS":         "secret",
+		"MAILBRIDGE_SMTP_SERVER":       "smtp.example.com",
+		"MAILBRIDGE_SMTP_FROM":         "support@example.com",
+		"MAILBRIDGE_AI_AUTO_APPLY_DUE": "true",
+	})
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.AI.AutoApplyDue {
+		t.Errorf("AI.AutoApplyDue = false, want true (MAILBRIDGE_AI_AUTO_APPLY_DUE=true)")
+	}
 }
 
 // setEnvs устанавливает переменные окружения и возвращает функцию очистки.

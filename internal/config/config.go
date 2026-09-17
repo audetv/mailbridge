@@ -61,6 +61,12 @@ type AIConfig struct {
 	SystemPromptFile string
 	// Temperature — жёсткость ответов (0.1 — строгий JSON, минимум "креатива").
 	Temperature float64
+	// AutoApplyDue — v0.25 шаг 7b/7d: авто-принятие AI-сроков (default false).
+	// false (дефолт): AI-срок пишется в ai_due_date + due_ai_pending=1,
+	// решение человека — приём/изменение/отмена в UI (7c).
+	// true: срок применяется сразу (due_date + due_source='ai').
+	// В обоих случаях ai_due_date хранится ВСЕГДА — база ошибок AI (шаг 8).
+	AutoApplyDue bool
 }
 
 // HTTPConfig настройки HTTP-сервера.
@@ -120,6 +126,7 @@ func Load() (*Config, error) {
 			SystemPromptFile: getEnv("MAILBRIDGE_AI_SYSTEM_FILE", ""),
 			SystemPrompt:     getEnv("MAILBRIDGE_AI_SYSTEM_PROMPT", ""),
 			Temperature:      getEnvAsFloat("MAILBRIDGE_AI_TEMPERATURE", 0.1),
+			AutoApplyDue:     getEnvAsBool("MAILBRIDGE_AI_AUTO_APPLY_DUE", false),
 		},
 		HTTP: HTTPConfig{
 			Listen: getEnv("MAILBRIDGE_LISTEN", ":8080"),
