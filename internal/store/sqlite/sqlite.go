@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" // драйвер SQLite
 
+	"github.com/audetv/mailbridge/internal/extractor"
 	"github.com/audetv/mailbridge/internal/store"
 )
 
@@ -573,10 +574,17 @@ type queryer interface {
 
 // ensurePersonInTx = upsertPersonByEmailInTx, но с сигнатурой (string, error):
 // found=false трактует как no-op (пустую персона).
+// 6-H: источник (task_comments.author) — сырой строка хедера («Имя
+// <email>»); identity обязаны хранить только чистый email (канон 6-F),
+// поэтому парсим RFC822 ДО upsert — так не создаётся сирот на сырых
+// хедерах (prod 2026-09-17: именно так в prod попали грязные identity).
 func ensurePersonInTx(ctx context.Context, tx *sql.Tx, email string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return "", nil
+	}
+	if parsed, _ := extractor.ParseFromHeader(email); parsed != "" {
+		email = strings.ToLower(strings.TrimSpace(parsed))
 	}
 	pid, found, err := upsertPersonByEmailInTx(ctx, tx, email)
 	if err != nil {
