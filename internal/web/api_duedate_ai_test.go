@@ -23,7 +23,7 @@ import (
 )
 
 // seedDuePending — задача без срока + «предложение AI» (ai_due_date, pending=1).
-func seedDuePending(t *testing.T, handler *web.TaskHandler, st *sqlite.Store, msgID string) int64 {
+func seedDuePending(t *testing.T, handler *web.TaskHandler, st *sqlite.Store, msgID string) {
 	t.Helper()
 	_ = handler
 	ctx := t.Context()
@@ -42,7 +42,6 @@ func seedDuePending(t *testing.T, handler *web.TaskHandler, st *sqlite.Store, ms
 	if err := st.SetTaskDueAIPending(ctx, 1, &ai, true); err != nil {
 		t.Fatalf("SetTaskDueAIPending: %v", err)
 	}
-	return 1
 }
 
 func TestAPI_ResolveAIDue_Accept(t *testing.T) {
