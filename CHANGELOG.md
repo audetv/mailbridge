@@ -1,9 +1,8 @@
 # Changelog
 
-## [Unreleased] — v0.25
+## [0.25.0] - 2026-09-17
 
-### Fixed
-- **Срок задачи (v0.25, шаг 7c, баг в закрытом PR #44):** выбор срока в карточке задачи кликом по календарю не сохранялся (PATCH не уходил) — PrimeVue 5 DatePicker не шлёт нативное `change` при клике (только `date-select`; `change` — лишь печать + blur). Подписан `@date-select` + `@clear-click` (`TaskDetailView.vue`); e2e **тест D** — клик по календарю «сегодня» в оверлее (портал вне `.due-field`, селектор `td[data-p-...=true]`) → `due_date` = сегодня, `due_source='manual'` (5/5).
+v0.25.0 = шаги 7a + 7b + 7c + фикс календаря (PR #46) + х...[truncated]
 
 ### Added
 - **AI-предложение срока (v0.25, шаг 7b, РЕЖИМ A):** AI извлекает явно обозначенные сроки из письма («до 18.09», «нужно до…»; нет — `null`, никогда не выдумывать) и **предлагает** — не применяет: `ai_due_date` + `due_ai_pending=1` (решает человек в UI, шаг 7c). Схема вердикта: `due_date` в new (`task.due_date`) и update (`updates.due_date`) + правило «явный срок / null / для completed — нет» + «Дата письма» в контексте (для относительных дат «до пятницы»). Канон `YYYY-MM-DD` — нормализация (`normalizeDueDate`: время срубается; «скоро»/мусор/пусто → предложение не создаётся). **`ai_due_date` хранится ВСЕГДА** (база ошибок AI: попал/упустил/заврался); **ручной срок — приоритетен**: `due_date`/`due_source='manual'` AI не перезаписывает (предложение лишь рядом, pending). Флаг `MAILBRIDGE_AI_AUTO_APPLY_DUE` (default `false` — ждать подтверждения; `true` = применить сразу: `due_date` + `due_source='ai'`, pending=0) — `config.go` + `config.example.env`; `SetAutoApplyDue` у оркестратора (wired из `main.go`). Store: `SetTaskDueAIPending` (interface + sqlite: `ai_due_date` + `due_ai_pending`, `null`-колонки идемпотентны); `UpdateTask` whitelist + `ai_due_date`/`due_ai_pending`. T-тесты: `internal/ai/step7b_duedate_test.go` (new: предложение/дефолт, авто-принятие, null, мусор, время; update-путь; `step7b_manual_test.go` — manual-сроки не трогает) — 8 сценариев + config-тест флага (default false + override). Тесты без LLM (реальный sqlite `:memory:`, паттерн шага 5).
