@@ -585,20 +585,54 @@ func (s *Store) EnsurePersonFromIncoming(ctx context.Context, fromName, fromEmai
 	// Дубли (clean-identity уже была + переименованная) — оставляем одну:
 	// MIN(id) на (email, person). Идемпотентно: после первого прохода
 	// dirty-строк по этому email не остаётся. (Страховка prod-деплоя.)
+	var dirtyID string
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT 'true'
-		FROM person_identities
+		SELECT id FROM person_identities
 		WHERE kind = 'email' AND value <> ?
 		  AND instr(lower(value), lower(?)) > 0
-		LIMIT 1`, email, email).Scan(new(string)); err == nil {
-		if _, err = s.db.ExecContext(ctx, `
-			UPDATE person_identities
-			SET value = ?
-			WHERE kind = 'email' AND value <> ?
-			  AND instr(lower(value), lower(?)) > 0`, email, email, email); err != nil {
-			return nil, fmt.Errorf("failed to rename dirty identity: %w", err)
+		LIMIT 1`, email, email).Scan(&dirtyID); err == nil {
+		// 6-H (prod 2026-09-17, crash-loop): чистая identity может УЖЕ
+		// существовать — тогда UPDATE dirty→clean коллидирует на
+		// UNIQUE(kind,value). В этом случае владелец грязной identity —
+		// дубль того же человека (prod: «сирота» с raw-хедером):
+		// сливаем дубль в владельца чистой identity и удаляем грязную.
+		var cleanID, cleanOwner string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM person_identities WHERE kind = 'email' AND value = ? LIMIT 1`, email).Scan(&cleanID); err == nil {
+			if err := s.db.QueryRowContext(ctx,
+				`SELECT person_id FROM person_identities WHERE id = ?`, cleanID).Scan(&cleanOwner); err != nil {
+				return nil, fmt.Errorf("failed to read clean identity owner: %w", err)
+			}
+			var dirtyOwner string
+			if err := s.db.QueryRowContext(ctx,
+				`SELECT person_id FROM person_identities WHERE id = ?`, dirtyID).Scan(&dirtyOwner); err != nil {
+				return nil, fmt.Errorf("failed to read dirty identity owner: %w", err)
+			}
+			if dirtyOwner != cleanOwner {
+				if err := s.MergePersons(ctx, store.PersonID(dirtyOwner), store.PersonID(cleanOwner)); err != nil {
+					return nil, fmt.Errorf("failed to merge dirty duplicate: %w", err)
+				}
+			}
+			if _, err := s.db.ExecContext(ctx,
+				`DELETE FROM person_identities
+				 WHERE kind = 'email' AND value <> ?
+				   AND instr(lower(value), lower(?)) > 0`, email, email); err != nil {
+				return nil, fmt.Errorf("failed to remove dirty identity: %w", err)
+			}
+		} else {
+			// Чистой ещё нет (первый бэкофилл) — переименовываем
+			// грязную в чистую (оригинальный сценарий 6-F).
+			if _, err := s.db.ExecContext(ctx, `
+				UPDATE person_identities
+				SET value = ?
+				WHERE kind = 'email' AND value <> ?
+				  AND instr(lower(value), lower(?)) > 0`, email, email, email); err != nil {
+				return nil, fmt.Errorf("failed to rename dirty identity: %w", err)
+			}
 		}
-		if _, err = s.db.ExecContext(ctx, `
+		// Дубли «чистой» identity — одна на (email, person): MIN(id).
+		// Идемпотентно (страховка, как в 6-F).
+		if _, err := s.db.ExecContext(ctx, `
 			DELETE FROM person_identities
 			WHERE kind = 'email' AND value = ?
 			  AND id NOT IN (

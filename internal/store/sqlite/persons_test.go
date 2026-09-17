@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 
@@ -136,6 +137,130 @@ func TestPersons_6F_SelfHealDirtyIdentity(t *testing.T) {
 	if count, _ := identityStats(ctx, t, s, "dirty@x.ru", "Имя <dirty@x.ru"); count != 1 {
 		t.Fatalf("re-ensure identities count: got %d, want 1", count)
 	}
+}
+
+// 6-H (Red, prod 2026-09-17): чистая identity УЖЕ СУЩЕСТВУЕТ у одной персоны,
+// а «сирота» с грязной identity (сырой хедер «Имя <email» без «>») — УДРУГОЙ.
+// Self-heal обязан: НЕ упасть с UNIQUE(kind,value), вернуть чистую персону,
+// убрать грязную identity, сирота не остаётся с identity на этот email;
+// идемпотентно на повторе. (Прод: update шёл ДО дедуп-DELETE — коллизия,
+// exit 1, crash-loop.)
+func TestPersons_6H_SelfHealDirtyIdentityWhenCleanAlreadyExists(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	const (
+		email     = "gusev@gc.example"
+		cleanPID  = "person-6h-clean"  // «хозяин» чистой identity
+		orphanPID = "person-6h-orphan" // сирота с грязной identity (prod: name/org пустые)
+	)
+	if _, err := s.ExecForTest(ctx,
+		`INSERT INTO persons (id, name, confirmed, is_internal, archived) VALUES ('person-6h-clean', 'Гусев Алексей', 1, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExecForTest(ctx,
+		`INSERT INTO persons (id, name, confirmed, is_internal, archived) VALUES ('person-6h-orphan', '', 1, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExecForTest(ctx,
+		fmt.Sprintf(`INSERT INTO person_identities (id, person_id, kind, value, is_primary) VALUES ('person-6h-i1', 'person-6h-clean', 'email', %q, 1)`, email)); err != nil {
+		t.Fatal(err)
+	}
+	dirtyVal := "Гусев Алексей <" + email
+	if _, err := s.ExecForTest(ctx,
+		fmt.Sprintf(`INSERT INTO person_identities (id, person_id, kind, value, is_primary) VALUES ('person-6h-i2', 'person-6h-orphan', 'email', %q, 0)`, dirtyVal)); err != nil {
+		t.Fatal(err)
+	}
+	// Задача «сироты» (prod: 384/394/404): после merge должна оказаться
+	// за «хозяином» чистой identity.
+	if _, err := s.ExecForTest(ctx,
+		fmt.Sprintf(`INSERT INTO tasks (message_id, subject, from_email, requestor_id, assignee_id) VALUES ('6h-task-1', 'Задача сироты', %q, %q, %q)`, email, orphanPID, orphanPID)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Повторный self-heal — НЕ падает с UNIQUE, возвращает «хозяина»
+	//    чистой identity (сирота — дубль того же человека).
+	p, err := s.EnsurePersonFromIncoming(ctx, "Гусев Алексей", email)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if p == nil {
+		t.Fatal("ensure: nil person")
+	}
+	if string(p.ID) != cleanPID {
+		t.Fatalf("returned person: got %q, want %q", p.ID, cleanPID)
+	}
+
+	// 2. Сирота не остаётся с identity на этот email (ни грязной, ни чистой),
+	//    чистая — одна, за настоящим владельцем.
+	var n int
+	if err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM person_identities WHERE value=%q OR value=%q`, email, dirtyVal)).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("identities for email: got %d rows, want exactly 1 (clean, owner's)", n)
+	}
+	if pid, ok := identityPersonID(ctx, t, s, email); !ok || pid != cleanPID {
+		t.Fatalf("identity person_id: got %q (%v), want %q", pid, ok, cleanPID)
+	}
+
+	// 3. Задачи сироты — за настоящим владельцем (merge, а не «дубль живёт»).
+	if tid, ok := taskIDForPerson(ctx, t, s, orphanPID); ok {
+		if got, ok := taskOwner(ctx, t, s, tid); !ok || got != cleanPID {
+			t.Fatalf("task %s owner: got %q (%v), want %q", tid, got, ok, cleanPID)
+		}
+	}
+
+	// 4. Идемпотентность: повтор — не падает, не дуплит, та же персона.
+	if p2, err := s.EnsurePersonFromIncoming(ctx, "", email); err != nil || p2 == nil || string(p2.ID) != cleanPID {
+		t.Fatalf("re-ensure: %v / %v / %q", err, p2, cleanPID)
+	}
+	if n2 := identityCount(ctx, t, s, email); n2 != 1 {
+		t.Fatalf("re-ensure identities: got %d, want 1", n2)
+	}
+}
+
+// identityCount: сколько всего identity совпадает по чистому email.
+func identityCount(ctx context.Context, t *testing.T, s *sqlite.Store, email string) int {
+	t.Helper()
+	var n int
+	if err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM person_identities WHERE value = %q`, email)).Scan(&n); err != nil {
+		t.Fatalf("identityCount: %v", err)
+	}
+	return n
+}
+
+// taskIDForPerson: первая (по id) задача, где персона — requestor или assignee.
+func taskIDForPerson(ctx context.Context, t *testing.T, s *sqlite.Store, pid string) (string, bool) {
+	t.Helper()
+	var id int64
+	err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT id FROM tasks WHERE requestor_id = %q OR assignee_id = %q ORDER BY id LIMIT 1`, pid, pid)).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", false
+		}
+		t.Fatalf("taskIDForPerson: %v", err)
+	}
+	return fmt.Sprintf("%d", id), true
+}
+
+// taskOwner: кто владелец (assignee) задачи; fallback — requestor.
+func taskOwner(ctx context.Context, t *testing.T, s *sqlite.Store, taskID string) (string, bool) {
+	t.Helper()
+	var owner string
+	err := s.QueryRowForTest(ctx,
+		fmt.Sprintf(`SELECT coalesce(assignee_id, requestor_id) FROM tasks WHERE id = %q`, taskID)).Scan(&owner)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", false
+		}
+		t.Fatalf("taskOwner: %v", err)
+	}
+	return owner, true
 }
 
 func identityStats(ctx context.Context, t *testing.T, s *sqlite.Store, clean, dirty string) (count, dirtyN int) {
@@ -385,5 +510,55 @@ func TestPersons_AutoAssignOnClose(t *testing.T) {
 	}
 	if person, _ := s.GetPerson(ctx, *task.AssigneeID); person == nil || person.Confirmed {
 		t.Fatalf("unexpected auto-assigned person: %+v", person)
+	}
+}
+
+// 6-H (часть 2, Red, prod 2026-09-17): авторы входящих в task_comments
+// хранятся raw-строкой хедера («Имя <email>» — так пишет processor).
+// auto-assign (ensurePersonInTx → upsertPersonByEmailInTx) обязан
+// записать identity ТОЛЬКО с чистым email — сырой хедер в
+// person_identities не должен попадать. (Прод: ровно так и попадал —
+// source грязных identity.)
+func TestPersons_6H_AutoAssignDoesNotStoreRawHeader(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	mustCreateTask(t, s, &store.Task{MessageID: "m6h2", Subject: "t6h2", Status: string(store.StatusNew)})
+	rawAuth := "Гусев Алексей <agusev6h@gc.example>"
+	comment := &store.TaskComment{
+		TaskID:    1,
+		Author:    rawAuth,
+		Body:      "подтверждаю выполнение",
+		Direction: "in",
+	}
+	if err := s.AddTaskComment(ctx, comment); err != nil {
+		t.Fatalf("AddTaskComment: %v", err)
+	}
+	if err := s.SetTaskStatus(ctx, 1, "completed", "admin"); err != nil {
+		t.Fatalf("SetTaskStatus: %v", err)
+	}
+
+	// 1. Чистая identity — ровно одна.
+	const cleanEmail = "agusev6h@gc.example"
+	if n := identityCount(ctx, t, s, cleanEmail); n != 1 {
+		t.Fatalf("clean identity count: got %d, want 1", n)
+	}
+	// 2. Сырой хедер в identities НЕ записан.
+	if n := identityCount(ctx, t, s, rawAuth); n != 0 {
+		t.Fatalf("raw header in identities: got %d rows, want 0", n)
+	}
+	// 3. Персона создана (один email — одна персона).
+	pid, ok := identityPersonID(ctx, t, s, cleanEmail)
+	if !ok || pid == "" {
+		t.Fatalf("identity owner: want non-empty person id, got ok=%v pid=%q", ok, pid)
+	}
+	// 4. Assignee связан с этой персоной.
+	task, err := s.GetTask(ctx, 1)
+	if err != nil || task == nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.AssigneeID == nil || *task.AssigneeID != store.PersonID(pid) {
+		t.Fatalf("assignee: got %v, want %q", task.AssigneeID, pid)
 	}
 }
