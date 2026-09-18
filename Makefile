@@ -31,22 +31,13 @@ run:
 		./$(BUILD_DIR)/$(APP_NAME) $(ARGS); \
 	fi
 
-run-dev: frontend-static
+run-dev:
 	@echo "Dev build: version $(VERSION) (commit $(COMMIT))"
 	@if [ -f configs/config.env ]; then \
 		set -a && . configs/config.env && set +a && go run $(LDFLAGS) ./cmd/$(APP_NAME) $(ARGS); \
 	else \
 		go run $(LDFLAGS) ./cmd/$(APP_NAME) $(ARGS); \
 	fi
-
-# Статика //go:embed — снимок cmd/mailbridge/static НА МОМЕНТ КОМПИЛЯЦИИ (main.go:37).
-# ВСЕГДА перед go run: собрать фронт + скопировать dist → static, иначе dev отдаёт СТАРУЮ статику
-# (инцидент v0.27.2, 2026-09-18: владелец увидел v0.27.1 без фикса; правила — mailbridge-dev skill).
-frontend-static:
-	@echo "Building frontend (embed-static)..."
-	cd frontend && npm run build
-	rm -rf cmd/mailbridge/static
-	cp -r frontend/dist cmd/mailbridge/static
 
 test:
 	go test -v -count=1 -timeout 30s ./...
