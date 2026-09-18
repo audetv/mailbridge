@@ -293,6 +293,51 @@ func TestDueDate_ListSortDefault(t *testing.T) {
 	}
 }
 
+func TestDueDate_ListSortNoDueByCreatedDesc(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// v0.25.1 (хотфикс): в группе «без срока» — новые выше (created_at DESC),
+	// а не старые (id ASC). Создаём 3 без срока ПОСЛЕДОВАТЕЛЬНО — created_at
+	// монотонно растут, порядок «последние сверху» отличим от старого.
+	d := func(id, date string) *store.Task {
+		tk := &store.Task{MessageID: id, Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+		if date != "" {
+			tk.DueDate = strp(date)
+			tk.DueSource = strp("manual")
+		}
+		return tk
+	}
+	mustCreateTask(t, s, d("due-task", "2026-10-01"))
+	n1 := d("n1", "") // созданная первой — должна уйти ВНИЗ
+	n2 := d("n2", "")
+	n3 := d("n3", "") // созданная последней — должна быть ПЕРВОЙ в группе без срока
+	mustCreateTask(t, s, n1)
+	mustCreateTask(t, s, n2)
+	mustCreateTask(t, s, n3)
+
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Page: 1, PerPage: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	var ids []string
+	for _, tk := range res.Tasks {
+		ids = append(ids, tk.MessageID)
+	}
+	if len(ids) != 4 {
+		t.Fatalf("expected 4 tasks, got %d (%v)", len(ids), ids)
+	}
+	// 1) задачи со сроком — сверху (по порядку срока, как и раньше).
+	if ids[0] != "due-task" {
+		t.Errorf("first = %v, want due-task (срок сохраняется приоритетом)", ids[0])
+	}
+	// 2) группа без срока — новые выше: n3 → n2 → n1 (а не n1 → n2 → n3).
+	if ids[1] != "n3" || ids[2] != "n2" || ids[3] != "n1" {
+		t.Errorf("no-due segment = %v, want [n3 n2 n1] (сначала последние созданные)", ids[1:])
+	}
+}
+
 func TestDueDate_ListSortUpdated(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()
