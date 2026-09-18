@@ -32,7 +32,7 @@
 **Зачем/боль.** При визуальном чеке v0.26.0 (инцидент: устаревшая статика на 8081) было невозможно в браузере увидеть, какая сборка реально подана; версия читалась только через `mailbridge version` бинарника.
 **Границы фичи.** `GET /api/version` (публичный, JSON `{version, commit, built}`) + отображение в шапке Dashboard: версия в строке, commit + time сборки в tooltip; `make run-dev` вшивает те же значения (ldflags) — commit виден и в dev. НЕ «проверка наличия новой версии»/уведомления — отдельная тема (если понадобится — новая идея).
 **Решения (владелец, 2026-09-18):** 1) эндпоинт **публичный** (без JWT); 2) версия в строке, commit+built — в tooltip; 3) значения показывать **как есть** (в т.ч. `dev`/`none`) — это полезнее: в dev видно реальную сборку; 4) порядок — эта фича = следующая (v0.27.0), «Сегодня/спринты» — после неё. Версия не жёстко привязана к фиче — номер = свойство артефакта «шаг завершён».
-**Статус:** реализован (v0.27.0, v0.27) — `GET /api/version` публичный + бейдж версии в шапке Dashboard (commit+built в tooltip); `make run-dev` вшивает ldflags. Тесты: `internal/web/version_test.go`, `frontend/tests/views/DashboardVersionBadge.spec.js`, e2e `tests-e2e/version-header.spec.js`.
+**Статус:** реализован (v0.27.0; PR #60 merged в `main`, CI green, 2026-09-18; тег — после тройки владельцем). `GET /api/version` публичный + бейдж версии в шапке Dashboard (commit+built в tooltip); `make run-dev` вшивает ldflags. Тесты: `internal/web/version_test.go`, `frontend/tests/views/DashboardVersionBadge.spec.js`, e2e `tests-e2e/version-header.spec.js`.
 
 ### «Сегодня» / спринты
 **Зачем/боль.** Ответ на вопрос «что отвечать сегодня»: приоритизация исходя из due (шаг 7), приоритета AI, возраста, «новый/ожидание».
