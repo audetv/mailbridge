@@ -1,5 +1,13 @@
 # API — Mailbridge
 
+## Версия (v0.27)
+
+### `GET /api/version`
+
+**Публичный** эндпоинт — без `Authorization` (единственный в API помимо `/api/health`; решение владельца 2026-09-18, шаг 8).
+
+`200` — JSON `{version, commit, built}`: строки «как есть» из ldflags — значения из `internal/version` (dev-сборка: `Version=dev, Commit=unknown, BuildTime=unknown` — не подавляются). Метод ≠ GET → `405`.
+
 ## Аутентификация
 
 JWT-подобный токен. Заголовок: `Authorization: Bearer token-USERNAME-YYYYMMDD`.

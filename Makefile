@@ -32,10 +32,11 @@ run:
 	fi
 
 run-dev:
+	@echo "Dev build: version $(VERSION) (commit $(COMMIT))"
 	@if [ -f configs/config.env ]; then \
-		set -a && . configs/config.env && set +a && go run ./cmd/$(APP_NAME) $(ARGS); \
+		set -a && . configs/config.env && set +a && go run $(LDFLAGS) ./cmd/$(APP_NAME) $(ARGS); \
 	else \
-		go run ./cmd/$(APP_NAME) $(ARGS); \
+		go run $(LDFLAGS) ./cmd/$(APP_NAME) $(ARGS); \
 	fi
 
 test:
