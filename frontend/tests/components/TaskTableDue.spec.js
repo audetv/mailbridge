@@ -13,6 +13,7 @@ vi.mock('vue-router', () => ({
 
 import TaskTable from '@/components/TaskTable.vue'
 import { useTasksStore } from '@/stores/tasks'
+import { todayKey } from '@/utils/due-date'
 import ToastService from 'primevue/toastservice'
 import PrimeVue from 'primevue/config'
 
@@ -21,7 +22,7 @@ async function mountTable(pinia) {
   const base = { project: 'Лидер Спорт', status: 'new', unread_comments: 0, created_at: '2026-08-29T10:00:00Z' }
   tasks.tasks = [
     { id: 1, ...base, due_date: '2026-09-16' }, // просрочено
-    { id: 2, ...base, due_date: new Date().toISOString().slice(0, 10) }, // сегодня
+    { id: 2, ...base, due_date: todayKey() }, // сегодня — ЛОКАЛЬНЫЙ день (dueClassOf считает локально; toISOString()=UTC → флейк 00:00–03:00 МСК, баг 2026-09-19)
     { id: 3, ...base, due_date: '2027-01-15' }, // будущее
     { id: 4, ...base, due_date: null, due_ai_pending: true, ai_due_date: '2027-01-15' }, // pending
     { id: 5, ...base, due_date: null } // без срока
