@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.27.0] - 2026-09-18
+
+v0.27.0 = шаг 8 «Версия в UI» (РЕЖИМ A; решения владельца 2026-09-18 зафиксированы в PLAN.md + ROADMAP.md — PR #59).
+
+### Added
+- **`GET /api/version` (шаг 8):** публичный эндпоинт — без `Authorization` (без общий auth-middleware в проекте; «публичный» = хендлер без проверки токена). JSON `{version, commit, built}` — строки «как есть» из `internal/version` (ldflags): dev-значения `dev`/`unknown` не подавляются (решение владельца 2026-09-18 — в dev видно реальную сборку). Метод ≠ GET → `405`. Тесты: `TestVersion_Endpoint` + `TestVersion_Payload` (`internal/web/version_test.go`).
+- **Версия в шапке Dashboard (шаг 8):** бейдж «v<версия>» рядом строкой «● Онлайн/Офлайн» (`.header-right`); commit + time сборки (UTC) — в tooltip (`title`). Запрос на `onMounted`, ошибка/отсутствие `version` в ответе — бейдж скрыт (шапка не ломается). Тесты: `frontend/tests/views/DashboardVersionBadge.spec.js` (4 кейса, вкл. dev/null/error).
+- **`make run-dev` вшивает ldflags (шаг 8):** `go run $(LDFLAGS)` — dev-сборка берёт версию/commit из Makefile (VERSION/COMMIT), а не из Git-тегов (так делает `make build`); в dev теперь видна реальная версионная метка.
+- **E2E (шаг 8):** `tests-e2e/version-header.spec.js` — `GET /api/version` без auth = 200 + JSON `{version, commit, built}`; бейдж в `.header-right` с текстом `v<версия>` и tooltip (commit+built).
+
+### Docs
+- `docs/api.md` — раздел «Версия (v0.27)» (`GET /api/version` — публичный, JSON, 405).
+- `ROADMAP.md` — «Версия в UI» → реализован (v0.27.0).
+- `CONTRIBUTING.md` — § 8: зафиксировано (владелец, 2026-09-18).
+
 ## [0.26.0] - 2026-09-17
 
 v0.26.0 = шаг 7d (Due date: вкладка «Все» + сортировки + фильтры по срокам, РЕЖИМ A).
