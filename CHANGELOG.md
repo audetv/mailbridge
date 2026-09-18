@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.3] - 2026-09-19 (хотфикс)
+
+Хотфикс от `v0.27.2` (последний релиз на GitHub — CONTRIBUTING §Хотфикс; заготовка-квитанция в `PLAN.md` — PR #68).
+
+### Added
+- **Цитата (quote) из письма в AI-саммари (хотфикс v0.27.3):** модель генерирует `quote` (дословные 1–3 строки из письма) и кладёт в `verdict_json` саммари-комментария с 15.09 (`internal/ai/orchestrator.go`), но UI нигде не рендерил (решение 15.09 убрало quote из `ai_verdict`; рендер в саммари не был сделан). Изменение (только фронтенд `CommentList.vue`; бэкенд/API/данные/промпт без изменений — данные уже в `verdict_json`): в комментарии-саммари (`isAIUserSummary()`) между бейджем «AI-саммари» и body — блок: подпись «Затронуто в письме» + quote (левая рамка, italic — по мотивам CSS markdown-blockquote). Источник — свой `verdict_json.quote`; fallback — `ai_verdict`-дубль того же `inbox_item_id` (правило дубля владельца: показывается ОДИН раз). Edge-cases: legacy `author='user'` / `quote:""` / нет `verdict_json` / malformed JSON → блока нет (try/catch, без логов); `ai_verdict`-комментарии quote не несут; body и экспорт MD/TXT не трогались. Иерархия (решение владельца 18.09): саммари → цитата дословно → «Оригинал письма» под спойлером. Тесты: 8 новых кейсов в `frontend/tests/components/CommentList.spec.js` (RED→GREEN: позитив, страховка ai_verdict, fallback дубля, пусто×4, legacy-регрессия v0.27.2).
+
 ## [0.27.2] - 2026-09-18 (хотфикс)
 
 Хотфикс от `v0.27.1` (последний релиз на GitHub — CONTRIBUTING §Хотфикс; заготовка-квитанция в `PLAN.md` — PR #66).

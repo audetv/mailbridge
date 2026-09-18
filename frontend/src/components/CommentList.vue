@@ -35,6 +35,18 @@
         </span>
       </div>
 
+      <!-- Хотфикс v0.27.3: цитата (quote) из письма — дословные 1–3 строки,
+           хранятся в verdict_json (строка-JSON {"quote": "…"}).
+           Рендер МЕЖДУ заголовком (бейдж «AI-саммари») и body:
+           источник — свой verdict_json; fallback — ai_verdict-дубль
+           того же inbox_item_id (правило дубля: показываем один раз).
+           Пусто/отсутствует/битый JSON → блок не рендерится;
+           ai_verdict-комментарии quote НЕ несут (решение 15.09). -->
+      <div v-if="summaryQuote(comment)" class="comment-quote">
+        <div class="comment-quote-label">Затронуто в письме</div>
+        <div class="comment-quote-text">{{ summaryQuote(comment) }}</div>
+      </div>
+
       <!-- Шаг 3b: MD-комментарии рендерим как Markdown (v-html через sanitize),
            plain-комментарии — прежний текстовый путь с linkify. -->
       <div v-if="isMd(comment)" class="comment-body md" v-html="renderMarkdown(comment)"></div>
@@ -228,6 +240,42 @@ function showOriginal(comment) {
 // там вложения остаются (это комментарий с письмом, не чистый вердикт).
 function isAiVerdictComment(comment) {
   return comment?.author === 'ai' || comment?.kind === 'ai_verdict'
+}
+
+// Хотфикс v0.27.3: цитата (quote) из письма — дословные 1–3 строки,
+// модель кладёт в verdict_json (строка-JSON {"quote": "…"}).
+// Показываем ТОЛЬКО в саммари-комментариях (isAIUserSummary), не в ai_verdict
+// (решение 15.09: вердикт = только саммари — quote в нём не рендерится).
+// Фолбэк: саммари без quote — берём quote из ai_verdict-дубля того же письма
+// (inbox_item_id) — правило дубля: quote показывается ОДИН раз.
+// try/catch: битый JSON / отсутствующее поле — молча пропускаем.
+const quoteCache = new Map()
+function parseQuote(verdictJson) {
+  const raw = typeof verdictJson === 'string' ? verdictJson : ''
+  if (!raw) return ''
+  const cached = quoteCache.get(raw)
+  if (cached !== undefined) return cached
+  let quote = ''
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.quote === 'string') quote = parsed.quote.trim()
+  } catch {
+    // невалидный JSON — молча пропускаем (без логов в UI)
+  }
+  quoteCache.set(raw, quote)
+  if (quoteCache.size > 500) quoteCache.clear()
+  return quote
+}
+function summaryQuote(comment) {
+  if (!isAIUserSummary(comment)) return ''
+  const own = parseQuote(comment?.verdict_json)
+  if (own) return own
+  const inboxItemId = comment?.inbox_item_id
+  if (!inboxItemId) return ''
+  const duplicate = props.comments.find(
+    (c) => c?.kind === 'ai_verdict' && c?.inbox_item_id === inboxItemId
+  )
+  return parseQuote(duplicate?.verdict_json)
 }
 function showAttachments(comment) {
   return !isAiVerdictComment(comment)
@@ -569,6 +617,26 @@ function formatDate(dateStr) {
   padding: 0.4rem 0.6rem;
   font-size: 0.9rem;
   color: var(--mb-muted, #555);
+}
+/* Хотфикс v0.27.3: цитата (quote) — стили по мотивам markdown-blockquote
+   (.comment-body.md blockquote: левая рамка + приглушённый текст). */
+.comment-quote {
+  margin: 0.35rem 0 0.5rem;
+  border-left: 3px solid var(--mb-primary);
+  padding: 0.2em 0.1em 0.2em 0.9em;
+}
+.comment-quote-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mb-text-muted);
+  margin-bottom: 0.1em;
+}
+.comment-quote-text {
+  font-style: italic;
+  color: var(--mb-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
 }
 .comment-original-meta {
   color: var(--mb-muted, #777);
