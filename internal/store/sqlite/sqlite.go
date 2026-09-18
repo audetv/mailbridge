@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -320,6 +321,34 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		conditions = append(conditions, "(LOWER(t.subject) LIKE LOWER(?) OR LOWER(t.body_text) LIKE LOWER(?) OR LOWER(t.from_email) LIKE LOWER(?))")
 		search := "%" + filter.Search + "%"
 		args = append(args, search, search, search)
+	}
+
+	// v0.26, шаг 7d: фильтры по срокам (одно значение за запрос).
+	// «Сегодня» — часовой пояс сервера: те же часы, что и time.Now() при
+	// записи due_date/updated_at, значит сравнение канонических YYYY-MM-DD
+	// согласовано. Невалидные значения игнорируются (API-слой валидирует).
+	var today time.Time
+	switch filter.Due {
+	case "overdue":
+		conditions = append(conditions, "t.due_date < ?")
+		args = append(args, time.Now().Format("2006-01-02"))
+	case "today":
+		conditions = append(conditions, "t.due_date = ?")
+		args = append(args, time.Now().Format("2006-01-02"))
+	case "tomorrow":
+		conditions = append(conditions, "t.due_date = ?")
+		args = append(args, time.Now().AddDate(0, 0, 1).Format("2006-01-02"))
+	case "7d", "30d":
+		days, _ := strconv.Atoi(filter.Due[:len(filter.Due)-1])
+		if days > 0 {
+			today = time.Now()
+			conditions = append(conditions, "t.due_date BETWEEN ? AND ?")
+			args = append(args, today.Format("2006-01-02"), today.AddDate(0, 0, days).Format("2006-01-02"))
+		}
+	case "none":
+		conditions = append(conditions, "t.due_date IS NULL")
+	case "due_pending":
+		conditions = append(conditions, "t.due_ai_pending = 1")
 	}
 
 	username := filter.Username
@@ -783,6 +812,13 @@ func (s *Store) AddTaskComment(ctx context.Context, comment *store.TaskComment) 
 	id, _ := result.LastInsertId()
 	comment.ID = id
 	comment.CreatedAt = time.Now()
+
+	// v0.26, шаг 7d: вклад-активность — новый комментарий (ответ/входящий
+	// комментарий, любой direction) поднимает tasks.updated_at, чтобы
+	// сортировка «по активности» подняла задачу наверх.
+	if _, err := s.db.ExecContext(ctx, "UPDATE tasks SET updated_at = ? WHERE id = ?", time.Now(), comment.TaskID); err != nil {
+		return fmt.Errorf("failed to bump task activity: %w", err)
+	}
 	return nil
 }
 

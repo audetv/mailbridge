@@ -20,7 +20,12 @@ test('bulk status change from UI applies to all selected', async ({ page, reques
   for (const i of [1, 2]) {
     const create = await request.post('/api/tasks', {
       headers: auth,
-      data: { title: `e2e-bulk-${i}-${stamp}`, project: 'Входящие' },
+      data: {
+        title: `e2e-bulk-${stamp}-${i}`,
+        // Поиск по unique stamp (см. ниже) находит обе задачи при любой
+        // сортировке — срок не нужен (задачу видно по search LIKE %stamp%).
+        project: 'Входящие',
+      },
     })
     expect(create.status(), `POST /api/tasks → ${create.status()}`).toBeLessThan(300)
     const json = await create.json()
@@ -32,19 +37,53 @@ test('bulk status change from UI applies to all selected', async ({ page, reques
   await page.goto('/')
   await page.waitForSelector('[data-testid="task-table"]', { state: 'visible', timeout: 15000 })
 
+  // 7a (v0.25.0): дефолтная сортировка «по срокам». Фильтруем поиск по
+  // уникальному stamp ЭТОГО прогона — иначе широкое 'e2e-bulk-' попадает на
+  // stale e2e-bulk-* прошлых прогонов (укопанные в dev-БД), и при sort=due
+  // (равные сроки = id ASC = самые старые вверху) задачи этого прогона,
+  // созданные последними, уходят за per_page=50 → picked == 0.
+  const search = page.locator('.search-input')
+  await search.fill(`e2e-bulk-${stamp}`)
   const rows = page.locator('tbody tr')
-  await expect(rows).not.toHaveCount(0, 'пустой список задач')
+  // Ждём, пока в листе появятся ОБЕ задачи этого прогона (по их уникальным
+  // именам). Лист refetch-ится дебаунсом поиска → стабильность считывания
+  // гарантируем ожиданием по именам, а не по rows.count() (гонка):
+  //   rows.nth(i) на несуществующий i зависает на innerText.
+  await expect(
+    page.locator('tbody tr', { hasText: `e2e-bulk-${stamp}-1` }).first()
+  ).toBeVisible({ timeout: 15000 })
+  await expect(
+    page.locator('tbody tr', { hasText: `e2e-bulk-${stamp}-2` }).first()
+  ).toBeVisible({ timeout: 15000 })
+
+  // PrimeVue .p-datatable-mask (loading overlay, full-screen) виден, пока идёт
+  // асинхронный refetch по поиску — его клики перехватываются. Ждём, пока
+  // маска скроется (opacity 0 / visibility hidden), чтобы чекбокс кликался.
+  const maskGone = async (timeoutMs = 10000) => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < timeoutMs) {
+      const hidden = await page
+        .locator('.p-datatable-mask')
+        .first()
+        .evaluate((el) => {
+          const cs = getComputedStyle(el)
+          return cs.visibility === 'hidden' || cs.opacity === '0'
+        })
+        .catch(() => true)
+      if (hidden) return
+      await page.waitForTimeout(50)
+    }
+    throw new Error('p-datatable-mask не скрылся за ' + timeoutMs + 'ms')
+  }
+  await maskGone()
 
   let picked = 0
-  const count = await rows.count()
-  for (let i = 0; i < count && picked < 2; i++) {
-    const title = await rows.nth(i).innerText()
-    if (title.includes(`e2e-bulk-`)) {
-      await rows.nth(i).locator('input[type="checkbox"]').first().check()
-      picked += 1
-    }
+  for (const n of [1, 2]) {
+    const row = page.locator('tbody tr', { hasText: `e2e-bulk-${stamp}-${n}` }).first()
+    await row.locator('input[type="checkbox"]').first().check()
+    picked += 1
   }
-  expect(picked, 'найдены обе созданные задачи в листе').toBe(2)
+  expect(picked, 'найдены обе созданные задачи (этот прогон) в листе').toBe(2)
 
   const panel = page.getByTestId('bulk-panel')
   await expect(panel).toBeVisible({ timeout: 5000 })

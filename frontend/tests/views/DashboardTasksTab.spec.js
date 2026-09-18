@@ -10,6 +10,16 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 const tasksMock = {
   setFilter: vi.fn((k, v) => { tasksMock.filters[k] = v }),
   setStatuses: vi.fn((s) => { tasksMock.filters.statuses = s }),
+  // 7d: вкладка задаёт статусы + дефолт-сортировку (all → updated).
+  setTab: vi.fn((tab) => {
+    const TAB_STATUS = { all: [], active: ['new', 'in_progress'], backlog: ['backlog'], completed: ['completed'], closed: ['closed'] }
+    if (!Object.prototype.hasOwnProperty.call(TAB_STATUS, tab)) return
+    tasksMock.filters.statuses = [...TAB_STATUS[tab]]
+    tasksMock.filters.sort = tab === 'all' ? 'updated' : 'due'
+    tasksMock.filters.due = ''
+    tasksMock.filters.page = 1
+    tasksMock.fetchTasks()
+  }),
   fetchTasks: vi.fn(async () => {}),
   filters: { project: '', epic_id: '', statuses: ['new', 'in_progress'], page: 1, per_page: 50 }
 }
@@ -92,9 +102,13 @@ describe('DashboardView — переход вкладок по URL (шаг 13.2)
     const { router, wrapper } = await mountAt('/?tab=projects')
     await flushPromises()
 
-    // вкладки (TabBar) на месте (v0.24 шаг 6: + вкладка «Персоны» → 7)
-    expect(wrapper.findAll('.tab-bar button').length).toBe(7)
-    expect(tasksMock.fetchTasks).not.toHaveBeenCalled()
+    // вкладки (TabBar) на месте (v0.24 шаг 6: + «Персоны» → 7; v0.26 шаг 7d:
+    // + «Все» → 8)
+    expect(wrapper.findAll('.tab-bar button').length).toBe(8)
+    // 7d: начальный applyTab('projects') (все inits) один раз прошёл в mock;
+    // для проверки ниже (URL-переход) — сброс счётчика.
+    expect(tasksMock.fetchTasks).toHaveBeenCalledTimes(1)
+    tasksMock.fetchTasks.mockClear()
 
     // имитируем ProjectsView.goToTasks(p): replace на «Активные» + фильтр
     tasksMock.filters.project = 'ТРК'
@@ -103,8 +117,10 @@ describe('DashboardView — переход вкладок по URL (шаг 13.2)
 
     // вкладка реально переключилась (watch на route.query.tab) — баг 1 закрыт
     expect(wrapper.find('[data-testid="task-table"]').exists()).toBe(true)
-    // applyTab -> setStatuses (не fetchTasks: он внутри TaskTable)
-    expect(tasksMock.setStatuses).toHaveBeenCalledWith(['new', 'in_progress'])
+    // 7d: applyTab → setTab (статусы + дефолт-сортировка вкладки в одном действии)
+    expect(tasksMock.setTab).toHaveBeenCalledWith('active')
+    expect(tasksMock.filters.statuses).toEqual(['new', 'in_progress'])
+    expect(tasksMock.filters.sort).toBe('due')
   })
 
   it('возврат на «Проекты» через клик таба не теряет проект-фильтр (в store)', async () => {

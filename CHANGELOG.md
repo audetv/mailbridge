@@ -1,8 +1,35 @@
 # Changelog
 
+## [0.27.0] - 2026-09-18
+
+v0.27.0 = шаг 8 «Версия в UI» (РЕЖИМ A; решения владельца 2026-09-18 зафиксированы в PLAN.md + ROADMAP.md — PR #59).
+
+### Added
+- **`GET /api/version` (шаг 8):** публичный эндпоинт — без `Authorization` (без общий auth-middleware в проекте; «публичный» = хендлер без проверки токена). JSON `{version, commit, built}` — строки «как есть» из `internal/version` (ldflags): dev-значения `dev`/`unknown` не подавляются (решение владельца 2026-09-18 — в dev видно реальную сборку). Метод ≠ GET → `405`. Тесты: `TestVersion_Endpoint` + `TestVersion_Payload` (`internal/web/version_test.go`).
+- **Версия в шапке Dashboard (шаг 8):** бейдж «v<версия>» рядом строкой «● Онлайн/Офлайн» (`.header-right`); commit + time сборки (UTC) — в tooltip (`title`). Запрос на `onMounted`, ошибка/отсутствие `version` в ответе — бейдж скрыт (шапка не ломается). Тесты: `frontend/tests/views/DashboardVersionBadge.spec.js` (4 кейса, вкл. dev/null/error).
+- **`make run-dev` вшивает ldflags (шаг 8):** `go run $(LDFLAGS)` — dev-сборка берёт версию/commit из Makefile (VERSION/COMMIT), а не из Git-тегов (так делает `make build`); в dev теперь видна реальная версионная метка.
+- **E2E (шаг 8):** `tests-e2e/version-header.spec.js` — `GET /api/version` без auth = 200 + JSON `{version, commit, built}`; бейдж в `.header-right` с текстом `v<версия>` и tooltip (commit+built).
+
+### Docs
+- `docs/api.md` — раздел «Версия (v0.27)» (`GET /api/version` — публичный, JSON, 405).
+- `ROADMAP.md` — «Версия в UI» → реализован (v0.27.0).
+- `CONTRIBUTING.md` — § 8: зафиксировано (владелец, 2026-09-18).
+
+## [0.26.0] - 2026-09-17
+
+v0.26.0 = шаг 7d (Due date: вкладка «Все» + сортировки + фильтры по срокам, РЕЖИМ A).
+
+### Added
+- **Вкладка «Все» (шаг 7d):** задачи любого статуса — `?statuses=` не посылается, бек-энд отдаёт любой. `setTab` в store задаёт дефолт-сортировку: «Все» → `updated` (активность); статусные вкладки → `due` (по срокам). UI — `DashboardView` + `TabBar` (кнопка «Все» в начале ряда вкладок). Тесты: `tests/views/DashboardTasksTab.spec.js` (setTab mock, tab count 8, fetchTasks assertion).
+- **Селектор «Сортировка» (шаг 7d):** PrimeVue `Select` в `FilterBar` — «По срокам» (`sort=due`) / «По активности» (`sort=updated`). Дефолт по вкладке (см. выше). API — `?sort=` уже есть из 7a (внесение в UI + дефолт-связка с вкладкой).
+- **Фильтры по срокам (шаг 7d):** серверный параметр `?due=` + 7 опций (PrimeVue `Select` в `FilterBar`): «Просроченные» / «Сегодня» / «Завтра» / «7 дней» / «30 дней» / «Без срока» / «Срок на подтверждении». Значения: `overdue` / `today` / `tomorrow` / `7d` / `30d` / `none` / `due_pending`. Валидация на API-уровне (`internal/web/api.go:359` — неизвестное значение → `400` + JSON error). В `store.TaskFilter.Due` (interface) + sqlite: WHERE-clause для каждого значения. `store.AddTaskComment` — бампит `tasks.updated_at` (вклад активности — для сортировки «по активности»). T-тесты: `TestDueDate_FilterByDueBuckets` (`internal/store/sqlite/sqlite_test.go:744` — 7 значений), `TestAddTaskComment_BumpsUpdatedAt` (`:819`). e2e: `due-filters-7d.spec.js` (вкладка «Все» + «по активности», вкладка «Активные» + «по срокам», сравнение просроченных/ближайших).
+
+### Docs
+- `docs/api.md` — `?due=` (7 значений + 400). `docs/data-model.md` — `updated_at` бампит в `AddTaskComment`.
+
 ## [0.25.1] - 2026-09-18
 
-**Хотфикс (CONTRIBUTING §«Хотфикс», ветка `hotfix/sort-due-created-at` от тега в проде `v0.25.0`).**
+**Хотфикс (CONTRIBUTING §«Хотфикс», ветка `hotfix/sort-due-created-at` от тега в проде `v0.25.0`; PR #61).**
 
 ### Fixed
 - **Сортировка «По срокам» (`?sort=due`/дефолт) — тайбрейкер внутри группы одинакового срока**: раньше при совпадении срока (в т.ч. в группе «без срока») самые СТАРЫЕ записи стояли сверху (`id ASC`). Теперь — **новые созданные выше** (`created_at DESC`), финальный детерминированный ключ — `id DESC` (стабильность пагинации). Поведение: 1) задачи со сроком — по порядку срока (просроченные сверху, без изменений); 2) в группе без срока — по дате создания, свежие сверху; 3) вкладка без единого срока — сразу по дате создания, сверху ближайшая к текущей. **НЕ затронуто:** режим «По активности» (`updated_at DESC`), фильтры `?due=…`, приоритет «без срока внизу» (`due_date IS NULL` первым ключом). Изменения: `internal/store/sqlite/sqlite.go` (ORDER BY), юнит-тест `TestDueDate_ListSortNoDueByCreatedDesc` (RED→GREEN), `docs/api.md`, комментарий `store.go`.

@@ -318,6 +318,10 @@ func main() {
 		_, _ = w.Write([]byte(m.PrometheusFormat()))
 	})
 
+	// Version API (v0.27, шаг 8): публичный GET /api/version — без JWT,
+	// {version, commit, built} из ldflags, значения как есть (dev/none ок).
+	mux.HandleFunc("/api/version", web.Version)
+
 	// Auth API
 	authHandler := web.NewAuthHandler()
 	mux.HandleFunc("/api/auth/login", authHandler.Login)

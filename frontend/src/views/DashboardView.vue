@@ -7,6 +7,7 @@
         <span class="connection-status" :class="{ connected: wsStore.connected }">
           {{ wsStore.connected ? '● Онлайн' : '○ Офлайн' }}
         </span>
+        <span v-if="versionInfo" class="version-badge" :title="versionTip">v{{ versionInfo.version }}</span>
         <span class="task-count">Задачи: {{ activeCount }}</span>
         <span class="inbox-count">Входящие: {{ inboxStore.unreadCount }}</span>
         <Button label="Выйти" severity="secondary" @click="handleLogout" />
@@ -83,6 +84,27 @@ const activeTab = ref('active')
 const activeCount = ref(0)
 const createTaskDialogOpen = ref(false)
 
+// v0.27, шаг 8: версия сборки в шапке (рядом «Онлайн/Офлайн»).
+// GET /api/version — публичный (без JWT); значения «как есть» (dev/none ок),
+// commit + built — в tooltip (title). Ошибка/нет ответа — бейдж скрыт.
+const versionInfo = ref(null)
+const versionTip = computed(() => {
+  if (!versionInfo.value) return ''
+  const v = versionInfo.value
+  return `mailbridge v${v.version}\ncommit: ${v.commit}\nсборка: ${v.built} (UTC)`
+})
+
+async function fetchVersion() {
+  try {
+    const { data } = await apiClient.get('/version')
+    if (data && data.version) {
+      versionInfo.value = data
+    }
+  } catch {
+    versionInfo.value = null
+  }
+}
+
 // Задача создана из диалога: диалог уже ушёл на /tasks/:id —
 // здесь только актуализируем счётчики, чтобы «Задачи: N» не устарело.
 function onTaskCreated() {
@@ -92,6 +114,7 @@ function onTaskCreated() {
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },
+  { key: 'all', label: 'Все', count: 0 },
   { key: 'active', label: 'Активные', count: 0 },
   { key: 'backlog', label: 'Бэклог', count: 0 },
   { key: 'completed', label: 'Выполненные', count: 0 },
@@ -100,7 +123,11 @@ const tabItems = computed(() => [
   { key: 'persons', label: 'Персоны', count: 0 }
 ])
 
+// Вкладки (v0.26, шаг 7d): «Все» — любой статус (пустой массив → без status
+// в запросе); дефолтные сортировки — Все: по активности, статусные: по срокам
+// (серверные sort=updated/due из 7a).
 const tabStatuses = {
+  all: [],
   active: ['new', 'in_progress'],
   backlog: ['backlog'],
   completed: ['completed'],
@@ -131,12 +158,14 @@ function applyTab(tab) {
   if (!isKnownTab(tab)) return
   activeTab.value = tab
   if (tab !== 'inbox') {
-    store.setStatuses(defaultStatuses(tab))
+    // 7d: setTab — статусы вкладки + дефолт-сортировка + сброс due-фильтра.
+    store.setTab(tab)
   }
 }
 
 onMounted(() => {
   wsStore.connect(authStore.token)
+  fetchVersion()
 
   const tabFromUrl = route.query.tab
   const saved = localStorage.getItem('mailbridge_active_tab')
@@ -183,7 +212,7 @@ function onTabSelect(key) {
   if (key === 'projects' || key === 'inbox') delete query.project
   router.replace({ query })
   if (key !== 'inbox' && key !== 'projects') {
-    store.setStatuses(tabStatuses[key])
+    store.setTab(key)
   }
 }
 
@@ -297,6 +326,15 @@ function handleLogout() {
 .inbox-count {
   color: var(--mb-text-muted);
   font-size: 1rem;
+}
+
+.version-badge {
+  font-size: 0.8rem;
+  color: var(--mb-text-muted);
+  border: 1px solid var(--mb-border);
+  border-radius: 0.375rem;
+  padding: 0.1rem 0.45rem;
+  cursor: default;
 }
 
 .dashboard-content {

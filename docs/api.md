@@ -1,5 +1,13 @@
 # API — Mailbridge
 
+## Версия (v0.27)
+
+### `GET /api/version`
+
+**Публичный** эндпоинт — без `Authorization` (единственный в API помимо `/api/health`; решение владельца 2026-09-18, шаг 8).
+
+`200` — JSON `{version, commit, built}`: строки «как есть» из ldflags — значения из `internal/version` (dev-сборка: `Version=dev, Commit=unknown, BuildTime=unknown` — не подавляются). Метод ≠ GET → `405`.
+
 ## Аутентификация
 
 JWT-подобный токен. Заголовок: `Authorization: Bearer token-USERNAME-YYYYMMDD`.
@@ -82,6 +90,7 @@ Query-параметры:
 - `project`, `assignee`, `type`, `priority` — фильтры
 - `search` — поиск по теме/тексту/email
 - `sort` (v0.25, шаг 7a) — `due` (default) — по сроку возраст, задачи без срока в конце (просроченные выше); при одинаковом сроке (в т.ч. «без срока») — **новые созданные выше** (`created_at DESC`, v0.25.1); `updated` — по дате обновления, новые сверху. Неизвестное значение → `400`.
+- `due` (v0.26.0, шаг 7d) — фильтр по срокам. Значения: `overdue` (просроченные, `due_date < сегодня`), `today` (сегодня), `tomorrow` (завтра), `7d` (в ближайшие 7 дней), `30d` (в ближайшие 30 дней), `none` (без срока, `due_date IS NULL`), `due_pending` (срок на подтверждении, `due_ai_pending = 1`). Пустое значение (параметр не передан) — фильтр отключён.
 
 Ответ:
 

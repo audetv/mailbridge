@@ -24,25 +24,55 @@ export const useTasksStore = defineStore('tasks', () => {
     requestor_id: '',
     assignee_id: '',
     search: '',
+    // Срок (v0.26, шаг 7d): сортировка + фильтр по датам — серверные ключи
+    // 7a («due»/«updated») и 7d («overdue|today|tomorrow|7d|30d|none|due_pending»).
+    sort: 'due',
+    due: '',
     page: 1,
     per_page: 50
   })
+
+  // Вкладки (v0.26, шаг 7d): «Все» (любой статус) + статусные. Ключи — те же,
+  // что во вкладках UI («completed» — статус выполненной). План: дефолт-
+  // сортировка «Все» → по активности; статусные вкладки → по срокам.
+  const TAB_STATUS = {
+    all: [],
+    active: ['new', 'in_progress'],
+    backlog: ['backlog'],
+    completed: ['completed'],
+    closed: ['closed']
+  }
+  const TAB_SORT = {
+    all: 'updated',
+    active: 'due',
+    backlog: 'due',
+    completed: 'due',
+    closed: 'due'
+  }
 
   async function fetchTasks() {
     loading.value = true
     try {
       const params = { ...filters.value }
+      // статусные вкладки — статусы; «Все» — пустой массив → параметр не
+      // слать (без status бек-энд отдаёт любой статус). Сортировка и due —
+      // всегда отправляем (дефолты: sort=due, due='').
+      const statuses = filters.value.statuses || []
       delete params.statuses
       // пусто → не слать (иначе бекенд будет парсить '' как отсутствующий)
       if (!params.epic_id) delete params.epic_id
       if (!params.requestor_id) delete params.requestor_id
       if (!params.assignee_id) delete params.assignee_id
       if (!params.assignee) delete params.assignee
+      if (!params.due) delete params.due
+      const query = { ...params }
+      // status: только если вкладка статусная (не «Все»); бэкенд принимает
+      // повторяющиеся статусы (q["status"] — axios сериализует массив).
+      if (statuses.length > 0) {
+        query.status = statuses
+      }
       const { data } = await apiClient.get('/tasks', {
-        params: {
-          ...params,
-          status: filters.value.statuses
-        }
+        params: query
       })
       tasks.value = data.tasks
       total.value = data.total
@@ -140,6 +170,18 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchTasks()
   }
 
+  // Вкладка (v0.26, шаг 7d): «Все» + статусные. Сбрасываем due-фильтр и
+  // применяем дефолтную сортировку вкладки (план: Все → активность,
+  // статусные → сроки). Фильтр по статусам — ядро вкладки.
+  function setTab(tabKey) {
+    if (!Object.prototype.hasOwnProperty.call(TAB_STATUS, tabKey)) return
+    filters.value.statuses = [...TAB_STATUS[tabKey]]
+    filters.value.sort = TAB_SORT[tabKey]
+    filters.value.due = ''
+    filters.value.page = 1
+    fetchTasks()
+  }
+
   // Привязка / отвязка задачи к модулю (epic). epicId = null — отвязать.
   async function setEpic(taskId, epicId) {
     const { data } = await apiClient.patch(`/tasks/${taskId}`, { epic_id: epicId ?? null })
@@ -207,6 +249,9 @@ export const useTasksStore = defineStore('tasks', () => {
     markAsRead,
     setFilter,
     setStatuses,
+    setTab,
+    TAB_STATUS,
+    TAB_SORT,
     setEpic,
     fetchInboxCount,
     fetchTaskInbox,
