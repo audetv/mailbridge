@@ -373,7 +373,7 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	// "due" (дефолт): просроченные сверху (due_date ASC — мин. срок = самый просроченный
 	// = приоритет), без срока — внизу (NULLS LAST); "updated": по свежести обновлений.
 	// Тикер по id — полная детерминированность (без дублей/склеек между страницами).
-	orderClause := "ORDER BY t.due_date IS NULL ASC, t.due_date ASC, t.id ASC"
+	orderClause := "ORDER BY t.due_date IS NULL ASC, t.due_date ASC, t.created_at DESC, t.id DESC" // v0.27.1 хотфикс: в группе «без срока» — новые выше (created_at DESC); id DESC — детерминированный ключ для пагинации
 	if sortKey := strings.TrimSpace(filter.Sort); sortKey == "updated" {
 		orderClause = "ORDER BY t.updated_at DESC, t.id DESC"
 	}
