@@ -8,11 +8,11 @@
       :class="[comment.direction, comment.kind]"
     >
       <div class="comment-header">
-        <span class="author" :title="isLegacyAIUser(comment) ? 'AI-саммари письма' : undefined">
+        <span class="author" :title="isAIUserSummary(comment) ? 'AI-саммари письма' : undefined">
           {{ isLegacyAIUser(comment) ? legacyAIAuthor(comment) : comment.author }}
         </span>
         <span class="comment-badges">
-          <span v-if="isLegacyAIUser(comment)" class="kind-badge ai-summary-badge">AI-саммари</span>
+          <span v-if="isAIUserSummary(comment)" class="kind-badge ai-summary-badge">AI-саммари</span>
           <span v-if="kindLabel(comment)" class="kind-badge">{{ kindLabel(comment) }}</span>
           <span v-if="isApproved(comment)" class="approved-badge">Утверждён</span>
         </span>
@@ -166,16 +166,35 @@ function kindLabel(comment) {
 }
 
 // Шаг 5 v0.23 (решение #1): legacy-комментарии — AI саммари письма под именем
-// «user» (83 строки до фикса в verdicts.go, не мигрируем). Сигны: author
-// «user» (+ direction in — все реальные user-комменты direction=out, проверено
-// по БД). Показываем реального отправителя (из inboxItems по inbox_item_id)
-// + бейдж «AI-саммари».
+// «user» (83 строки до фикса в verdicts.go, не мигрируем). Показываем
+// реального отправителя (из inboxItems по inbox_item_id) + бейдж «AI-саммари».
 function isLegacyAIUser(comment) {
   return comment?.author === 'user'
 }
 function legacyAIAuthor(comment) {
   const s = senderOf(comment)
   return s || 'автор письма'
+}
+
+// Хотфикс v0.27.2 (15.09, 7f65a3a): саммари пишутся под реальным автором
+// (senderLabel) — предикат «входящий саммари письма» = по kind, не по author:
+//   kind='user_comment' && direction='in' && есть inbox_item_id.
+// ВНИМАНИЕ: не direction+inbox_item_id без kind — у ai_verdict тоже оба поля
+// (97 строк в БД), они получили бы спойлер.
+function isInMailSummary(comment) {
+  return (
+    comment?.kind === 'user_comment' &&
+    comment?.direction === 'in' &&
+    Boolean(comment?.inbox_item_id)
+  )
+}
+// Бейдж «AI-саммари»: новый формат (предикат выше) + legacy author='user'
+// (подпись — реальная) — бейдж виден и БЕЗ inbox_item (как было до хотфикса).
+function isAIUserSummary(comment) {
+  return (
+    isInMailSummary(comment) ||
+    Boolean(comment?.author === 'user' && comment?.kind === 'user_comment')
+  )
 }
 
 // «Оригинал письма»: источник по comment.inbox_item_id (используется legacy-автором).
@@ -197,11 +216,12 @@ function subjectOf(comment) {
   const item = inboxItemOf(comment)
   return item?.subject ? `«${item.subject}»` : ''
 }
-// Detail письма показываем ТОЛЬКО в саммари-комментарии (author='user',
-// есть inbox_item_id) — там, где смотрят письмо. AI-вердикт (ai_verdict)
-// спойлера НЕ имеет (решение 14.09: там только саммари).
+// Detail письма показываем ТОЛЬКО в саммари-комментарии (входящий саммари
+// письма: legacy author='user' + новый формат, см. isInMailSummary) — там,
+// где смотрят письмо. AI-вердикт (ai_verdict) спойлера НЕ имеет
+// (решение 14.09: там только саммари).
 function showOriginal(comment) {
-  return comment?.author === 'user' && Boolean(inboxItemOf(comment))
+  return isInMailSummary(comment) && Boolean(inboxItemOf(comment))
 }
 // AI-вердикт = только саммари: вложения в нём не показываем.
 // «AI» = новый ai_verdict (author='ai') — legacy-саммари (author='user') НЕ в счёт:
