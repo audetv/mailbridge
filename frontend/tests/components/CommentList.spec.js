@@ -317,3 +317,116 @@ describe('CommentList (шаг 5 v0.23 — AI-вердикт = только са�
     expect(wrapper.find('.comment-attachment-item a').text()).toBe('фото.png')
   })
 })
+
+
+// Хотфикс v0.27.3: цитата (quote) из письма — дословные 1–3 строки,
+// хранятся в verdict_json (строка-JSON {"quote": "…"}) коммента-саммари.
+// Рендер — блок «Затронуто в письме» МЕЖДУ бейджем «AI-саммари» (header)
+// и body (саммари). Источники: свой verdict_json → fallback ai_verdict-дубль
+// того же inbox_item_id. Пусто/нет/битый JSON → блок не рендерится.
+// ai_verdict-комментарии quote НЕ несут (решение 15.09).
+describe('CommentList (хотфикс v0.27.3 — цитата в AI-саммари)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(useAuthStore).mockReturnValue({ user: { username: 'admin' } })
+    mockAttachments()
+  })
+
+  const INBOX_ITEM = {
+    id: 140,
+    from_name: 'Мария Клиентова',
+    from_contact: 'mariya@mail.ru',
+    subject: 'Бесплатно?',
+    body_text: 'Добрый день! Подскажите, разработка будет бесплатная?\nМир'
+  }
+  const QUOTE_TEXT = 'разработка будет бесплатная'
+  // Новый саммари (формат после 15.09): kind=user_comment, direction=in,
+  // inbox_item_id, verdict_json = строка-JSON с quote.
+  const QUOTE_SUMMARY = {
+    ...COMMENT,
+    id: 70,
+    author: 'Мария Клиентова',
+    direction: 'in',
+    inbox_item_id: 140,
+    verdict_json: JSON.stringify({ quote: QUOTE_TEXT }),
+    body: 'Клиент уточняет, что разработка будет бесплатной.'
+  }
+  const QUOTE_VERDICT_DUPLICATE = {
+    ...COMMENT,
+    id: 71,
+    author: 'ai',
+    kind: 'ai_verdict',
+    direction: 'in',
+    inbox_item_id: 140,
+    verdict_json: JSON.stringify({ quote: QUOTE_TEXT }),
+    body: 'Клиент уточняет, что разработка будет бесплатной.'
+  }
+
+  it('саммари user_comment с verdict_json.quote: блок «Затронуто в письме» + текст quote; body — чистый саммари', () => {
+    const wrapper = mountList([QUOTE_SUMMARY], [INBOX_ITEM])
+    const block = wrapper.find('.comment-quote')
+    expect(block.exists()).toBe(true)
+    expect(block.text()).toContain('Затронуто в письме')
+    expect(block.text()).toContain(QUOTE_TEXT)
+    // body — саммари по-прежнему, quote в body не дублируется
+    expect(wrapper.find('.comment-body').text()).toContain('Клиент уточняет, что разработка будет бесплатной.')
+    // бейдж + detail v0.27.2 — не сломаны
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
+    expect(wrapper.find('.comment-original').exists()).toBe(true)
+  })
+
+  it('ai_verdict-дубль (тот же inbox_item_id, тот же quote): quote НЕ показывается', () => {
+    const wrapper = mountList([QUOTE_SUMMARY, QUOTE_VERDICT_DUPLICATE], [INBOX_ITEM])
+    const blocks = wrapper.findAll('.comment-quote')
+    // quote ровно ОДИН раз (в саммари), дубль в ai_verdict — нет
+    expect(blocks.length).toBe(1)
+    expect(blocks[0].text()).toContain(QUOTE_TEXT)
+    // второй комментарий (ai_verdict) — блока не имеет
+    const verdictComment = wrapper.findAll('.comment')[1]
+    expect(verdictComment.find('.comment-quote').exists()).toBe(false)
+  })
+
+  it('fallback: саммари без quote + ai_verdict того же inbox_item_id с quote → блок виден', () => {
+    const summaryNoQuote = { ...QUOTE_SUMMARY, id: 72, verdict_json: undefined }
+    const wrapper = mountList([summaryNoQuote, QUOTE_VERDICT_DUPLICATE], [INBOX_ITEM])
+    const block = wrapper.find('.comment-quote')
+    expect(block.exists()).toBe(true)
+    expect(block.text()).toContain('Затронуто в письме')
+    expect(block.text()).toContain(QUOTE_TEXT)
+  })
+
+  it('пусто: quote="" → блок отсутствует (без ошибок)', () => {
+    const wrapper = mountList([{ ...QUOTE_SUMMARY, id: 73, verdict_json: JSON.stringify({ quote: '' }) }], [INBOX_ITEM])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.comment-body').exists()).toBe(true)
+  })
+
+  it('пусто: verdict_json отсутствует → блок отсутствует', () => {
+    const wrapper = mountList([{ ...QUOTE_SUMMARY, id: 74, verdict_json: undefined }], [INBOX_ITEM])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+  })
+
+  it('пусто: битый JSON в verdict_json → блок отсутствует, UI не ломается', () => {
+    const wrapper = mountList([{ ...QUOTE_SUMMARY, id: 75, verdict_json: '{not a json' }], [INBOX_ITEM])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.comment-body').exists()).toBe(true)
+  })
+
+  it('legacy author="user" (без quote в verdict_json): блока quote нет, бейдж + detail как есть (регрессия v0.27.2)', () => {
+    const legacy = {
+      ...COMMENT, id: 76, author: 'user', direction: 'in',
+      inbox_item_id: 140, verdict_json: undefined,
+      body: 'Клиент уточняет условия.'
+    }
+    const wrapper = mountList([legacy], [INBOX_ITEM])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
+    expect(wrapper.find('.comment-original').exists()).toBe(true)
+  })
+
+  it('ai_verdict-комментарий (даже с quote в verdict_json): блока нет — вердикт = только саммари (решение 15.09)', () => {
+    const wrapper = mountList([QUOTE_VERDICT_DUPLICATE], [INBOX_ITEM])
+    expect(wrapper.find('.comment-quote').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Затронуто в письме')
+  })
+})
