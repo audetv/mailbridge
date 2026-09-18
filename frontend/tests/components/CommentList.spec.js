@@ -233,6 +233,49 @@ describe('CommentList (шаг 5 v0.23 — AI-вердикт = только са�
     expect(wrapper.find('summary').text()).toContain('Целищева Виктория')
   })
 
+  // Хотфикс v0.27.2: саммари после 15.09 (коммит 7f65a3a) пишутся
+  // senderLabel(email) — реальный автор, kind=user_comment, direction=in,
+  // inbox_item_id заполнен. Предикат — через kind, не через author.
+  const NEW_SUMMARY = {
+    ...COMMENT,
+    id: 60,
+    author: 'Гусев Алексей',
+    direction: 'in',
+    inbox_item_id: 128,
+    body: 'Клиент уточнил, что нужен новый документ для сайта.'
+  }
+
+  it('новый саммари (kind=user_comment, direction=in, inbox_item_id): реальный автор + бейдж AI-саммари + detail «Оригинал письма»', () => {
+    const wrapper = mountList([NEW_SUMMARY], [INBOX_ITEM])
+    expect(wrapper.find('.author').text()).toContain('Гусев Алексей')
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(true)
+    expect(wrapper.find('.ai-summary-badge').text()).toBe('AI-саммари')
+    expect(wrapper.find('.comment-original').exists()).toBe(true)
+    expect(wrapper.find('.comment-original-body').text()).toContain('сообщите сроки, когда ждать ответ')
+    expect(wrapper.find('summary').text()).toContain('Целищева Виктория')
+  })
+
+  it('новый саммари БЕЗ inboxItem: без detail и без краша', () => {
+    const wrapper = mountList([{ ...NEW_SUMMARY, id: 61 }], [])
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    expect(wrapper.find('.comment-body').exists()).toBe(true)
+  })
+
+  // Страховка (урок из разбора, PLAN.md «Хотфикс v0.27.2» п.1): гейт НЕ может
+  // стоять на direction=in + inbox_item_id — у ai_verdict тоже есть оба поля.
+  it('ai_verdict (direction=in, inbox_item_id есть): detail НЕ появляется даже при новом гейте', () => {
+    const wrapper = mountList([VERDICT_COMMENT], [INBOX_ITEM])
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(false)
+  })
+
+  it('user_comment с direction=out (внутренний): БЕЗ бейджа AI-саммари и detail', () => {
+    const inner = { ...COMMENT, id: 62, direction: 'out', inbox_item_id: 128 }
+    const wrapper = mountList([inner], [INBOX_ITEM])
+    expect(wrapper.find('.ai-summary-badge').exists()).toBe(false)
+    expect(wrapper.find('.comment-original').exists()).toBe(false)
+  })
+
   it('legacy author="user" БЕЗ inboxItem → «автор письма», без краха', () => {
     const legacy = { ...COMMENT, id: 53, author: 'user', inbox_item_id: undefined, body: 'Саммари.' }
     const wrapper = mountList([legacy], [])
