@@ -26,9 +26,7 @@
             @change="onToggleAllPage"
             aria-label="select all on page"
           />
-          <label class="bulk-toolbar-label" for="bulk-select-all">
-            Выбрать все на странице
-          </label>
+          <label class="bulk-toolbar-label" for="bulk-select-all"> Выбрать все на странице </label>
           <span v-if="allSelectedCount" class="bulk-count" data-testid="bulk-count">
             Выбрано: {{ allSelectedCount }}
           </span>
@@ -69,12 +67,9 @@
       </Column>
       <Column field="project" header="Проект" style="width: 150px">
         <template #body="{ data }">
-          <a
-            v-if="data.project"
-            href="#"
-            class="project-link"
-            @click.prevent="goToProject(data.project)"
-          >{{ data.project }}</a>
+          <a v-if="data.project" href="#" class="project-link" @click.prevent="goToProject(data.project)">{{
+            data.project
+          }}</a>
           <span v-else>—</span>
         </template>
       </Column>
@@ -102,6 +97,22 @@
               size="small"
               data-testid="due-pending-badge"
             />
+          </div>
+        </template>
+      </Column>
+      <!-- План (v0.28, шаг 28c): scheduled_date — «когда делаю». Тон другой,
+           не «дедлайн»: сегодня в плане — info; дальше — secondary. -->
+      <Column field="scheduled_date" header="План" style="width: 130px">
+        <template #body="{ data }">
+          <div data-testid="scheduled-cell" class="scheduled-cell">
+            <Tag
+              v-if="data.scheduled_date"
+              class="scheduled-tag"
+              data-testid="scheduled-tag"
+              :value="data.scheduled_date"
+              :severity="scheduledSeverity(data)"
+            />
+            <span v-else class="epic-none" data-testid="scheduled-none">—</span>
           </div>
         </template>
       </Column>
@@ -138,9 +149,7 @@
         aria-label="status to apply"
       >
         <option value="" disabled>К статусу…</option>
-        <option v-for="s in ALL_STATUSES" :key="s" :value="s">
-          К {{ statusLabel(s) }}
-        </option>
+        <option v-for="s in ALL_STATUSES" :key="s" :value="s">К {{ statusLabel(s) }}</option>
       </select>
 
       <button
@@ -175,9 +184,7 @@
         Применить
       </button>
 
-      <button class="bulk-clear" @click="onClearSelection" :disabled="busy">
-        Снять выбор
-      </button>
+      <button class="bulk-clear" @click="onClearSelection" :disabled="busy">Снять выбор</button>
     </div>
   </div>
 </template>
@@ -194,7 +201,7 @@ import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Badge from 'primevue/badge'
 import { useToast } from 'primevue/usetoast'
-import { dueClassOf } from '@/utils/due-date'
+import { dueClassOf, todayKey } from '@/utils/due-date'
 
 const store = useTasksStore()
 const epics = useEpicsStore()
@@ -208,9 +215,7 @@ const toast = useToast()
 const allSelectedCount = computed(() => store.selectedTasks.length)
 const busy = ref(false)
 const ALL_STATUSES = ['backlog', 'new', 'in_progress', 'completed', 'closed']
-const projectNames = computed(() =>
-  (projectsStore.projects || []).map((p) => p.name).filter(Boolean)
-)
+const projectNames = computed(() => (projectsStore.projects || []).map((p) => p.name).filter(Boolean))
 
 // Ленивая подгрузка списка проектов — только при первом появлении панели.
 let projectsLoaded = false
@@ -226,12 +231,10 @@ watch(
 )
 
 const allPageSelected = computed(
-  () =>
-    store.tasks.length > 0 &&
-    store.tasks.every((t) => store.selectedTasks.some((s) => s.id === t.id))
+  () => store.tasks.length > 0 && store.tasks.every((t) => store.selectedTasks.some((s) => s.id === t.id))
 )
-const somePageSelected = computed(
-  () => store.tasks.some((t) => store.selectedTasks.some((s) => s.id === t.id))
+const somePageSelected = computed(() =>
+  store.tasks.some((t) => store.selectedTasks.some((s) => s.id === t.id))
 )
 
 // Клик в зоне выбора (кол. checkbox idx 0 / ID idx 1): гасим ЕЩЁ В ФАЗЕ
@@ -266,7 +269,7 @@ async function applyBulk(changes) {
     toast.add({
       severity: 'success',
       summary: `Готово: ${res.count} ${res.count === 1 ? 'задача' : 'задач'}`,
-      life: 3000,
+      life: 3000
     })
     store.clearSelection()
     selectedStatus.value = ''
@@ -277,7 +280,7 @@ async function applyBulk(changes) {
       severity: 'error',
       summary: 'Ошибка bulk',
       detail: e.response?.data?.error || e.message,
-      life: 5000,
+      life: 5000
     })
   } finally {
     busy.value = false
@@ -360,7 +363,7 @@ function statusLabel(status) {
     backlog: 'Backlog',
     in_progress: 'В работе',
     completed: 'Готово',
-    closed: 'Закрыта',
+    closed: 'Закрыта'
   }
   return labels[status] || status
 }
@@ -371,9 +374,18 @@ function statusSeverity(status) {
     backlog: 'secondary',
     in_progress: 'warn',
     completed: 'success',
-    closed: 'neutral',
+    closed: 'neutral'
   }
   return map[status] || 'secondary'
+}
+
+// План (v0.28, 28c): scheduled сегодня — info (синий, «в плане сегодня»),
+// дальше — secondary. От дедлайна (due) тона отличаются намеренно:
+// план — не обещание, не дедлайн.
+function scheduledSeverity(task) {
+  const v = task?.scheduled_date
+  if (v && v === todayKey()) return 'info'
+  return 'secondary'
 }
 
 function prioritySeverity(priority) {

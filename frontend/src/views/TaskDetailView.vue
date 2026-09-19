@@ -182,7 +182,12 @@
                   срок? (AI: {{ store.currentTask.ai_due_date }})
                 </span>
                 <div class="due-ai-actions">
-                  <Button size="small" label="Принять" @click="resolveAiDue('accept')" data-testid="due-ai-accept" />
+                  <Button
+                    size="small"
+                    label="Принять"
+                    @click="resolveAiDue('accept')"
+                    data-testid="due-ai-accept"
+                  />
                   <Button
                     size="small"
                     label="Изменить"
@@ -198,6 +203,21 @@
                   />
                 </div>
               </div>
+            </div>
+
+            <!-- План (v0.28, шаг 28c): scheduled_date — «когда делаю».
+                 Независимый от «Срок» (due): свои save/PATCH, due не трогаем. -->
+            <div class="field scheduled-field">
+              <label data-testid="scheduled-label">План</label>
+              <DatePicker
+                v-model="scheduledDateValue"
+                dateFormat="dd.mm.yy"
+                :showClear="true"
+                @change="onScheduledDateChange"
+                @date-select="onScheduledDateChange"
+                @clear-click="onScheduledDateChange"
+                data-testid="scheduled-datepicker"
+              />
             </div>
 
             <!-- Персоны (v0.24, шаг 6): роли на задаче (§7.7): заказчик/исполнитель.
@@ -271,6 +291,8 @@ const assignee = ref('')
 const epic = ref(null)
 // Срок (v0.25, 7c): значение DatePicker (Date | null) для утверждённого due_date.
 const dueDateValue = ref(null)
+// План (v0.28, 28c): значение DatePicker (Date | null) для scheduled_date.
+const scheduledDateValue = ref(null)
 // Персоны (v0.24, шаг 6): роли на задаче (§7.7) — заказчик/исполнитель.
 const requestorId = ref('')
 const assigneeId = ref('')
@@ -281,9 +303,7 @@ const expanded = ref(false)
 let unsubscribeCommentApproved = null
 let unsubscribeResync = null
 
-const epicOptions = computed(() =>
-  epicsStore.epics.map((e) => ({ label: e.name, value: e.id }))
-)
+const epicOptions = computed(() => epicsStore.epics.map((e) => ({ label: e.name, value: e.id })))
 
 // Персона-опции: [{label, value}] (label: имя/org/email — для «в процессе
 // узнавания» (name='') — email из primary_email; канон §7.7.1).
@@ -368,10 +388,13 @@ onUnmounted(() => {
   unsubscribeResync?.()
 })
 
-watch(() => store.currentTask, () => {
-  syncFields()
-  loadEpics()
-})
+watch(
+  () => store.currentTask,
+  () => {
+    syncFields()
+    loadEpics()
+  }
+)
 
 // Эпики проекта задачи (схема: задача → проект по ИМЕНИ, API эпиков по ID проекта)
 async function loadEpics() {
@@ -402,6 +425,8 @@ function syncFields() {
   assignee.value = store.currentTask.assignee
   // Срок (7c): канон «YYYY-MM-DD» → Date для DatePicker (null — без срока).
   dueDateValue.value = toDatePickerValue(store.currentTask.due_date)
+  // План (28c): то же для scheduled_date (отдельное поле, 28a).
+  scheduledDateValue.value = toDatePickerValue(store.currentTask.scheduled_date)
   // Персоны (роль на задаче, §7.7) — из store; '' = не назначена.
   requestorId.value = store.currentTask.requestor_id || ''
   assigneeId.value = store.currentTask.assignee_id || ''
@@ -438,6 +463,20 @@ async function saveDueDate(value) {
 async function onDueDateChange() {
   // DatePicker уже обновил v-model (dueDateValue); null = пользователь снял срок.
   await saveDueDate(dueDateValue.value)
+}
+
+// — План (v0.28, шаг 28c): scheduled_date — «когда делаю». —
+// Независимый от due_date/cycle AI: PATCH только scheduled_date (данные 28a).
+// value — Date (DatePicker) | строчка 'YYYY-MM-DD' | null (снять план).
+async function saveScheduledDate(value) {
+  const scheduled = toCanonicalDate(value) // null — план снят
+  const r = await store.updateTask(route.params.id, { scheduled_date: scheduled })
+  scheduledDateValue.value = toDatePickerValue(r?.task?.scheduled_date)
+}
+
+async function onScheduledDateChange() {
+  // DatePicker уже обновил v-model (scheduledDateValue); null = план снят.
+  await saveScheduledDate(scheduledDateValue.value)
 }
 
 // Решение по AI-предложению срока (due_ai_pending, 7b):
@@ -513,7 +552,7 @@ function previewTextOf(item) {
 
 function previewHtml(item) {
   const text = previewTextOf(item)
-  const html = text ? escapeHtml(text) : (item.body_html || escapeHtml(item.body_text))
+  const html = text ? escapeHtml(text) : item.body_html || escapeHtml(item.body_text)
   if (html.length > 5000) {
     return html.slice(0, 5000) + '...'
   }
@@ -567,6 +606,9 @@ defineExpose({
   loadEpics,
   dueDateValue,
   onDueDateChange,
+  scheduledDateValue,
+  saveScheduledDate,
+  onScheduledDateChange,
   saveDueDate,
   resolveAiDue
 })
