@@ -91,8 +91,9 @@ SQLite (WAL-режим), файл `data/mailbridge.db`. Миграции в `int
 | ai_due_date | TEXT (YYYY-MM-DD) | Срок, предложенный AI (v0.25, шаг 7b): база ошибок AI — хранится всегда, даже если отклонён |
 | due_source | TEXT ('ai' / 'manual') | Кто установил `due_date`; ручная установка приоритетнее AI (решение владельца) |
 | due_ai_pending | INTEGER (0/1) | AI предложил срок — ждёт решения человека (v0.25, шаг 7b) |
+| scheduled_date | TEXT (YYYY-MM-DD) | **План задачи** (v0.28, шаг 28a; решение владельца 2026-09-19) — «когда делаю»; `due_date` = обещание, `scheduled_date` = план; `TEXT` как `due_date`; AI-инфраструктуры нет (НЕ AI-извлечение) |
 
-Индексы: `message_id`, `status`, `project`, `assignee`, `thread_id`, `source_email_id`, `epic_id`.
+Индексы: `message_id`, `status`, `project`, `assignee`, `thread_id`, `source_email_id`, `epic_id`, `due_date`, `scheduled_date`.
 
 ### task_comments — комментарии
 

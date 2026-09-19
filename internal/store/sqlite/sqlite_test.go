@@ -251,6 +251,117 @@ func TestDueDate_UpdateAndClear(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// v0.28.0, шаг 28a — план задачи (scheduled_date)
+// ---------------------------------------------------------------------------
+
+func TestScheduledDate_MigrationColumn(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Колонка появляется миграцией идемпотентно (схема свежей БД = ALTER).
+	has, err := s.ColumnExistsForTest(ctx, "tasks", "scheduled_date")
+	if err != nil {
+		t.Fatalf("ColumnExistsForTest: %v", err)
+	}
+	if !has {
+		t.Fatal("tasks.scheduled_date отсутствует после миграции")
+	}
+
+	// Повторная миграция (идемпотентность) не ломает и не дублирует.
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+}
+
+func TestScheduledDate_CreateGet(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t1 := &store.Task{MessageID: "sched-1", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new",
+		ScheduledDate: strp("2026-10-01")}
+	mustCreateTask(t, s, t1)
+
+	got, err := s.GetTask(ctx, t1.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ScheduledDate == nil || *got.ScheduledDate != "2026-10-01" {
+		t.Errorf("scheduled_date = %v, want 2026-10-01", got.ScheduledDate)
+	}
+	if got.DueDate != nil {
+		t.Errorf("due_date = %v, want nil (не задана)", got.DueDate)
+	}
+
+	// Без плана — null (поле просто отсутствует).
+	t2 := &store.Task{MessageID: "sched-2", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, t2)
+	g2, err := s.GetTask(ctx, t2.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if g2.ScheduledDate != nil {
+		t.Errorf("scheduled_date = %v, want nil", g2.ScheduledDate)
+	}
+}
+
+func TestScheduledDate_UpdateAndClear(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tk := &store.Task{MessageID: "sched-u", Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: "new"}
+	mustCreateTask(t, s, tk)
+
+	// Установка плана (как делает API: scheduled_date как есть).
+	if err := s.UpdateTask(ctx, tk.ID, map[string]interface{}{"scheduled_date": "2026-12-31"}); err != nil {
+		t.Fatalf("UpdateTask set: %v", err)
+	}
+	g, _ := s.GetTask(ctx, tk.ID)
+	if g.ScheduledDate == nil || *g.ScheduledDate != "2026-12-31" {
+		t.Errorf("after set, scheduled_date = %v, want 2026-12-31", g.ScheduledDate)
+	}
+
+	// Снятие плана (NULL).
+	if err := s.UpdateTask(ctx, tk.ID, map[string]interface{}{"scheduled_date": nil}); err != nil {
+		t.Fatalf("UpdateTask clear: %v", err)
+	}
+	g2, _ := s.GetTask(ctx, tk.ID)
+	if g2.ScheduledDate != nil {
+		t.Errorf("after clear, scheduled_date = %v, want nil", g2.ScheduledDate)
+	}
+
+	// due_date при этом не трогается (две независимые даты).
+	if g2.DueDate != nil {
+		t.Errorf("due_date = %v, want nil (scheduled не влияет на due)", g2.DueDate)
+	}
+}
+
+func TestScheduledDate_ListReturnsField(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	mustCreateTask(t, s, &store.Task{
+		MessageID: "sched-list", Subject: "T", BodyText: "B", FromEmail: "u@e.com",
+		Project: "ТРК", Status: "new", ScheduledDate: strp("2026-11-11"),
+	})
+
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Page: 1, PerPage: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(res.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(res.Tasks))
+	}
+	got := res.Tasks[0].ScheduledDate
+	if got == nil || *got != "2026-11-11" {
+		t.Errorf("ListTasks scheduled_date = %v, want 2026-11-11", got)
+	}
+}
+
 func TestDueDate_ListSortDefault(t *testing.T) {
 	s, cleanup := setupStore(t)
 	defer cleanup()

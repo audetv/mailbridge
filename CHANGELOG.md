@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0] - 2026-09-19 (в разработке)
+
+v0.28.0 = «План»: scheduled_date + вкладка «План» + реорганизация вкладок (PLAN.md, решения владельца 2026-09-19).
+
+### Added
+- **План задачи `scheduled_date` (v0.28, шаг 28a — БД + API):** колонка `tasks.scheduled_date` (TEXT NULL, идемпотентная миграция + индекс `idx_tasks_scheduled_date`) — «когда делаю» (решение владельца: две независимые даты — `due_date` = обещание, `scheduled_date` = план; AI-инфраструктуры нет). API: `POST /api/tasks` принимает `scheduled_date`; `PATCH /api/tasks/{id}` — установка (строка) / снятие (`null`); валидация — те же правила, что `due_date` (канон `YYYY-MM-DD`, `400` на мусор: `DD.MM.YYYY`, `2026-02-31`, время); `tasks.list` отдаёт поле. Рефакторинг: `validDueDate` → `validTaskDate` (общий валидатор двух дат). Тесты: `TestScheduledDate_MigrationColumn`/`_CreateGet`/`_UpdateAndClear`/`_ListReturnsField` (RED→GREEN) + 3 API-теста (`UpdateTaskScheduledDate` вкл. «scheduled не трогает due», `RejectsBadFormat` 5 кейсов, `CreateTaskWithScheduledDate`). Доки: `docs/api.md`, `docs/data-model.md`.
+
 ## [0.27.3] - 2026-09-19 (хотфикс)
 
 Хотфикс от `v0.27.2` (последний релиз на GitHub — CONTRIBUTING §Хотфикс; заготовка-квитанция в `PLAN.md` — PR #68).
