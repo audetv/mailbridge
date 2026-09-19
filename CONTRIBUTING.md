@@ -26,7 +26,7 @@ make lint
 
 - CI: `.github/workflows/ci.yml` → джобы `Lint` (golangci-lint + npm lint + build) и `Test` (`go test -race`).
 - **На `main` НЕТ required status check** (проверено по API 2026-09-16: `required_pull_request_reviews=0`, обязательные статусы не установлены) → «Green CI обязателен» это **наша дисциплина, не блокировка GitHub**: мерджим ТОЛЬКО когда `gh pr checks` зелёный, и CI на HEAD не пропущена сбоем.
-- **Doc-only изменения (md/docs/archive) — без прогона CI:** `ci.yml` имеет `paths-ignore` для них (экономия ~2–4 мин на каждый такой PR). Любой PR с кодом (go/vue/Makefile/CI) CI запускает в полном виде — проверяй, что он запустился; если на кодовый PR CI не стартовала — это баг правил, чинить, а не мержить «вслепую».
+- **CI на все PR, исключений нет (с 2026-09-19; `paths-ignore` в `ci.yml` снят):** — ЛЮБОЙ PR (включая doc-only: `*.md`/`docs/**`/`archive/**`) — merge ТОЛЬКО после `gh pr checks` = pass. Цена ~2 мин фонового прогона на doc-only PR — сознательная покупка единого инварианта «green CI → merge», без служебного случая «а не заведётся ли CI». Если на любой PR CI не стартовала — аномалия (триггеры/ветка) — чинить, а не мержить «вслепую».
 - `go` lint (golangci-lint, gofmt) и `npm run lint` обязаны проходить до мержа.
 - Коммит не считается готовым, пока `gh run list` для его head sha не green.
 - После мержа убедиться, что push-запуск на `main` тоже green (иначе чинить отдельной веткой).
