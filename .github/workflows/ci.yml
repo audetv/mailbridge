@@ -1,20 +1,13 @@
 name: CI
 
-# Доки (md/docs/archive) — без прогона CI: там нечему ломать, а npm/go-джобы — 2–4 мин
-# на каждый doc-only PR. Любой PR с кодом (go/vue/Makefile) CI запускает в полном виде.
+# CI заводится на ВСЯКИЙ PR (включая doc-only / md / archive — решение владельца 2026-09-19):
+# «ждём зелёный CI» — единый инвариант без служебных случаев (paths-ignore снят,
+# доки-PR теперь тоже проходят проверку — merge только по `gh pr checks` = pass).
 on:
   push:
     branches: [main, develop, feature/ai]
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "archive/**"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "archive/**"
 
 jobs:
   lint:
