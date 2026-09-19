@@ -420,6 +420,8 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		EpicID      *int64  `json:"epic_id"`
 		// v0.25, шаг 7a: срок задачи — "YYYY-MM-DD" (дата, без времени).
 		DueDate *string `json:"due_date"`
+		// v0.28, шаг 28a: план задачи — "YYYY-MM-DD" (те же правила).
+		ScheduledDate *string `json:"scheduled_date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -467,8 +469,12 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.DueDate != nil && strings.TrimSpace(*req.DueDate) != "" && !validDueDate(*req.DueDate) {
+	if req.DueDate != nil && strings.TrimSpace(*req.DueDate) != "" && !validTaskDate(*req.DueDate) {
 		writeError(w, http.StatusBadRequest, "due_date must be \"YYYY-MM-DD\"")
+		return
+	}
+	if req.ScheduledDate != nil && strings.TrimSpace(*req.ScheduledDate) != "" && !validTaskDate(*req.ScheduledDate) {
+		writeError(w, http.StatusBadRequest, "scheduled_date must be \"YYYY-MM-DD\"")
 		return
 	}
 
@@ -484,6 +490,9 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		// Ручное создание: source = manual (AI тут не участвует).
 		manual := "manual"
 		task.DueSource = &manual
+	}
+	if req.ScheduledDate != nil && strings.TrimSpace(*req.ScheduledDate) != "" {
+		task.ScheduledDate = req.ScheduledDate
 	}
 	if err := h.store.CreateTask(r.Context(), task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -588,10 +597,11 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validDueDate — срок задачи: строка "YYYY-MM-DD" (дата, без времени).
-// Канон: онтология v0.5.2 §7.5. Проверяет формат и реальное существование дня
-// (например, 31 Feb — нет), чтобы в БД хранились только корректные DATE.
-func validDueDate(s string) bool {
+// validTaskDate — дата задачи (due_date / scheduled_date): строка "YYYY-MM-DD" (дата, без времени).
+// Канон: онтология v0.5.2 §7.5 (due) + v0.28 шаг 28a (scheduled — те же правила).
+// Проверяет формат и реальное существование дня (31 Feb — нет),
+// чтобы в БД хранились только корректные DATE.
+func validTaskDate(s string) bool {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
 		return false
@@ -630,6 +640,8 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		"type": true, "priority": true, "epic_id": true,
 		// v0.25, шаг 7a: срок задачи (string "YYYY-MM-DD" | null — снять срок).
 		"due_date": true,
+		// v0.28, шаг 28a: план задачи (string "YYYY-MM-DD" | null — снять план).
+		"scheduled_date": true,
 		// 7c, тестовый: установка AI-предложения срока (e2e/unit без LLM).
 		// Действует ТОЛЬКО при due_ai_pending=1 — иначе 400 (не для продуктового UI).
 		"due_ai_set": true,
@@ -656,7 +668,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ds, ok := v.(string)
-			if !ok || !validDueDate(ds) {
+			if !ok || !validTaskDate(ds) {
 				http.Error(w, `{"error":"due_date must be \"YYYY-MM-DD\" or null"}`, http.StatusBadRequest)
 				return
 			}
@@ -664,6 +676,20 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			// Ручное изменение всегда приоритетнее: source = manual (канон: онтология v0.5.2 §7.5).
 			filtered["due_source"] = "manual"
 			manualDue = true
+			continue
+		}
+		if k == "scheduled_date" {
+			// null / "null" — снять план; иначе строка даты (те же правила, что due_date).
+			if v == nil {
+				filtered["scheduled_date"] = nil
+				continue
+			}
+			ds, ok := v.(string)
+			if !ok || !validTaskDate(ds) {
+				http.Error(w, `{"error":"scheduled_date must be \"YYYY-MM-DD\" or null"}`, http.StatusBadRequest)
+				return
+			}
+			filtered["scheduled_date"] = ds
 			continue
 		}
 		// v0.25, шаг 7c: принятие/отклонение AI-срока — отдельные сигналы.
@@ -722,7 +748,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if v, present := updates["due_ai_set"]; present {
 		delete(filtered, "due_ai_set") // не столбец БД — переводится в ai_due_date ниже
 		dv, ok := v.(string)
-		if !ok || dv != "" && !validDueDate(dv) {
+		if !ok || dv != "" && !validTaskDate(dv) {
 			http.Error(w, `{"error":"due_ai_set must be "YYYY-MM-DD" or empty"}`, http.StatusBadRequest)
 			return
 		}

@@ -32,7 +32,7 @@ func (s *Store) GetInboxItemsByThread(ctx context.Context, threadID string) ([]*
 // GetTasksByThread возвращает все задачи цепочки.
 func (s *Store) GetTasksByThread(ctx context.Context, threadID string) ([]*store.Task, error) {
 	query := `SELECT id, message_id, subject, body_text, body_html, from_email, from_name,
-		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, due_date, ai_due_date, due_source, due_ai_pending, created_at, updated_at
+		project, type, priority, status, assignee, thread_id, source_email_id, ai_verdict, epic_id, requestor_id, assignee_id, due_date, ai_due_date, due_source, due_ai_pending, scheduled_date, created_at, updated_at
 		FROM tasks WHERE thread_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, threadID)

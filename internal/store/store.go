@@ -110,6 +110,9 @@ type Task struct {
 	// Канон: онтология v0.5.2 §7.5. Ручной срок приоритетнее AI;
 	// AI-предложение (ai_due_date, due_source) появится в шаге 7b.
 	DueDate *string `json:"due_date,omitempty"`
+	// v0.28, шаг 28a: план задачи — «когда делаю» (DATE, те же правила, что due_date).
+	// Решение владельца 2026-09-19: две независимые даты — due (обещание) + scheduled (план).
+	ScheduledDate *string `json:"scheduled_date,omitempty"`
 	// AI-предложение срока (пополняется в шаге 7b): хранится ВСЕГДА (и отклонённые — база ошибок AI).
 	AIDueDate    *string   `json:"ai_due_date,omitempty"`
 	DueSource    *string   `json:"due_source,omitempty"`     // 'ai' | 'manual'

@@ -342,6 +342,29 @@ func (s *Store) migrateSchema(ctx context.Context) error {
 		return fmt.Errorf("failed to create idx_tasks_due_date: %w", err)
 	}
 
+	// План задачи (v0.28, шаг 28a): scheduled_date — «когда делаю» (DATE, без времени).
+	// Те же правила, что due_date (7a): TEXT NULL, канонический YYYY-MM-DD из API.
+	// AI-инфраструктуры нет (решение владельца: НЕ AI-извлечение scheduled).
+	planColumns := map[string]string{
+		"scheduled_date": "TEXT NULL",
+	}
+	for col, typ := range planColumns {
+		has, err := s.columnExists(ctx, "tasks", col)
+		if err != nil {
+			return fmt.Errorf("failed to check column %s: %w", col, err)
+		}
+		if !has {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, typ)); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	// Индекс под срез «План» (v0.28, шаг 28b: ?plan=today|tomorrow|week).
+	if _, err := s.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_tasks_scheduled_date ON tasks(scheduled_date)"); err != nil {
+		return fmt.Errorf("failed to create idx_tasks_scheduled_date: %w", err)
+	}
+
 	// Модули: в ранней версии схемы (v0.22 шаг 3) epics создавались без description/status;
 	// идемпотентно дособираем колонки, если их нет.
 	epicsBackfillColumns := map[string]string{
