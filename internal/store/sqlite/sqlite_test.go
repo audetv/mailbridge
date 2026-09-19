@@ -969,6 +969,95 @@ func TestDueDate_FilterByDueBuckets(t *testing.T) {
 	}
 }
 
+// v0.28, шаг 28b: срез «План» (plan=today|tomorrow|week).
+// Семантика (решение владельца 2026-09-19): окно scheduled (today = сегодня,
+// tomorrow = завтра, week = 7 дней включая сегодня) + ВСЕГДА просроченные due
+// (due_date < сегодня, активные статусы new/in_progress/backlog) —
+// «совсем не видеть просроченные» отклонено. completed/closed — вне плана.
+func TestPlan_FilterByPlanBuckets(t *testing.T) {
+	s, cleanup := setupStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	inWeek := now.AddDate(0, 0, 5).Format("2006-01-02")  // в пределах 7-дневного окна
+	outWeek := now.AddDate(0, 0, 8).Format("2006-01-02") // вне окна
+	overdue := now.AddDate(0, 0, -2).Format("2006-01-02")
+
+	mk := func(mid, status, due, sched string) {
+		tk := &store.Task{MessageID: mid, Subject: "T", BodyText: "B", FromEmail: "u@e.com", Project: "ТРК", Status: status}
+		if due != "" {
+			tk.DueDate = strp(due)
+			tk.DueSource = strp("manual")
+		}
+		if sched != "" {
+			tk.ScheduledDate = strp(sched)
+		}
+		mustCreateTask(t, s, tk)
+	}
+	mk("p-sched-today", "new", "", today)
+	mk("p-sched-tomorrow", "new", "", tomorrow)
+	mk("p-sched-week", "new", "", inWeek)
+	mk("p-sched-out", "new", "", outWeek)
+	mk("p-overdue-new", "new", overdue, "")
+	mk("p-overdue-prog", "in_progress", overdue, "")
+	mk("p-overdue-backlog", "backlog", overdue, "")
+	// Просроченные due, НО закрытые статусы — вне плана (решение 28b).
+	mk("p-overdue-done", "completed", overdue, "")
+	mk("p-overdue-closed", "closed", overdue, "")
+	// Без обеих дат — не в плане.
+	mk("p-bare", "new", "", "")
+	// due = сегодня — это НЕ просрочено (просрочка = due < сегодня).
+	mk("p-due-today", "new", today, "")
+
+	want := map[string][]string{
+		// scheduled сегодня + все просроченные due (активные статусы).
+		"today": {"p-sched-today", "p-overdue-new", "p-overdue-prog", "p-overdue-backlog"},
+		// scheduled завтра + все просроченные due (просрочка — всегда).
+		"tomorrow": {"p-sched-tomorrow", "p-overdue-new", "p-overdue-prog", "p-overdue-backlog"},
+		// scheduled в 7-дневном окне (сегодня..+6; +8 — вне) + просроченные.
+		"week": {"p-sched-today", "p-sched-tomorrow", "p-sched-week", "p-overdue-new", "p-overdue-prog", "p-overdue-backlog"},
+	}
+	for _, p := range []string{"today", "tomorrow", "week"} {
+		res, err := s.ListTasks(ctx, &store.TaskFilter{Plan: p, Page: 1, PerPage: 50})
+		if err != nil {
+			t.Fatalf("ListTasks plan=%s: %v", p, err)
+		}
+		got := map[string]bool{}
+		for _, tk := range res.Tasks {
+			got[tk.MessageID] = true
+		}
+		if len(res.Tasks) != len(want[p]) {
+			t.Errorf("plan=%s: got %d tasks (%v), want %v", p, len(res.Tasks), gotKeys(got), want[p])
+			continue
+		}
+		for _, id := range want[p] {
+			if !got[id] {
+				t.Errorf("plan=%s: missing %s in %v", p, id, gotKeys(got))
+			}
+		}
+	}
+
+	// Неизвестное значение — фильтр игнорируется (400 отвечает API-слой).
+	res, err := s.ListTasks(ctx, &store.TaskFilter{Plan: "bogus", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("ListTasks plan=bogus: %v", err)
+	}
+	if len(res.Tasks) != 11 {
+		t.Errorf("plan=bogus: expected no filter applied (11 tasks), got %d", len(res.Tasks))
+	}
+}
+
+func gotKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // v0.26, шаг 7d: вклад-активность — новый комментарий поднимает
 // tasks.updated_at (сортировка «по активности» учитывает ответы, не только
 // правки метаданных).

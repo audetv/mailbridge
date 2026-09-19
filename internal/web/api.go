@@ -364,6 +364,16 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v0.28, шаг 28b: срез «План» — один из фиксированных значений.
+	// Невалидное → 400 (молчаливый fallback скрывал бы typo, как ?due=).
+	rawPlan := q.Get("plan")
+	switch rawPlan {
+	case "", "today", "tomorrow", "week":
+	default:
+		writeError(w, http.StatusBadRequest, "plan must be today|tomorrow|week")
+		return
+	}
+
 	filter := &store.TaskFilter{
 		Project:     q.Get("project"),
 		EpicID:      epicID,
@@ -382,6 +392,8 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		Sort: q.Get("sort"),
 		// v0.26, шаг 7d: фильтр по срокам (проверен выше).
 		Due: rawDue,
+		// v0.28, шаг 28b: срез «План» (проверен выше).
+		Plan: rawPlan,
 	}
 
 	result, err := h.store.ListTasks(r.Context(), filter)

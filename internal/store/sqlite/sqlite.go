@@ -351,6 +351,22 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 		conditions = append(conditions, "t.due_ai_pending = 1")
 	}
 
+	// v0.28, шаг 28b: срез «План» — scheduled в окне + ВСЕГДА просроченные due
+	// (due_date < сегодня, только активные статусы new/in_progress/backlog;
+	// completed/closed вне плана — решение владельца). Одно OR-сложение
+	// в одном условии — не разбивать на несколько AND.
+	switch filter.Plan {
+	case "today":
+		conditions = append(conditions, "(t.scheduled_date = ? OR (t.due_date < ? AND t.status IN ('new','in_progress','backlog')))")
+		args = append(args, time.Now().Format("2006-01-02"), time.Now().Format("2006-01-02"))
+	case "tomorrow":
+		conditions = append(conditions, "(t.scheduled_date = ? OR (t.due_date < ? AND t.status IN ('new','in_progress','backlog')))")
+		args = append(args, time.Now().AddDate(0, 0, 1).Format("2006-01-02"), time.Now().Format("2006-01-02"))
+	case "week":
+		conditions = append(conditions, "(t.scheduled_date BETWEEN ? AND ? OR (t.due_date < ? AND t.status IN ('new','in_progress','backlog')))")
+		args = append(args, time.Now().Format("2006-01-02"), time.Now().AddDate(0, 0, 6).Format("2006-01-02"), time.Now().Format("2006-01-02"))
+	}
+
 	username := filter.Username
 	if username == "" {
 		username = ""
