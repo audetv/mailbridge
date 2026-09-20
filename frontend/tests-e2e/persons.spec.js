@@ -135,7 +135,7 @@ test('C: PUT /api/tasks/{id}/persons — assignee_id сохраняется', as
 })
 
 // ── D: «К задачам» из Персон → фильтр Заказчик ─────────────────────────────
-test('D: «К задачам» из Персон — вкладка Активные + фильтр Заказчик (персона)', async ({ page }) => {
+test('D: «К задачам» из Персон — вкладка Статус/Активные + фильтр Заказчик (персона)', async ({ page }) => {
   const req = page.request
   await login(req)
   const ts = Date.now().toString()
@@ -166,10 +166,10 @@ test('D: «К задачам» из Персон — вкладка Активн
   await expect(row).toBeVisible()
   await row.locator('button, a', { hasText: 'К задачам' }).first().click()
 
-  // Вкладка «Активные» активна + URL несёт requestor_id (deep-link).
-  const activeBtn = page.locator('.tab-bar button', { hasText: 'Активные' })
+  // Вкладка «Статус» активна + селект «Активные» (28d) + URL несёт requestor_id (deep-link).
+  const statusBtn = page.locator('.tab-bar button', { hasText: 'Статус' }).first()
   await expect
-    .poll(async () => activeBtn.evaluate((el) => el.classList.contains('active')), { timeout: 10000 })
+    .poll(async () => statusBtn.evaluate((el) => el.classList.contains('active')), { timeout: 10000 })
     .toBe(true)
   await expect(page).toHaveURL(/requestor_id=/, { timeout: 5000 })
 

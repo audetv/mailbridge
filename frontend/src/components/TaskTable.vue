@@ -420,12 +420,12 @@ function onRowClick(event) {
   router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
 }
 
-// Ссылка «Проект» → вкладка «Активные» + фильтр по проекту (таб — по URL,
-// watch в DashboardView; epic от другого проекта сбрасываем).
+// Ссылка «Проект» → вкладка «Статус» + «Активные» (28d) + фильтр по проекту
+// (таб — по URL, deep-link в DashboardView; epic от другого проекта — сброс).
 function goToProject(projectName) {
   store.filters.epic_id = ''
   store.setFilter('project', projectName)
-  router.replace({ query: { ...route.query, tab: 'active', project: projectName } })
+  router.replace({ query: { ...route.query, tab: 'status', status: 'active', project: projectName } })
 }
 
 function onPage(event) {

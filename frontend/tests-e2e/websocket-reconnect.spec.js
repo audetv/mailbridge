@@ -55,7 +55,7 @@ test.describe('WS-reliability — Шаг 0 (v0.22.1)', () => {
   }) => {
     const token = await login(request, 'admin', 'admin')
 
-    await page.goto('/?tab=active')
+    await page.goto("/?tab=status&status=active")
     const indicator = page.locator('.connection-status')
     await expect(indicator).toHaveClass(/connected/, { timeout: 15000 })
     await expect(page.locator('[data-testid="task-table"]')).toBeVisible({ timeout: 15000 })
@@ -113,7 +113,7 @@ test.describe('WS-reliability — Шаг 0 (v0.22.1)', () => {
     request
   }) => {
     await login(request, 'admin', 'admin')
-    await page.goto('/?tab=active')
+    await page.goto("/?tab=status&status=active")
     const indicator = page.locator('.connection-status')
     await expect(indicator).toHaveClass(/connected/, { timeout: 15000 })
 
