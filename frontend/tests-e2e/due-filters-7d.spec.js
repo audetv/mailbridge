@@ -109,11 +109,12 @@ test.describe('7d: вкладка/сортировка/фильтры по ср�
     ).toHaveCount(0)
   })
 
-  test('статусная вкладка: просроченные — наверху при sort=due (7a дефолт)', async ({ request }) => {
+  test('статусная вкладка: просроченные — наверху при явном sort=due (режим 7a)', async ({ request }) => {
     const stamp = Date.now()
     // Общий уникальный токен e2e-7d-cmp-<stamp> на обеих задачах — поиск
     // LIKE %term% находит ровно эту пару прогона (dev-БД копит stale e2e-7d-*,
-    // которые при sort=due id ASC уплывают за пер_page=50).
+    // которые при id ASC уплывают за пер_page=50). sort=due здесь ЯВНЫЙ —
+    // v0.29.0 дефолт — «По дате создания» (created), см. сортировка.spec.js.
     const overdue = await api(request, 'POST', '/api/tasks', {
       // search-токен `e2e-7d-cmp-<stamp>` — ОБЩИЙ подстроковый префикс обеих
       // задач (stamp сразу после префикса, без слова в середине), чтобы

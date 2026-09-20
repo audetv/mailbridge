@@ -90,11 +90,13 @@ const requestor = ref(null)
 const assigneePerson = ref(null)
 // Срок (v0.26, шаг 7d): сортировка (дефолт по вкладке — store фильтрует) +
 // фильтр по срокам (showClear — снял = любой срок).
-const sort = ref('due')
+const sort = ref('created')
 const due = ref(null)
 
-// Сортировка (серверная, 7a/7d): «по срокам» = due, «по активности» = updated.
+// Сортировка (серверная, 7a/7d; v0.29.0 — «По дате создания» первым, дефолт):
+// «по дате создания» = created, «по срокам» = due, «по активности» = updated.
 const SORT_OPTIONS = [
+  { label: 'По дате создания', value: 'created' },
   { label: 'По срокам', value: 'due' },
   { label: 'По активности', value: 'updated' },
 ]
@@ -141,7 +143,7 @@ onMounted(async () => {
   project.value = store.filters.project || null
   requestor.value = store.filters.requestor_id || null
   assigneePerson.value = store.filters.assignee_id || null
-  sort.value = store.filters.sort || 'due'
+  sort.value = store.filters.sort || 'created'
   due.value = store.filters.due || null
   if (project.value) {
     const projectId = await projectsIdByName(project.value)

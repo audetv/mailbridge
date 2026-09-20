@@ -50,7 +50,7 @@ describe('v0.28/28e — store setTab / setStatusFilter / setPlanFilter', () => {
     expect(s.filters.statuses).toEqual(['new', 'in_progress'])
     expect(s.filters.plan).toBe('')
     expect(s.filters.due).toBe('')
-    expect(s.filters.sort).toBe('due')
+    expect(s.filters.sort).toBe('created') // v0.29.0: дефолт — «По дате создания»
     expect(s.filters.page).toBe(1)
     const call = vi.mocked(apiGet).mock.lastCall
     expect(call[0]).toBe('/tasks')
