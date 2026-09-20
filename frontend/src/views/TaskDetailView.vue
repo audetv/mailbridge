@@ -575,8 +575,10 @@ function onReplySent() {
 }
 
 function goBack() {
-  const tab = route.query.tab
-  router.push({ path: '/', query: tab ? { tab } : {} })
+  // v0.28/28e: возвращаемся с ВЕСЬМ исходным query (вкладка + её значение
+  // + фильтры) — выбор пользователя не сбрасывается к дефолтам.
+  const q = { ...route.query }
+  router.push({ path: '/', query: q })
 }
 
 function formatDate(dateStr) {
