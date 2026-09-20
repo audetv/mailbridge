@@ -44,7 +44,7 @@ describe('ProjectsView — «К задачам» (шаг 6)', () => {
     tasksMock.setFilter.mockReset()
   })
 
-  it('кнопка «К задачам»: фильтр по проекту + переход на вкладку «Активные» по URL', async () => {
+  it('кнопка «К задачам»: фильтр по проекту + переход на вкладку «Статус»/«Активные» (28d)', async () => {
     const wrapper = mount(ProjectsView, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
@@ -58,9 +58,9 @@ describe('ProjectsView — «К задачам» (шаг 6)', () => {
     expect(tasksMock.setFilter).toHaveBeenCalledWith('project', 'Лидер Спорт')
     // чужой модуль сброшен
     expect(tasksMock.filters.epic_id).toBe('')
-    // переход — именно на вкладку «active» с проектом в URL (deep-link)
+    // переход — вкладка «Статус» + селект «Активные» с проектом в URL (deep-link, 28d)
     expect(routerMock.replace).toHaveBeenCalledWith({
-      query: { tab: 'active', project: 'Лидер Спорт' }
+      query: { tab: 'status', status: 'active', project: 'Лидер Спорт' }
     })
   })
 })

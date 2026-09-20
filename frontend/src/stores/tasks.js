@@ -28,27 +28,26 @@ export const useTasksStore = defineStore('tasks', () => {
     // 7a («due»/«updated») и 7d («overdue|today|tomorrow|7d|30d|none|due_pending»).
     sort: 'due',
     due: '',
+    // v0.28, шаг 28d: срез «План» (?plan=, серверная логика 28b). '' — выключен.
+    plan: '',
     page: 1,
     per_page: 50
   })
 
-  // Вкладки (v0.26, шаг 7d): «Все» (любой статус) + статусные. Ключи — те же,
-  // что во вкладках UI («completed» — статус выполненной). План: дефолт-
-  // сортировка «Все» → по активности; статусные вкладки → по срокам.
-  const TAB_STATUS = {
+  // v0.28, шаг 28d: вкладка «Статус» + селект. 5 статусных вкладок (v0.26, 7d)
+  // → одна «Статус»; значения селекта (по плану: ?status=
+  // all|active|backlog|completed|closed) → массив статусов запроса.
+  const STATUS_FILTER = {
     all: [],
     active: ['new', 'in_progress'],
     backlog: ['backlog'],
     completed: ['completed'],
     closed: ['closed']
   }
-  const TAB_SORT = {
-    all: 'updated',
-    active: 'due',
-    backlog: 'due',
-    completed: 'due',
-    closed: 'due'
-  }
+
+  // v0.28, шаг 28d: вкладка «План» + селект. Значения — серверный срез 28b
+  // (?plan=today|tomorrow|week); «План» — БЕЗ status (любой статус).
+  const PLAN_FILTER = { today: 'today', tomorrow: 'tomorrow', week: 'week' }
 
   async function fetchTasks() {
     loading.value = true
@@ -65,6 +64,7 @@ export const useTasksStore = defineStore('tasks', () => {
       if (!params.assignee_id) delete params.assignee_id
       if (!params.assignee) delete params.assignee
       if (!params.due) delete params.due
+      if (!params.plan) delete params.plan
       const query = { ...params }
       // status: только если вкладка статусная (не «Все»); бэкенд принимает
       // повторяющиеся статусы (q["status"] — axios сериализует массив).
@@ -170,13 +170,46 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchTasks()
   }
 
-  // Вкладка (v0.26, шаг 7d): «Все» + статусные. Сбрасываем due-фильтр и
-  // применяем дефолтную сортировку вкладки (план: Все → активность,
-  // статусные → сроки). Фильтр по статусам — ядро вкладки.
-  function setTab(tabKey) {
-    if (!Object.prototype.hasOwnProperty.call(TAB_STATUS, tabKey)) return
-    filters.value.statuses = [...TAB_STATUS[tabKey]]
-    filters.value.sort = TAB_SORT[tabKey]
+  // Вкладка (v0.28, шаг 28d): «Статус» (селект-значение, дефолт «Активные»)
+  // и «План» (селект-значение, дефолт «Сегодня»). Смена вкладки сбрасывает
+  // фильтр другой вкладки (plan ↔ due/status) — без перекрёстных фильтров.
+  function setTab(tabKey, status = 'active') {
+    if (tabKey === 'status') {
+      const statuses = STATUS_FILTER[status] || []
+      filters.value.statuses = [...statuses]
+      filters.value.plan = ''
+      filters.value.due = ''
+      filters.value.sort = 'due'
+      filters.value.page = 1
+      fetchTasks()
+      return
+    }
+    if (tabKey === 'plan') {
+      const plan = PLAN_FILTER[status] || 'today'
+      filters.value.plan = plan
+      filters.value.statuses = [] // «План» — любой статус
+      filters.value.due = ''
+      filters.value.sort = 'due'
+      filters.value.page = 1
+      fetchTasks()
+      return
+    }
+  }
+
+  // Селект «Статус» (вкладка «Статус», v0.28/28d): значение ?status= → статусы.
+  function setStatusFilter(status) {
+    if (!Object.prototype.hasOwnProperty.call(STATUS_FILTER, status)) return
+    filters.value.statuses = [...STATUS_FILTER[status]]
+    filters.value.plan = ''
+    filters.value.due = ''
+    filters.value.page = 1
+    fetchTasks()
+  }
+
+  // Селект «План» (вкладка «План», v0.28/28d): значение ?plan= → срез 28b.
+  function setPlanFilter(plan) {
+    if (!Object.prototype.hasOwnProperty.call(PLAN_FILTER, plan)) return
+    filters.value.plan = PLAN_FILTER[plan]
     filters.value.due = ''
     filters.value.page = 1
     fetchTasks()
@@ -250,8 +283,10 @@ export const useTasksStore = defineStore('tasks', () => {
     setFilter,
     setStatuses,
     setTab,
-    TAB_STATUS,
-    TAB_SORT,
+    setStatusFilter,
+    setPlanFilter,
+    STATUS_FILTER,
+    PLAN_FILTER,
     setEpic,
     fetchInboxCount,
     fetchTaskInbox,

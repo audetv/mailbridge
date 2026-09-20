@@ -1,5 +1,5 @@
-// due-filters-7d.spec.js — E2E (v0.26, шаг 7d): вкладка «Все», серверная
-// сортировка (?sort=due/updated), фильтры по срокам (?due=…).
+// due-filters-7d.spec.js — E2E (v0.26, шаг 7d): вкладка «Все» (28d: «Статус»
+// + селект «Все»), серверная сортировка (?sort=due/updated), фильтры по срокам (?due=…).
 // Приёмка плана: «Все» — любой статус (без status в запросе); новое
 // сообщение/комментарий → задача наверху при sort=updated; просроченные —
 // наверху в статусных вкладках при sort=due; due-фильтры выделяют сроки.
@@ -50,10 +50,13 @@ test.describe('7d: вкладка/сортировка/фильтры по ср�
     expect(all.status).toBe(200)
     expect(all.json.tasks.some((x) => x.id === task.id)).toBeTruthy()
 
-    // — UI: вкладка «Все» видна; в ней наша задача (любой статус).
-    await page.goto('/?tab=all')
-    const tabAll = page.locator('.tab-bar button', { hasText: 'Все' })
-    await expect(tabAll).toBeVisible()
+    // — UI: вкладка «Статус» + селект «Все» (28d: 5 статусных вкладок →
+    //   одна «Статус» + селект); в ней наша задача (любой статус).
+    await page.goto('/?tab=status&status=all')
+    const statusTab = page.locator('.tab-bar button', { hasText: 'Статус' })
+    await expect(statusTab).toBeVisible()
+    const sel = page.locator('[data-testid="status-select"] .p-select-label')
+    await expect(sel).toContainText('Все', { timeout: 10000 })
     const row = page.locator('[data-testid="task-table"] tr', { hasText: `e2e-7d-all-${stamp}` })
     await expect(row).toBeVisible()
 

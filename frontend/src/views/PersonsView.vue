@@ -233,11 +233,12 @@ const toast = useToast()
 const router = useRouter()
 const route = useRoute()
 
-// «К задачам» — вкладка «Активные» с фильтром заказчика = персона (шаг 6:
-// персона → её задачи). Ссылка persona→tasks, как project→tasks в ProjectsView.
+// «К задачам» — вкладка «Статус» + «Активные» (28d) с фильтром заказчика =
+// персона (шаг 6: персона → её задачи). Ссылка persona→tasks, как
+// project→tasks в ProjectsView.
 function goToTasks(p) {
   tasksStore.filters.requestor_id = p.id
-  router.replace({ query: { ...route.query, tab: 'active', requestor_id: p.id } })
+  router.replace({ query: { ...route.query, tab: 'status', status: 'active', requestor_id: p.id } })
 }
 
 // Фильтры =================================================================

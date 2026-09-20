@@ -25,19 +25,46 @@
       <ProjectsView v-else-if="activeTab === 'projects'" />
       <PersonsView v-else-if="activeTab === 'persons'" />
       <template v-else>
+        <div class="tab-filter-row">
+          <Select
+            v-if="activeTab === 'status'"
+            v-model="statusFilterValue"
+            :options="STATUS_OPTIONS"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Статус"
+            :allowEmpty="false"
+            class="tab-filter-select status-select"
+            data-testid="status-select"
+            @change="onStatusFilterChange"
+          />
+          <Select
+            v-else-if="activeTab === 'plan'"
+            v-model="planFilterValue"
+            :options="PLAN_OPTIONS"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="План"
+            :allowEmpty="false"
+            class="tab-filter-select plan-select"
+            data-testid="plan-select"
+            @change="onPlanFilterChange"
+          />
+        </div>
         <div class="tasks-toolbar">
           <Button
+            v-if="activeTab === 'status' || activeTab === 'plan'"
             label="Создать задачу"
             icon="pi pi-plus"
             @click="createTaskDialogOpen = true"
           />
         </div>
-        <FilterBar />
-        <TaskTable />
+        <FilterBar v-if="activeTab === 'status' || activeTab === 'plan'" />
+        <TaskTable v-if="activeTab === 'status' || activeTab === 'plan'" />
       </template>
     </main>
 
-    <!-- Диалог создания задачи (кнопка в «Активных задачах»): проект выбирается -->
+    <!-- Диалог создания задачи (кнопка на вкладке «Статус»): проект выбирается -->
     <CreateTaskDialog
       :visible="createTaskDialogOpen"
       :projects="projectsStore.projects"
@@ -54,6 +81,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 import Button from 'primevue/button'
+import Select from 'primevue/select'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import { useProjectsStore } from '@/stores/projects'
@@ -80,7 +108,7 @@ const wsStore = useWebSocket()
 const inboxStore = useInboxStore()
 const epicsStore = useEpicsStore()
 
-const activeTab = ref('active')
+const activeTab = ref('status')
 const activeCount = ref(0)
 const createTaskDialogOpen = ref(false)
 
@@ -114,28 +142,38 @@ function onTaskCreated() {
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },
-  { key: 'all', label: 'Все', count: 0 },
-  { key: 'active', label: 'Активные', count: 0 },
-  { key: 'backlog', label: 'Бэклог', count: 0 },
-  { key: 'completed', label: 'Выполненные', count: 0 },
-  { key: 'closed', label: 'Закрытые', count: 0 },
+  { key: 'status', label: 'Статус', count: 0 },
+  { key: 'plan', label: 'План', count: 0 },
   { key: 'projects', label: 'Проекты', count: 0 },
   { key: 'persons', label: 'Персоны', count: 0 }
 ])
 
-// Вкладки (v0.26, шаг 7d): «Все» — любой статус (пустой массив → без status
-// в запросе); дефолтные сортировки — Все: по активности, статусные: по срокам
-// (серверные sort=updated/due из 7a).
-const tabStatuses = {
-  all: [],
-  active: ['new', 'in_progress'],
-  backlog: ['backlog'],
-  completed: ['completed'],
-  closed: ['closed']
-}
+// v0.28, шаг 28d: 5 статусных вкладок (v0.26/7d) → ОДНА «Статус» + селект,
+// и вкладка «План» + селект. Мапы значения селекта → запрос — в store
+// (tasks.STATUS_FILTER / tasks.PLAN_FILTER); здесь только опции и UI-рефы.
+const STATUS_OPTIONS = [
+  { label: 'Все', value: 'all' },
+  { label: 'Активные', value: 'active' },
+  { label: 'Бэклог', value: 'backlog' },
+  { label: 'Выполненные', value: 'completed' },
+  { label: 'Закрытые', value: 'closed' }
+]
+const PLAN_OPTIONS = [
+  { label: 'Сегодня', value: 'today' },
+  { label: 'Завтра', value: 'tomorrow' },
+  { label: 'Неделя', value: 'week' }
+]
+const statusFilterValue = ref('active')
+const planFilterValue = ref('today')
+// hasOwn — store-мапы не прототипные, но «all»: [] — falsy; hasOwnProperty
+// честнее `!!map[v]`.
+const statusKeyValid = (v) =>
+  v != null && Object.prototype.hasOwnProperty.call(store.STATUS_FILTER, v)
+const planKeyValid = (v) =>
+  v != null && Object.prototype.hasOwnProperty.call(store.PLAN_FILTER, v)
 
-const isKnownTab = (k) => k === 'inbox' || k === 'projects' || k === 'persons' || !!tabStatuses[k]
-const defaultStatuses = (tab) => tabStatuses[tab] || ['new', 'in_progress']
+const isKnownTab = (k) =>
+  k === 'inbox' || k === 'status' || k === 'plan' || k === 'projects' || k === 'persons'
 
 // URL — source of truth: deep-link «?project=…» переживает reload.
 // Сидим в setup (до onMounted дочернего FilterBar) — селект «Проект»
@@ -151,16 +189,34 @@ if (typeof route.query.requestor_id === 'string' && route.query.requestor_id !==
   store.filters.page = 1
 }
 
-// URL — source of truth для вкладки (deep-link: ?tab=active&project=…):
-// applyTab вызывается и при mount, и на каждый переход (router.push/replace),
-// поэтому «К задачам»/ссылка «Проект» из таблицы переключают вкладку корректно.
-function applyTab(tab) {
+// URL — source of truth для вкладки + селекта (вкладка «Статус» →
+// ?status=, вкладка «План» → ?plan=). applyTab вызывается и при mount, и на
+// каждый переход (router.push/replace), поэтому «К задачам»/ссылка «Проект»
+// из таблицы и deep-link «?tab=plan&plan=today» переключают вкладку и
+// селект корректно. Старые ключи ?tab=all/active/backlog/completed/closed —
+// ломаются (без миграции, решение владельца): unknown → дефолт «Статус».
+function applyTab(tab, statusVal, planVal) {
   if (!isKnownTab(tab)) return
   activeTab.value = tab
-  if (tab !== 'inbox') {
-    // 7d: setTab — статусы вкладки + дефолт-сортировка + сброс due-фильтра.
-    store.setTab(tab)
+  if (tab === 'inbox') return
+  if (tab === 'status') {
+    const sv = statusKeyValid(statusVal) ? statusVal : 'active'
+    statusFilterValue.value = sv
+    store.setTab('status', sv)
+  } else {
+    const pv = planKeyValid(planVal) ? planVal : 'today'
+    planFilterValue.value = pv
+    store.setTab('plan', pv)
   }
+}
+
+function applyTabFromQuery() {
+  const t = route.query.tab
+  applyTab(
+    typeof t === 'string' ? t : 'status',
+    typeof route.query.status === 'string' ? route.query.status : undefined,
+    typeof route.query.plan === 'string' ? route.query.plan : undefined
+  )
 }
 
 onMounted(() => {
@@ -170,25 +226,36 @@ onMounted(() => {
   const tabFromUrl = route.query.tab
   const saved = localStorage.getItem('mailbridge_active_tab')
 
-  let tab = 'active'
-  if (tabFromUrl && isKnownTab(tabFromUrl)) {
+  let tab = 'status'
+  let statusVal = undefined
+  let planVal = undefined
+
+  // URL — source of truth, fallback — localStorage (механика из 7d).
+  if (typeof tabFromUrl === 'string' && isKnownTab(tabFromUrl)) {
     tab = tabFromUrl
+    statusVal = typeof route.query.status === 'string' ? route.query.status : undefined
+    planVal = typeof route.query.plan === 'string' ? route.query.plan : undefined
   } else if (saved && isKnownTab(saved)) {
     tab = saved
   }
 
-  applyTab(tab)
+  applyTab(tab, statusVal, planVal)
   fetchActiveCount()
   inboxStore.fetchUnreadCount()
 })
 
-// Переход по URL (goToTasks/ссылка проекта) — переключаем вкладку;
-// фильтр проекта уже выставлен вызывающим (tasksStore.setFilter) — без дубля.
-watch(() => route.query.tab, (tab) => {
-  if (tab !== undefined && tab !== activeTab.value) {
-    applyTab(tab)
+// Переход по URL (goToTasks/ссылка проекта/deep-link) — переключаем вкладку
+// + селект. watch на ?tab= и на ?status=/?plan= — один watch ловит всё:
+// ?tab=status&status=all (селект «Все»), ?tab=plan&plan=week и т.д.
+watch(
+  () => [route.query.tab, route.query.status, route.query.plan],
+  ([tab, statusVal, planVal]) => {
+    if (tab === undefined && statusVal === undefined && planVal === undefined) return
+    if (!isKnownTab(tab)) return // не наша вкладка — не трогаем (и старые ?tab=active — ломаются)
+    if (tab === activeTab.value) return
+    applyTabFromQuery()
   }
-})
+)
 
 onUnmounted(() => {
   wsStore.disconnect()
@@ -205,15 +272,50 @@ async function fetchActiveCount() {
   }
 }
 
+// Клик по вкладке (TabBar @select). URL — ?tab=<key>; для «Статус»/«План» —
+// ещё ?status= / ?plan= (дефолт: active / today). Старые ?status=/?plan= из
+// другого таб-контекста — очищаем (без перекрёстных фильтров).
 function onTabSelect(key) {
   activeTab.value = key
   localStorage.setItem('mailbridge_active_tab', key)
   const query = { ...route.query, tab: key }
-  if (key === 'projects' || key === 'inbox') delete query.project
-  router.replace({ query })
-  if (key !== 'inbox' && key !== 'projects') {
-    store.setTab(key)
+  if (key === 'projects' || key === 'inbox') {
+    delete query.project
+    delete query.status
+    delete query.plan
   }
+  if (key === 'status') {
+    query.status = statusFilterValue.value
+    delete query.plan
+  }
+  if (key === 'plan') {
+    query.plan = planFilterValue.value
+    delete query.status
+  }
+  router.replace({ query })
+  if (key === 'status') {
+    store.setTab('status', statusFilterValue.value)
+  } else if (key === 'plan') {
+    store.setTab('plan', planFilterValue.value)
+  }
+}
+
+// Селект «Статус» (вкладка «Статус»): значение ?status= → store.setStatusFilter
+// (включая «Все» → []). UI-реф синхронизируем с store (deep-link ?status=all
+// → селект покажет «Все»). Селект «План» — аналогично ?plan=.
+function onStatusFilterChange(event) {
+  const value = event?.value ?? event
+  if (!statusKeyValid(value)) return
+  statusFilterValue.value = value
+  store.setStatusFilter(value)
+  router.replace({ query: { ...route.query, status: value } })
+}
+function onPlanFilterChange(event) {
+  const value = event?.value ?? event
+  if (!planKeyValid(value)) return
+  planFilterValue.value = value
+  store.setPlanFilter(value)
+  router.replace({ query: { ...route.query, plan: value } })
 }
 
 watch(
@@ -339,5 +441,13 @@ function handleLogout() {
 
 .dashboard-content {
   padding: 2rem;
+}
+
+.tab-filter-row {
+  margin-bottom: 0.75rem;
+}
+
+.tab-filter-select {
+  width: 180px;
 }
 </style>
