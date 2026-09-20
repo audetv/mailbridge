@@ -166,8 +166,8 @@ test('D: «К задачам» из Персон — вкладка Статус
   await expect(row).toBeVisible()
   await row.locator('button, a', { hasText: 'К задачам' }).first().click()
 
-  // Вкладка «Статус» активна + селект «Активные» (28d) + URL несёт requestor_id (deep-link).
-  const statusBtn = page.locator('.tab-bar button', { hasText: 'Статус' }).first()
+  // Вкладка «Статус» активна (28e: таб = пункт выбора «Активные») + URL несёт requestor_id.
+  const statusBtn = page.locator('button[data-testid="tab-status"]')
   await expect
     .poll(async () => statusBtn.evaluate((el) => el.classList.contains('active')), { timeout: 10000 })
     .toBe(true)

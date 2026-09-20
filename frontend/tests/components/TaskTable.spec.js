@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
+const routeMock = { params: {}, query: {} }
+const routerMock = { push: vi.fn(), replace: vi.fn() }
 vi.mock('@/api/client', () => ({
   default: { get: vi.fn(), patch: vi.fn(), post: vi.fn() }
 }))
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useRoute: () => ({ params: {}, query: {} })
+  useRouter: () => routerMock,
+  useRoute: () => routeMock
 }))
 
 import TaskTable from '@/components/TaskTable.vue'
@@ -71,5 +73,32 @@ describe('TaskTable — колонка «Модуль»', () => {
 
     await link.trigger('click')
     expect(tasks.setFilter).toHaveBeenCalledWith('project', 'Лидер Спорт')
+  })
+})
+
+describe('v0.28/28e — клик по строке: на задачу УНОСИТСЯ весь текущий query', () => {
+  let pinia
+  beforeEach(() => {
+    vi.resetAllMocks()
+    routeMock.query = {}
+    pinia = createPinia()
+    setActivePinia(pinia)
+  })
+
+  it('вкладка «План» + значение + фильтр → в query задачи (назад вернёт всё обратно)', async () => {
+    const { wrapper } = await mountTable(pinia)
+    routeMock.query = { tab: 'plan', plan: 'tomorrow', project: 'Деск X' }
+    await wrapper.findAll('tbody tr')[0].trigger('click')
+    expect(routerMock.push).toHaveBeenCalledWith({
+      path: '/tasks/1',
+      query: { tab: 'plan', plan: 'tomorrow', project: 'Деск X' }
+    })
+  })
+
+  it('без query → чистый путь (без мусорных параметров)', async () => {
+    const { wrapper } = await mountTable(pinia)
+    routeMock.query = {}
+    await wrapper.findAll('tbody tr')[1].trigger('click')
+    expect(routerMock.push).toHaveBeenCalledWith({ path: '/tasks/2', query: {} })
   })
 })

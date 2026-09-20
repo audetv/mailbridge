@@ -31,7 +31,7 @@ func TestAPI_ListTasksPlan(t *testing.T) {
 	}
 
 	// Валидные — 200 + список задач приходит.
-	for _, v := range []string{"today", "tomorrow", "week"} {
+	for _, v := range []string{"today", "tomorrow", "week", "none"} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/tasks?plan="+v, nil)
 		handler.ListTasks(w, req)

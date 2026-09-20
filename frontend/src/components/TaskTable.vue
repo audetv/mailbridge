@@ -417,7 +417,10 @@ function onRowClick(event) {
   nextTick(() => {
     if (store.selectedTasks !== before) store.selectedTasks = before
   })
-  router.push({ path: `/tasks/${event.data.id}`, query: { tab: route.query.tab } })
+  // v0.28/28e: на задачу уносим ВСЁ текущее состояние вкладки (tab + её
+  // значение + фильтры) — кнопка «назад» на странице задачи вернёт его
+  // целиком, без сброса к дефолтам (решение владельца 2026-09-20).
+  router.push({ path: `/tasks/${event.data.id}`, query: { ...route.query } })
 }
 
 // Ссылка «Проект» → вкладка «Статус» + «Активные» (28d) + фильтр по проекту

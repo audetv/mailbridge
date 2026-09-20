@@ -50,13 +50,12 @@ test.describe('7d: вкладка/сортировка/фильтры по ср�
     expect(all.status).toBe(200)
     expect(all.json.tasks.some((x) => x.id === task.id)).toBeTruthy()
 
-    // — UI: вкладка «Статус» + селект «Все» (28d: 5 статусных вкладок →
-    //   одна «Статус» + селект); в ней наша задача (любой статус).
+    // — UI: вкладка «Статус» — пункт «Все» (28e: дропдаун-вкладка,
+    //   ОТДЕЛЬНОГО селекта нет); в ней наша задача (любой статус).
     await page.goto('/?tab=status&status=all')
-    const statusTab = page.locator('.tab-bar button', { hasText: 'Статус' })
+    const statusTab = page.locator('button[data-testid="tab-status"]')
     await expect(statusTab).toBeVisible()
-    const sel = page.locator('[data-testid="status-select"] .p-select-label')
-    await expect(sel).toContainText('Все', { timeout: 10000 })
+    await expect(statusTab.locator('.tab-dd-label')).toContainText('Все', { timeout: 10000 })
     const row = page.locator('[data-testid="task-table"] tr', { hasText: `e2e-7d-all-${stamp}` })
     await expect(row).toBeVisible()
 

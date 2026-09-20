@@ -1019,8 +1019,12 @@ func TestPlan_FilterByPlanBuckets(t *testing.T) {
 		"tomorrow": {"p-sched-tomorrow", "p-overdue-new", "p-overdue-prog", "p-overdue-backlog"},
 		// scheduled в 7-дневном окне (сегодня..+6; +8 — вне) + просроченные.
 		"week": {"p-sched-today", "p-sched-tomorrow", "p-sched-week", "p-overdue-new", "p-overdue-prog", "p-overdue-backlog"},
+		// 28e: «Без плана» = scheduled_date IS NULL (срез по дате НЕ добавляется
+		// — это фильтр по полю scheduled; просроченные due — не в окне):
+		// у p-sched-today/tomorrow/week/out scheduled_date ЕСТЬ — их нет.
+		"none": {"p-overdue-new", "p-overdue-prog", "p-overdue-backlog", "p-overdue-done", "p-overdue-closed", "p-bare", "p-due-today"},
 	}
-	for _, p := range []string{"today", "tomorrow", "week"} {
+	for _, p := range []string{"today", "tomorrow", "week", "none"} {
 		res, err := s.ListTasks(ctx, &store.TaskFilter{Plan: p, Page: 1, PerPage: 50})
 		if err != nil {
 			t.Fatalf("ListTasks plan=%s: %v", p, err)
