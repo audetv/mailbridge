@@ -368,9 +368,9 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	// Невалидное → 400 (молчаливый fallback скрывал бы typo, как ?due=).
 	rawPlan := q.Get("plan")
 	switch rawPlan {
-	case "", "today", "tomorrow", "week":
+	case "", "today", "tomorrow", "week", "none":
 	default:
-		writeError(w, http.StatusBadRequest, "plan must be today|tomorrow|week")
+		writeError(w, http.StatusBadRequest, "plan must be today|tomorrow|week|none")
 		return
 	}
 

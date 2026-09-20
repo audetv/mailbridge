@@ -20,37 +20,16 @@
       </div>
     </header>
     <main class="dashboard-content">
-      <TabBar :tabs="tabItems" :activeTab="activeTab" @select="onTabSelect" />
+      <TabBar
+        :tabs="tabItems"
+        :activeTab="activeTab"
+        @select="onTabSelect"
+        @select-option="onTabSelectOption"
+      />
       <InboxView v-if="activeTab === 'inbox'" />
       <ProjectsView v-else-if="activeTab === 'projects'" />
       <PersonsView v-else-if="activeTab === 'persons'" />
       <template v-else>
-        <div class="tab-filter-row">
-          <Select
-            v-if="activeTab === 'status'"
-            v-model="statusFilterValue"
-            :options="STATUS_OPTIONS"
-            optionLabel="label"
-            optionValue="value"
-            placeholder="Статус"
-            :allowEmpty="false"
-            class="tab-filter-select status-select"
-            data-testid="status-select"
-            @change="onStatusFilterChange"
-          />
-          <Select
-            v-else-if="activeTab === 'plan'"
-            v-model="planFilterValue"
-            :options="PLAN_OPTIONS"
-            optionLabel="label"
-            optionValue="value"
-            placeholder="План"
-            :allowEmpty="false"
-            class="tab-filter-select plan-select"
-            data-testid="plan-select"
-            @change="onPlanFilterChange"
-          />
-        </div>
         <div class="tasks-toolbar">
           <Button
             v-if="activeTab === 'status' || activeTab === 'plan'"
@@ -81,7 +60,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 import Button from 'primevue/button'
-import Select from 'primevue/select'
 import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import { useProjectsStore } from '@/stores/projects'
@@ -142,15 +120,17 @@ function onTaskCreated() {
 
 const tabItems = computed(() => [
   { key: 'inbox', label: 'Лента', count: 0 },
-  { key: 'status', label: 'Статус', count: 0 },
-  { key: 'plan', label: 'План', count: 0 },
+  { key: 'status', label: 'Статус', count: 0, options: STATUS_OPTIONS, selected: statusFilterValue.value },
+  { key: 'plan', label: 'План', count: 0, options: PLAN_OPTIONS, selected: planFilterValue.value },
   { key: 'projects', label: 'Проекты', count: 0 },
   { key: 'persons', label: 'Персоны', count: 0 }
 ])
 
-// v0.28, шаг 28d: 5 статусных вкладок (v0.26/7d) → ОДНА «Статус» + селект,
-// и вкладка «План» + селект. Мапы значения селекта → запрос — в store
-// (tasks.STATUS_FILTER / tasks.PLAN_FILTER); здесь только опции и UI-рефы.
+// v0.28, шаг 28e: вкладки-дропдауны (Bootstrap «Tabs with dropdowns»,
+// решение владельца 2026-09-20): «Статус» и «План» — дропдаун-кнопки,
+// пункты — списки ниже; таб показывает выбранный пункт. Мапы значения →
+// запрос — в store (tasks.STATUS_FILTER / tasks.PLAN_FILTER); здесь только
+// опции и UI-рефы. PLAN: + «Все» (без фильтра) / «Без плана» (?plan=none).
 const STATUS_OPTIONS = [
   { label: 'Все', value: 'all' },
   { label: 'Активные', value: 'active' },
@@ -159,6 +139,8 @@ const STATUS_OPTIONS = [
   { label: 'Закрытые', value: 'closed' }
 ]
 const PLAN_OPTIONS = [
+  { label: 'Все', value: 'all' },
+  { label: 'Без плана', value: 'none' },
   { label: 'Сегодня', value: 'today' },
   { label: 'Завтра', value: 'tomorrow' },
   { label: 'Неделя', value: 'week' }
@@ -204,6 +186,7 @@ function applyTab(tab, statusVal, planVal) {
     statusFilterValue.value = sv
     store.setTab('status', sv)
   } else {
+    // 'all' легитимно: без фильтра (deffalt 'today' только для мусора/отсутствия).
     const pv = planKeyValid(planVal) ? planVal : 'today'
     planFilterValue.value = pv
     store.setTab('plan', pv)
@@ -300,22 +283,38 @@ function onTabSelect(key) {
   }
 }
 
-// Селект «Статус» (вкладка «Статус»): значение ?status= → store.setStatusFilter
-// (включая «Все» → []). UI-реф синхронизируем с store (deep-link ?status=all
-// → селект покажет «Все»). Селект «План» — аналогично ?plan=.
-function onStatusFilterChange(event) {
-  const value = event?.value ?? event
-  if (!statusKeyValid(value)) return
-  statusFilterValue.value = value
-  store.setStatusFilter(value)
-  router.replace({ query: { ...route.query, status: value } })
-}
-function onPlanFilterChange(event) {
-  const value = event?.value ?? event
-  if (!planKeyValid(value)) return
-  planFilterValue.value = value
-  store.setPlanFilter(value)
-  router.replace({ query: { ...route.query, plan: value } })
+// Выбор пункта во вкладке-дропдауне (TabBar @select-option). Клик по
+// КНОПКЕ вкладки — только открывает меню (Bootstrap-паттерн); вкладка
+// становится активной + fetch — при выборе пункта. URL — source of truth:
+// ?status= / ?plan= переписывается, параметр другой вкладки — удаляется.
+// «Статус»: статусы; «План»: срез ?plan= (all = без фильтра, 28e: + none).
+function onTabSelectOption(key, value) {
+  if (key === 'status') {
+    if (!statusKeyValid(value)) return
+    statusFilterValue.value = value
+    if (activeTab.value === 'status') store.setStatusFilter(value)
+    else store.setTab('status', value) // смена вкладки — сбросить план/due
+  } else if (key === 'plan') {
+    if (!planKeyValid(value)) return
+    planFilterValue.value = value
+    if (activeTab.value === 'plan') store.setPlanFilter(value)
+    else store.setTab('plan', value)
+  } else {
+    return
+  }
+  if (activeTab.value !== key) {
+    activeTab.value = key
+    localStorage.setItem('mailbridge_active_tab', key)
+  }
+  const query = { ...route.query, tab: key }
+  if (key === 'status') {
+    query.status = value
+    delete query.plan
+  } else {
+    query.plan = value
+    delete query.status
+  }
+  router.replace({ query })
 }
 
 watch(

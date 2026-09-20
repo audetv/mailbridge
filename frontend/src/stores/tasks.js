@@ -45,9 +45,13 @@ export const useTasksStore = defineStore('tasks', () => {
     closed: ['closed']
   }
 
-  // v0.28, шаг 28d: вкладка «План» + селект. Значения — серверный срез 28b
-  // (?plan=today|tomorrow|week); «План» — БЕЗ status (любой статус).
-  const PLAN_FILTER = { today: 'today', tomorrow: 'tomorrow', week: 'week' }
+  // v0.28, шаг 28e: вкладка-дропдаун «План» (решение владельца 2026-09-20,
+  // аналогия Bootstrap «Tabs with dropdowns»): ТАБ — дропдаун-кнопка,
+  // пункты — Все / Без плана / Сегодня / Завтра / Неделя, таб показывает
+  // выбранный пункт. Значения — серверный срез 28b (?plan=) + «Все»
+  // (без фильтра, 'all' → '') + «Без плана» ('none' → scheduled IS NULL).
+  // «План» — БЕЗ status (любой статус).
+  const PLAN_FILTER = { all: '', none: 'none', today: 'today', tomorrow: 'tomorrow', week: 'week' }
 
   async function fetchTasks() {
     loading.value = true
@@ -170,8 +174,8 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchTasks()
   }
 
-  // Вкладка (v0.28, шаг 28d): «Статус» (селект-значение, дефолт «Активные»)
-  // и «План» (селект-значение, дефолт «Сегодня»). Смена вкладки сбрасывает
+  // Вкладка-дропдаун (v0.28, шаг 28e): «Статус» (значение, дефолт «Активные»)
+  // и «План» (значение, дефолт «Сегодня»). Смена вкладки сбрасывает
   // фильтр другой вкладки (plan ↔ due/status) — без перекрёстных фильтров.
   function setTab(tabKey, status = 'active') {
     if (tabKey === 'status') {
@@ -185,7 +189,12 @@ export const useTasksStore = defineStore('tasks', () => {
       return
     }
     if (tabKey === 'plan') {
-      const plan = PLAN_FILTER[status] || 'today'
+      // 'all' = без фильтра ( PLAN_FILTER.all = '' ); hasOwn — '' falsy,
+      // поэтому не `|| 'today'` (сломал бы «Все»).
+      const plan =
+        Object.prototype.hasOwnProperty.call(PLAN_FILTER, status)
+          ? PLAN_FILTER[status]
+          : 'today'
       filters.value.plan = plan
       filters.value.statuses = [] // «План» — любой статус
       filters.value.due = ''

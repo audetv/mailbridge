@@ -91,17 +91,13 @@ async function columnValues(page, header) {
 }
 
 async function goToActive(page) {
-  // 28d: 5 статусных вкладок → «Статус» + селект; «Активные» — значение селекта.
+  // 28e: вкладки-дропдауны, таб = пункт выбора; «Активные» — пункт вкладки.
   await page.goto('/')
   await expect(page.locator('.tab-bar')).toBeVisible({ timeout: 15000 })
-  const statusBtn = page.locator('.tab-bar button', { hasText: 'Статус' })
+  const statusBtn = page.locator('button[data-testid="tab-status"]')
   if (!(await statusBtn.evaluate((el) => el.classList.contains('active')))) {
     await statusBtn.click()
-  }
-  const sel = page.locator('[data-testid="status-select"] .p-select-label')
-  if (!((await sel.innerText()).includes('Активные'))) {
-    await sel.locator('[role="combobox"]').click()
-    await page.locator('.p-select-option', { hasText: 'Активные' }).first().click()
+    await page.locator('.tab-dropdown [role="menuitemradio"]', { hasText: 'Активные' }).first().click()
   }
 }
 
@@ -122,8 +118,8 @@ test('A: «К задачам» из Проектов — вкладка Акти
   await expect(row).toBeVisible({ timeout: 10000 })
   await row.locator('button', { hasText: 'К задачам' }).click()
 
-  // Вкладка «Статус» активна + селект «Активные» (28d)
-  const statusBtn = page.locator('.tab-bar button', { hasText: 'Статус' }).first()
+  // Вкладка «Статус» активна (28e: таб = пункт выбора «Активные»)
+  const statusBtn = page.locator('button[data-testid="tab-status"]')
   await expect
     .poll(async () => statusBtn.evaluate((el) => el.classList.contains('active')), { timeout: 10000 })
     .toBe(true)

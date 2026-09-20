@@ -1,8 +1,10 @@
 // DashboardTasksTab.spec.js — URL — source of truth для вкладки (шаг 13.2) +
-// v0.28/28d: вкладки Инбокс/Статус/План/Проекты/Персоны; «Статус» + селект
-// (?status=all|active|backlog|completed|closed), «План» + селект (?plan=
-// today|tomorrow|week, срез 28b). Старые ключи ?tab=all/active/backlog/… —
-// ломаются (без миграции, решение владельца 2026-09-19): unknown tab → дефолт.
+// v0.28/28e: вкладки-дропдауны (Bootstrap «Tabs with dropdowns», решение
+// владельца 2026-09-20): «Статус» и «План» — дропдаун-кнопки, таб показывает
+// выбранный пункт. ОТДЕЛЬНОГО селекта НЕТ (откат UI 28d).
+// «Статус»: Все/Активные/Бэклог/Выполненные/Закрытые → ?status=;
+// «План»: Все/Без плана/Сегодня/Завтра/Неделя → ?plan= (none/add 28e, срез 28b).
+// Старые ключи ?tab=all/active/backlog/… — ломаются: unknown tab → дефолт.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -11,9 +13,9 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 const tasksMock = {
   setFilter: vi.fn((k, v) => { tasksMock.filters[k] = v }),
   setStatuses: vi.fn((s) => { tasksMock.filters.statuses = s }),
-  // 28d: две формы вкладки — status (+ селект-значение) и plan (+ значение).
+  // 28e: две формы вкладки-дропдаун — status (+ пункт) и plan (+ пункт).
   STATUS_FILTER: { all: [], active: ['new', 'in_progress'], backlog: ['backlog'], completed: ['completed'], closed: ['closed'] },
-  PLAN_FILTER: { today: 'today', tomorrow: 'tomorrow', week: 'week' },
+  PLAN_FILTER: { all: '', none: 'none', today: 'today', tomorrow: 'tomorrow', week: 'week' },
   setTab: vi.fn((tab, value = 'active') => {
     if (tab === 'status') {
       tasksMock.filters.statuses = [...(tasksMock.STATUS_FILTER[value] || [])]
@@ -21,7 +23,7 @@ const tasksMock = {
       tasksMock.filters.due = ''
       tasksMock.filters.sort = 'due'
     } else if (tab === 'plan') {
-      tasksMock.filters.plan = tasksMock.PLAN_FILTER[value] || 'today'
+      tasksMock.filters.plan = tasksMock.PLAN_FILTER[value] ?? 'today'
       tasksMock.filters.statuses = []
       tasksMock.filters.due = ''
       tasksMock.filters.sort = 'due'
@@ -35,7 +37,7 @@ const tasksMock = {
     tasksMock.fetchTasks()
   }),
   setPlanFilter: vi.fn((v) => {
-    tasksMock.filters.plan = v
+    tasksMock.filters.plan = tasksMock.PLAN_FILTER[v] ?? v
     tasksMock.filters.due = ''
     tasksMock.fetchTasks()
   }),
@@ -93,53 +95,76 @@ async function mountAt(path) {
   return { router, wrapper }
 }
 
-describe('DashboardView — вкладки v0.28/28d (Статус+селект / План+селект / URL)', () => {
+describe('DashboardView — вкладки-дропдауны v0.28/28e (Статус ▼ / План ▼ / URL)', () => {
   beforeEach(async () => {
     vi.restoreAllMocks()
     tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
     localStorage.clear()
   })
 
-  it('5 вкладок в порядке: Лента, Статус, План, Проекты, Персоны', async () => {
+  it('5 вкладок в порядке: Лента, Статус, План, Проекты, Персоны; две — дропдауны', async () => {
     const { wrapper } = await mountAt('/')
     await flushPromises()
-    const labels = wrapper.findAll('.tab-bar button').map((b) => b.text().trim()).map((t) => t.replace(/\d+$/, '').trim())
-    expect(labels).toEqual(['Лента', 'Статус', 'План', 'Проекты', 'Персоны'])
-    // старых вкладак нет
-    const all = wrapper.findAll('.tab-bar button').map((b) => b.text())
-    expect(all.some((t) => t.trim() === 'Все')).toBe(false)
-    expect(all.some((t) => t.trim() === 'Активные')).toBe(false)
-    expect(all.some((t) => t.trim() === 'Бэклог')).toBe(false)
+    // топ-уровневые кнопки: таб = пункту выбора (показывает ВЫБРАННЫЙ пункт:
+    // по дефолту Статус → «Активные», План → «Сегодня»; 28e, решение владельца)
+    const labels = wrapper.findAll('[data-testid^="tab-"]').map((b) => b.find('.tab-dd-label').exists() ? b.find('.tab-dd-label').text().trim() : b.text().trim())
+    expect(labels).toEqual(['Лента', 'Активные', 'Сегодня', 'Проекты', 'Персоны'])
+    // дропдауны именно в Статус и Плане
+    expect(wrapper.find('[data-testid="tab-status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tab-plan"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tab-inbox"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tab-projects"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tab-persons"]').exists()).toBe(true)
+    // пунктов в меню вне дропдаунов нет (таб «Лента»/«Проекты»/«Персоны» — простые)
+    const top = wrapper.findAll('[data-testid^="tab-"]').map((b) => b.text())
+    expect(top.some((t) => t.trim() === 'Все')).toBe(false)
   })
 
-  it('дефолт (без ?tab) — вкладка «Статус», селект «Активные», fetch по статусам', async () => {
+  it('дефолт (без ?tab) — вкладка «Статус», пункт «Активные», fetch по статусам', async () => {
     const { wrapper } = await mountAt('/')
     await flushPromises()
     expect(wrapper.find('[data-testid="task-table"]').exists()).toBe(true)
-    const statusBtn = wrapper.findAll('.tab-bar button').find((b) => b.text().includes('Статус'))
+    const statusBtn = wrapper.find('[data-testid="tab-status"]')
     expect(statusBtn.classes()).toContain('active')
+    // таб показывает выбранный пункт — но по дефолту активная точка «Статус»:
+    // пункт вкладки = «Активные» (selected)
     expect(tasksMock.setTab).toHaveBeenCalledWith('status', 'active')
     expect(tasksMock.filters.statuses).toEqual(['new', 'in_progress'])
     expect(tasksMock.filters.plan).toBe('')
   })
 
-  it('deep-link ?tab=status&status=completed: «Статус» + селект «Выполненные» + fetch', async () => {
+  it('deep-link ?tab=status&status=completed: пункт вкладки «Выполненные», fetch', async () => {
     const { wrapper } = await mountAt('/?tab=status&status=completed')
     await flushPromises()
     expect(tasksMock.setTab).toHaveBeenCalledWith('status', 'completed')
     expect(tasksMock.filters.statuses).toEqual(['completed'])
-    const sel = wrapper.find('[data-testid="status-select"] .p-select-label')
-    expect(sel.text()).toContain('Выполненные')
+    // табу открываем → пункт «Выполненные» выделен (selected)
+    const dd = wrapper.find('[data-testid="tab-status"]')
+    await dd.trigger('click')
+    await flushPromises()
+    const menu = dd.element.parentElement
+    const selected = Array.from(
+      menu.querySelectorAll('[role="menuitemradio"]')
+    ).find((b) => b.classList.contains('selected'))
+    expect(selected).toBeTruthy()
+    expect(selected.textContent).toContain('Выполненные')
   })
 
-  it('deep-link ?tab=plan&plan=tomorrow: «План» + селект «Завтра», БЕЗ status, fetch с plan', async () => {
+  it('deep-link ?tab=plan&plan=tomorrow: «План», пункт «Завтра», БЕЗ status, fetch с plan', async () => {
     const { wrapper } = await mountAt('/?tab=plan&plan=tomorrow')
     await flushPromises()
     expect(tasksMock.setTab).toHaveBeenCalledWith('plan', 'tomorrow')
     expect(tasksMock.filters.plan).toBe('tomorrow')
     expect(tasksMock.filters.statuses).toEqual([])
-    const sel = wrapper.find('[data-testid="plan-select"] .p-select-label')
-    expect(sel.text()).toContain('Завтра')
+    const dd = wrapper.find('[data-testid="tab-plan"]')
+    await dd.trigger('click')
+    await flushPromises()
+    const menu = dd.element.parentElement
+    const selected = Array.from(
+      menu.querySelectorAll('[role="menuitemradio"]')
+    ).find((b) => b.classList.contains('selected'))
+    expect(selected).toBeTruthy()
+    expect(selected.textContent).toContain('Завтра')
   })
 
   it('старый ?tab=active ломается (без миграции): fallback на «Статус»', async () => {
@@ -158,11 +183,15 @@ describe('DashboardView — вкладки v0.28/28d (Статус+селект 
     }
   })
 
-  it('клик «План» → URL ?tab=plan (без ?status=), store — план-срез, статусы выключены', async () => {
+  it('клик «План» + пункт (default «Сегодня») → URL ?tab=plan (без ?status=), статусы выключены', async () => {
     const { router, wrapper } = await mountAt('/?tab=status&status=completed')
     await flushPromises()
-    const planTab = wrapper.findAll('.tab-bar button').find((b) => b.text().trim() === 'План')
-    await planTab.trigger('click')
+    const planBtn = wrapper.find('[data-testid="tab-plan"]')
+    await planBtn.trigger('click') // открыть меню
+    await flushPromises()
+    const menu = planBtn.element.parentElement
+    const today = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).find((o) => o.textContent.includes('Сегодня'))
+    await today.click()
     await flushPromises()
     expect(router.currentRoute.value.query.tab).toBe('plan')
     expect(router.currentRoute.value.query.status).toBeUndefined()
@@ -171,11 +200,15 @@ describe('DashboardView — вкладки v0.28/28d (Статус+селект 
     expect(tasksMock.filters.plan).toBe('today')
   })
 
-  it('клик «Статус» из «План» → URL ?tab=status (без ?plan=), статусы снова включены', async () => {
+  it('клик «Статус» из «План» + пункт «Активные» → URL ?tab=status (без ?plan=), статусы включены', async () => {
     const { router, wrapper } = await mountAt('/?tab=plan&plan=week')
     await flushPromises()
-    const statusTab = wrapper.findAll('.tab-bar button').find((b) => b.text().includes('Статус'))
-    await statusTab.trigger('click')
+    const statusTab = wrapper.find('[data-testid="tab-status"]')
+    await statusTab.trigger('click') // открыть меню
+    await flushPromises()
+    const menu = statusTab.element.parentElement
+    const active = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).find((o) => o.textContent.includes('Активные'))
+    await active.click()
     await flushPromises()
     expect(router.currentRoute.value.query.tab).toBe('status')
     expect(router.currentRoute.value.query.status).toBe('active')
@@ -185,12 +218,51 @@ describe('DashboardView — вкладки v0.28/28d (Статус+селект 
     expect(tasksMock.filters.plan).toBe('')
   })
 
-  it('селект «Статус»: выбор «Бэклог» → ?status=backlog, fetch по статусам', async () => {
-    await mountAt('/?tab=status&status=active')
+  it('выбор пункта в «Статус»: «Бэклог» → ?status=backlog, fetch по статусам', async () => {
+    const { router, wrapper } = await mountAt('/?tab=status&status=active')
     await flushPromises()
-    tasksMock.setStatusFilter('backlog')
+    const dd = wrapper.find('[data-testid="tab-status"]')
+    await dd.trigger('click')
+    await flushPromises()
+    const menu = dd.element.parentElement
+    const opt = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).find((o) => o.textContent.includes('Бэклог'))
+    await opt.click()
+    await flushPromises()
+    expect(tasksMock.setStatusFilter).toHaveBeenLastCalledWith('backlog')
     expect(tasksMock.filters.statuses).toEqual(['backlog'])
     expect(tasksMock.fetchTasks).toHaveBeenCalled()
+    expect(router.currentRoute.value.query.status).toBe('backlog')
+    expect(router.currentRoute.value.query.plan).toBeUndefined()
+  })
+
+  it('28e: пункт «План» → «Без плана» → ?plan=none', async () => {
+    const { router, wrapper } = await mountAt('/?tab=plan&plan=today')
+    await flushPromises()
+    const dd = wrapper.find('[data-testid="tab-plan"]')
+    await dd.trigger('click')
+    await flushPromises()
+    const menu = dd.element.parentElement
+    const opt = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).find((o) => o.textContent.includes('Без плана'))
+    await opt.click()
+    await flushPromises()
+    expect(tasksMock.setPlanFilter).toHaveBeenLastCalledWith('none')
+    expect(tasksMock.filters.plan).toBe('none')
+    expect(router.currentRoute.value.query.plan).toBe('none')
+  })
+
+  it('28e: пункт «План» → «Все» → без фильтра (plan не в params)', async () => {
+    const { router, wrapper } = await mountAt('/?tab=plan&plan=today')
+    await flushPromises()
+    const dd = wrapper.find('[data-testid="tab-plan"]')
+    await dd.trigger('click')
+    await flushPromises()
+    const menu = dd.element.parentElement
+    const opt = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).find((o) => o.textContent.trim().replace(/^\S+\s+/, '') === 'Все')
+    await opt.click()
+    await flushPromises()
+    expect(tasksMock.setPlanFilter).toHaveBeenLastCalledWith('all')
+    expect(tasksMock.filters.plan).toBe('')
+    expect(router.currentRoute.value.query.plan).toBe('all')
   })
 
   it('«Создать задачу» виден во вкладках «Статус» и «План», НЕ в «Ленте»', async () => {

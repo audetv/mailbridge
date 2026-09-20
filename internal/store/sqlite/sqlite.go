@@ -365,6 +365,8 @@ func (s *Store) ListTasks(ctx context.Context, filter *store.TaskFilter) (*store
 	case "week":
 		conditions = append(conditions, "(t.scheduled_date BETWEEN ? AND ? OR (t.due_date < ? AND t.status IN ('new','in_progress','backlog')))")
 		args = append(args, time.Now().Format("2006-01-02"), time.Now().AddDate(0, 0, 6).Format("2006-01-02"), time.Now().Format("2006-01-02"))
+	case "none": // 28e: «План» → «Без плана» = scheduled_date IS NULL.
+		conditions = append(conditions, "t.scheduled_date IS NULL")
 	}
 
 	username := filter.Username

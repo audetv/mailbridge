@@ -1,8 +1,11 @@
-// tasks-tabs.spec.js — v0.28, шаг 28d: вкладка «Статус» + селект / «План» + селект.
-// Модель (решения владельца 2026-09-19): 5 статусных вкладок → ОДНА «Статус» +
-// селект (Все/Активные/Бэклог/Выполненные/Закрытые → ?status=); + вкладка
-// «План» + селект (Сегодня/Завтра/Неделя → ?plan=, серверный срез 28b).
-// Статусные статусы и план-срез — не взаимоисключающие, «План» не шлёт status.
+// tasks-tabs.spec.js — v0.28, шаг 28e: вкладки-дропдауны.
+// Модель (решения владельца 2026-09-20, аналогия Bootstrap «Tabs with
+// dropdowns»): «Статус» и «План» — дропдаун-вкладки (таб = пункт выбора,
+// таб показывает выбранный пункт; ОТДЕЛЬНОГО селекта НЕТ — 28d откат).
+// «Статус»: Все/Активные/Бэклог/Выполненные/Закрытые → ?status=;
+// «План»: Все (без фильтра)/Без плана (?plan=none)/Сегодня/Завтра/Неделя
+// (?plan=, серверный срез 28b). Статусы и план-срез не взаимоисключающие,
+// «План» не шлёт status.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -16,7 +19,7 @@ function store() {
   return useTasksStore()
 }
 
-describe('v0.28/28d — store setTab / setStatusFilter / setPlanFilter', () => {
+describe('v0.28/28e — store setTab / setStatusFilter / setPlanFilter', () => {
   beforeEach(() => {
     apiGet.mockClear()
   })
@@ -32,9 +35,13 @@ describe('v0.28/28d — store setTab / setStatusFilter / setPlanFilter', () => {
     })
   })
 
-  it('PLAN_FILTER: today/tomorrow/week (значения серверного среза 28b)', () => {
+  it('PLAN_FILTER: all/none/today/tomorrow/week (28e: + Все/Без плана)', () => {
     const s = store()
-    expect(['today', 'tomorrow', 'week']).toEqual(Object.keys(s.PLAN_FILTER).sort())
+    expect(['all', 'none', 'today', 'tomorrow', 'week']).toEqual(
+      Object.keys(s.PLAN_FILTER).sort()
+    )
+    expect(s.PLAN_FILTER.all).toBe('') // «Все» — без фильтра
+    expect(s.PLAN_FILTER.none).toBe('none') // «Без плана» — ?plan=none
   })
 
   it('setTab("status") — дефолт «Активные», без plan, due сброшен, status+fetch', () => {
@@ -89,6 +96,33 @@ describe('v0.28/28d — store setTab / setStatusFilter / setPlanFilter', () => {
     expect(params.plan).toBe('tomorrow')
     expect(params).not.toHaveProperty('status')
     expect(s.filters.statuses).toEqual([])
+  })
+
+  it('28e: setPlanFilter("all") — «Все» = без фильтра (plan не уходит в params)', () => {
+    const s = store()
+    s.setTab('plan')
+    apiGet.mockClear()
+    s.setPlanFilter('all')
+    expect(s.filters.plan).toBe('')
+    expect(vi.mocked(apiGet).mock.lastCall[1].params).not.toHaveProperty('plan')
+  })
+
+  it('28e: setPlanFilter("none") — «Без плана» → ?plan=none', () => {
+    const s = store()
+    s.setTab('plan')
+    apiGet.mockClear()
+    s.setPlanFilter('none')
+    expect(s.filters.plan).toBe('none')
+    expect(vi.mocked(apiGet).mock.lastCall[1].params).toHaveProperty('plan', 'none')
+  })
+
+  it('28e: setTab("plan","none") / ("plan","all") — пункт выбора из дропдауна', () => {
+    const s = store()
+    apiGet.mockClear()
+    s.setTab('plan', 'none')
+    expect(s.filters.plan).toBe('none')
+    s.setTab('plan', 'all')
+    expect(s.filters.plan).toBe('')
   })
 
   it('fetchTasks: план и due вместе (AND на сервере) — оба уходят в params', () => {
