@@ -374,6 +374,17 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v0.29.0 (issue #81): сортировка — один из фиксированных значений.
+	// Пусто = дефолт "created". Невалидное → 400 (молчаливый fallback
+	// скрывал бы typo, как ?due= / ?plan=).
+	rawSort := q.Get("sort")
+	switch rawSort {
+	case "", "created", "due", "updated":
+	default:
+		writeError(w, http.StatusBadRequest, "sort must be created|due|updated")
+		return
+	}
+
 	filter := &store.TaskFilter{
 		Project:     q.Get("project"),
 		EpicID:      epicID,
@@ -387,9 +398,9 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		Page:        page,
 		PerPage:     perPage,
 		Username:    username,
-		// v0.25, шаг 7a: сортировка списка. "due" (дефолт, store её выбирает)
-		// или "updated" — по свежести правок.
-		Sort: q.Get("sort"),
+		// v0.25, шаг 7a: сортировка списка (проверена выше).
+		// "" = дефолт "created" (v0.29.0); "due" / "updated" — явные.
+		Sort: rawSort,
 		// v0.26, шаг 7d: фильтр по срокам (проверен выше).
 		Due: rawDue,
 		// v0.28, шаг 28b: срез «План» (проверен выше).

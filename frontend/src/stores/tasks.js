@@ -25,8 +25,9 @@ export const useTasksStore = defineStore('tasks', () => {
     assignee_id: '',
     search: '',
     // Срок (v0.26, шаг 7d): сортировка + фильтр по датам — серверные ключи
-    // 7a («due»/«updated») и 7d («overdue|today|tomorrow|7d|30d|none|due_pending»).
-    sort: 'due',
+    // 7a («due»/«updated») и 7d («overdue|today|tomorrow|7d|30d|none|due_pending»);
+    // v0.29.0 (issue #81): + 'created' — по дате создания, дефолт (новые сверху).
+    sort: 'created',
     due: '',
     // v0.28, шаг 28d: срез «План» (?plan=, серверная логика 28b). '' — выключен.
     plan: '',
@@ -59,7 +60,7 @@ export const useTasksStore = defineStore('tasks', () => {
       const params = { ...filters.value }
       // статусные вкладки — статусы; «Все» — пустой массив → параметр не
       // слать (без status бек-энд отдаёт любой статус). Сортировка и due —
-      // всегда отправляем (дефолты: sort=due, due='').
+      // всегда отправляем (дефолты: sort=created, due='').
       const statuses = filters.value.statuses || []
       delete params.statuses
       // пусто → не слать (иначе бекенд будет парсить '' как отсутствующий)
@@ -183,7 +184,7 @@ export const useTasksStore = defineStore('tasks', () => {
       filters.value.statuses = [...statuses]
       filters.value.plan = ''
       filters.value.due = ''
-      filters.value.sort = 'due'
+      filters.value.sort = 'created' // v0.29.0: новый дефолт — «По дате создания»
       filters.value.page = 1
       fetchTasks()
       return
@@ -198,7 +199,7 @@ export const useTasksStore = defineStore('tasks', () => {
       filters.value.plan = plan
       filters.value.statuses = [] // «План» — любой статус
       filters.value.due = ''
-      filters.value.sort = 'due'
+      filters.value.sort = 'created' // v0.29.0: новый дефолт — «По дате создания»
       filters.value.page = 1
       fetchTasks()
       return

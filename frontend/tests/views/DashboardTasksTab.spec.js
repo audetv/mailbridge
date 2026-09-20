@@ -21,12 +21,12 @@ const tasksMock = {
       tasksMock.filters.statuses = [...(tasksMock.STATUS_FILTER[value] || [])]
       tasksMock.filters.plan = ''
       tasksMock.filters.due = ''
-      tasksMock.filters.sort = 'due'
+      tasksMock.filters.sort = 'created'
     } else if (tab === 'plan') {
       tasksMock.filters.plan = tasksMock.PLAN_FILTER[value] ?? 'today'
       tasksMock.filters.statuses = []
       tasksMock.filters.due = ''
-      tasksMock.filters.sort = 'due'
+      tasksMock.filters.sort = 'created'
     }
     tasksMock.filters.page = 1
     tasksMock.fetchTasks()
@@ -42,7 +42,7 @@ const tasksMock = {
     tasksMock.fetchTasks()
   }),
   fetchTasks: vi.fn(async () => {}),
-  filters: { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
+  filters: { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'created', due: '', plan: '', page: 1, per_page: 50 }
 }
 const wsMock = { connected: false, events: [], connect: vi.fn(), disconnect: vi.fn() }
 
@@ -98,7 +98,7 @@ async function mountAt(path) {
 describe('DashboardView — вкладки-дропдауны v0.28/28e (Статус ▼ / План ▼ / URL)', () => {
   beforeEach(async () => {
     vi.restoreAllMocks()
-    tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
+    tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'created', due: '', plan: '', page: 1, per_page: 50 }
     localStorage.clear()
   })
 
@@ -176,7 +176,7 @@ describe('DashboardView — вкладки-дропдауны v0.28/28e (Ста�
   it('старые ?tab=all / backlog / completed / closed — все ломаются → «Статус»', async () => {
     for (const old of ['all', 'backlog', 'completed', 'closed']) {
       vi.restoreAllMocks()
-      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
+      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'created', due: '', plan: '', page: 1, per_page: 50 }
       await mountAt('/?tab=' + old)
       await flushPromises()
       expect(tasksMock.setTab).toHaveBeenLastCalledWith('status', 'active')
@@ -272,7 +272,7 @@ describe('DashboardView — вкладки-дропдауны v0.28/28e (Ста�
       ['inbox', false]
     ]) {
       vi.restoreAllMocks()
-      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
+      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'created', due: '', plan: '', page: 1, per_page: 50 }
       const { wrapper } = await mountAt('/?tab=' + tab)
       await flushPromises()
       const createBtn = wrapper.findAll('button').some((b) => b.text().includes('Создать задачу'))
@@ -289,7 +289,7 @@ describe('DashboardView — вкладки-дропдауны v0.28/28e (Ста�
       ['/?tab=persons', false]
     ]) {
       vi.restoreAllMocks()
-      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'due', due: '', plan: '', page: 1, per_page: 50 }
+      tasksMock.filters = { project: '', epic_id: '', statuses: ['new', 'in_progress'], sort: 'created', due: '', plan: '', page: 1, per_page: 50 }
       const { wrapper } = await mountAt(path)
       await flushPromises()
       expect(wrapper.find('[data-testid="task-table"]').exists(), path).toBe(expectTable)
