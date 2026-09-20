@@ -47,7 +47,6 @@ describe('TaskTable — колонка «Срок» (7c)', () => {
     const { wrapper } = await mountTable(pinia)
     const headers = wrapper.findAll('th').map((th) => th.text())
     expect(headers).toContain('Срок')
-    const idx = wrapper.findAll('th').findIndex((th) => th.text() === 'Срок')
 
     const cell = (row) => row.find('[data-testid="due-cell"]')
     const rows = wrapper.findAll('tbody tr')
@@ -66,9 +65,7 @@ describe('TaskTable — колонка «Срок» (7c)', () => {
 
   it('pending (due_ai_pending) — бейдж «срок?» (предложение AI ждёт решения)', async () => {
     const { wrapper } = await mountTable(pinia)
-    const idx = wrapper.findAll('th').findIndex((th) => th.text() === 'Срок')
     const rows = wrapper.findAll('tbody tr')
-    const cell = (row) => row.findAll('td')[idx]
 
     const pending = wrapper.findAll('[data-testid="due-pending-badge"]')
     expect(pending.length).toBe(1)

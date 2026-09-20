@@ -4,6 +4,7 @@
 
 ### Changed
 - **Методология планирования — модель issue-контекста (2026-09-20, решение владельца):** `CONTRIBUTING.md` §«Уровни планирования»: GitHub Issue = живой контекст (обсуждение фичи + расследование бага); ROADMAP = индекс-запись + указатель на issue; PLAN создаётся из issue при команде «старт» (без дублирования); BACKLOG = захват. Пилот: **issue #81** — фича «По дате создания» (кандидат v0.29.0), ROADMAP-индекс-запись с указателем.
+- **Lint-планка warning = ошибка (issue #75, шаг 0, 2026-09-20):** `frontend/package.json` lint → `eslint . --max-warnings=0` (ранее warning не блокировал ни локально, ни в CI — 4 warnings накопились). Чистка: 4 мёртвых `no-unused-vars` в тестах (`tests-e2e/bulk-actions.spec.js` — `rows`, `tests-e2e/due-date.spec.js` — `aiRow`, `tests/components/TaskTableDue.spec.js` — `idx`×2; ассершны уже по `data-testid`, строки — остаток рефакторинга). Доказано: `npm run lint` = 0 errors 0 warnings, `npm test` = 184/184. Кодовых ассершнов не задето.
 
 ## [0.28.0] - 2026-09-19 (в разработке)
 
