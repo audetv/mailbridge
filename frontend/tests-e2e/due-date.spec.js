@@ -54,7 +54,7 @@ test('7c-A: «Принять» — срок = AI-значение, source=ai, pe
   const AI = '2027-03-31'
   const task = await seedTask(request, AI)
 
-  const aiRow = await openPending(page, task.id)
+  await openPending(page, task.id)
   await expect(page.locator('[data-testid="due-ai-suggestion"]')).toContainText(AI)
 
   const respPromise = page.waitForResponse(

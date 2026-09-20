@@ -44,7 +44,6 @@ test('bulk status change from UI applies to all selected', async ({ page, reques
   // созданные последними, уходят за per_page=50 → picked == 0.
   const search = page.locator('.search-input')
   await search.fill(`e2e-bulk-${stamp}`)
-  const rows = page.locator('tbody tr')
   // Ждём, пока в листе появятся ОБЕ задачи этого прогона (по их уникальным
   // именам). Лист refetch-ится дебаунсом поиска → стабильность считывания
   // гарантируем ожиданием по именам, а не по rows.count() (гонка):
