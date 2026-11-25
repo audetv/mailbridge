@@ -3,10 +3,12 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -44,12 +46,26 @@ func (c *OpenAIClient) SetTemperature(t float64) {
 }
 
 // Generate отправляет промпт в OpenAI-совместимый API и возвращает ответ.
-func (c *OpenAIClient) Generate(ctx context.Context, prompt string, _ []string) (string, error) {
-	messages := []map[string]string{}
+// hotfix 29.1 (issue #87): images (base64, без префикса data:) передаются как
+// мультимодальный content [{type:text},{type:image_url,...}] — формат принимают
+// llama.cpp/llama-server и остальные OpenAI-совместимые vision-эндпоинты.
+func (c *OpenAIClient) Generate(ctx context.Context, prompt string, images []string) (string, error) {
+	messages := []map[string]interface{}{}
 	if c.system != "" {
-		messages = append(messages, map[string]string{"role": "system", "content": c.system})
+		messages = append(messages, map[string]interface{}{"role": "system", "content": c.system})
 	}
-	messages = append(messages, map[string]string{"role": "user", "content": prompt})
+	if len(images) > 0 {
+		parts := []map[string]interface{}{{"type": "text", "text": prompt}}
+		for _, img := range images {
+			parts = append(parts, map[string]interface{}{
+				"type":      "image_url",
+				"image_url": map[string]string{"url": "data:" + imageMIME(img) + ";base64," + img},
+			})
+		}
+		messages = append(messages, map[string]interface{}{"role": "user", "content": parts})
+	} else {
+		messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
+	}
 
 	reqBody := map[string]interface{}{
 		"model":       c.model,
@@ -100,4 +116,16 @@ func (c *OpenAIClient) Generate(ctx context.Context, prompt string, _ []string) 
 	}
 
 	return openaiResp.Choices[0].Message.Content, nil
+}
+
+// imageMIME определяет тип изображения из base64-байтов (оркестратор отдаёт
+// «голый» base64 без MIME). Неизвестное — image/png (безопасный дефолт для
+// растеров из preprocessor).
+func imageMIME(b64 string) string {
+	if data, err := base64.StdEncoding.DecodeString(b64); err == nil {
+		if ct := http.DetectContentType(data); strings.HasPrefix(ct, "image/") {
+			return ct
+		}
+	}
+	return "image/png"
 }
