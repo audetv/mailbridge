@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-11-25
+
+v0.29.1 = hotfix vision: openai-клиент передаёт изображения (issue #87).
+
 ### Fixed
 - **OpenAI-клиент передаёт изображения (hotfix 29.1, issue #87):** `internal/ai/openai.go` — `Generate()` принимал `images` и выбрасывал (`_ []string`); на `PROVIDER=openai` (прод со strata/llama.cpp с 2026-11-25) картинки из писем и PDF-сканы не доходили до модели → `image_note` пустел (замер: 26 писем с картинками, 0 `image_note`). Теперь при `images>0` user-сообщение — мультимодальный content `[{type:text},{type:image_url,"data:image/<mime>;base64,..."}]` (MIME из decoded-байтов, `http.DetectContentType`). Без картинок поведение не меняется (content = строка). Тесты RED→GREEN: `TestOpenAIClient_WithImages` / `WithoutImages`. Живая приёмка на dev :8081 (strata): письмо с PNG-вложением «VISION TEST 29.1» → вердикт `"image_note":"VISION TEST 29.1"` + созданная задача.
 
