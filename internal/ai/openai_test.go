@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/audetv/mailbridge/internal/ai"
@@ -108,6 +109,88 @@ func TestOpenAIClient_SystemAndTemperature(t *testing.T) {
 	client.SetTemperature(0.1)
 
 	if _, err := client.Generate(context.Background(), "test", nil); err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+}
+
+// png1x1B64 — валидный PNG 1×1 (для MIME-детекта из байтов).
+const png1x1B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+// TestOpenAIClient_WithImages — hotfix 29.1 (issue #87): изображения обязаны
+// уходить в запрос как мультимодальный content [{type:text},{type:image_url,data:URL}].
+func TestOpenAIClient_WithImages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+
+		msgs, ok := reqBody["messages"].([]interface{})
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("messages = %v, want 1 entry", reqBody["messages"])
+		}
+		content, ok := msgs[0].(map[string]interface{})["content"].([]interface{})
+		if !ok || len(content) != 2 {
+			t.Fatalf("expected content array [text,image], got %#v", msgs[0].(map[string]interface{})["content"])
+		}
+		part0, _ := content[0].(map[string]interface{})
+		if part0["type"] != "text" || part0["text"] != "опиши картинку" {
+			t.Errorf("bad text part: %#v", part0)
+		}
+		part1, _ := content[1].(map[string]interface{})
+		if part1["type"] != "image_url" {
+			t.Fatalf("bad image part type: %#v", part1)
+		}
+		img, _ := part1["image_url"].(map[string]interface{})
+		url, _ := img["url"].(string)
+		if !strings.HasPrefix(url, "data:image/png;base64,") {
+			t.Errorf("bad data URL prefix: %q", url)
+		}
+		if !strings.HasSuffix(url, png1x1B64) {
+			t.Error("image payload altered")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]string{"content": "ok"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := ai.NewOpenAIClient(srv.URL, "test-key", "test-model")
+	if _, err := client.Generate(context.Background(), "опиши картинку", []string{png1x1B64}); err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+}
+
+// TestOpenAIClient_WithoutImages — регресс (hotfix 29.1): без картинок content
+// остаётся строкой (поведение до фикса не меняется).
+func TestOpenAIClient_WithoutImages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		msgs := reqBody["messages"].([]interface{})
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %v", reqBody["messages"])
+		}
+		if s, ok := msgs[0].(map[string]interface{})["content"].(string); !ok || s != "только текст" {
+			t.Errorf("expected string content, got %#v", msgs[0].(map[string]interface{})["content"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]string{"content": "ok"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := ai.NewOpenAIClient(srv.URL, "test-key", "test-model")
+	if _, err := client.Generate(context.Background(), "только текст", nil); err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
 }

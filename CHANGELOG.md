@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **OpenAI-клиент передаёт изображения (hotfix 29.1, issue #87):** `internal/ai/openai.go` — `Generate()` принимал `images` и выбрасывал (`_ []string`); на `PROVIDER=openai` (прод со strata/llama.cpp с 2026-11-25) картинки из писем и PDF-сканы не доходили до модели → `image_note` пустел (замер: 26 писем с картинками, 0 `image_note`). Теперь при `images>0` user-сообщение — мультимодальный content `[{type:text},{type:image_url,"data:image/<mime>;base64,..."}]` (MIME из decoded-байтов, `http.DetectContentType`). Без картинок поведение не меняется (content = строка). Тесты RED→GREEN: `TestOpenAIClient_WithImages` / `WithoutImages`. Живая приёмка на dev :8081 (strata): письмо с PNG-вложением «VISION TEST 29.1» → вердикт `"image_note":"VISION TEST 29.1"` + созданная задача.
+
 ### Changed
 - **Методология планирования — модель issue-контекста (2026-09-20, решение владельца):** `CONTRIBUTING.md` §«Уровни планирования»: GitHub Issue = живой контекст (обсуждение фичи + расследование бага); ROADMAP = индекс-запись + указатель на issue; PLAN создаётся из issue при команде «старт» (без дублирования); BACKLOG = захват. Пилот: **issue #81** — фича «По дате создания» (кандидат v0.29.0), ROADMAP-индекс-запись с указателем.
 - **Lint-планка warning = ошибка (issue #75, шаг 0, 2026-09-20):** `frontend/package.json` lint → `eslint . --max-warnings=0` (ранее warning не блокировал ни локально, ни в CI — 4 warnings накопились). Чистка: 4 мёртвых `no-unused-vars` в тестах (`tests-e2e/bulk-actions.spec.js` — `rows`, `tests-e2e/due-date.spec.js` — `aiRow`, `tests/components/TaskTableDue.spec.js` — `idx`×2; ассершны уже по `data-testid`, строки — остаток рефакторинга). Доказано: `npm run lint` = 0 errors 0 warnings, `npm test` = 184/184. Кодовых ассершнов не задето.
